@@ -13,14 +13,15 @@
 # =============================================================
 
 # ---- Stage 1: Bygg openDAQ fra kildekode ----
-FROM ubuntu:22.04 AS builder
+FROM ubuntu:24.04 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PARALLELLE_JOBBER=2
 ARG OPENDAQ_BRANCH=main
 
 # Installer build-avhengigheter
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# (Ubuntu 24.04 har cmake 3.28 — openDAQ krever minst 3.24)
+RUN apt-get update && apt-get install -y \
     build-essential \
     git \
     cmake \
@@ -41,6 +42,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Verifiser cmake-versjon
+RUN cmake --version
 
 # Klon openDAQ fra GitHub
 WORKDIR /src
@@ -76,11 +80,8 @@ RUN cmake --build /src/build -j ${PARALLELLE_JOBBER}
 
 # Organiser bygde filer for kopiering til runtime-stage
 RUN mkdir -p /opt/opendaq/lib /opt/opendaq/python && \
-    # Kopier delte biblioteker (.so-filer)
     find /src/build/bin -name "*.so*" -exec cp -P {} /opt/opendaq/lib/ \; && \
-    # Kopier Python-binding (.so for Python)
     find /src/build/bin -name "opendaq*.so" -exec cp {} /opt/opendaq/python/ \; && \
-    # Kopier Python-pakke (wrapper-kode)
     cp -r /src/bindings/python/package/opendaq/* /opt/opendaq/python/ 2>/dev/null || true
 
 
