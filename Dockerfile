@@ -17,9 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kmod \
     iproute2 \
     procps \
+    python3 \
+    python3-pip \
+    && pip3 install --no-cache-dir --break-system-packages flask \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker-entrypoint.sh /entrypoint.sh
+COPY web_ui.py /app/web_ui.py
 RUN chmod +x /entrypoint.sh
+
+ENV WEB_PORT=8080
 
 ENTRYPOINT ["/entrypoint.sh"]

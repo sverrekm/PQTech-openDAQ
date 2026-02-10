@@ -25,6 +25,8 @@ services:
       - POLL_INTERVALL=10
       # Auto-bind SIRIUS naar den kobles til
       - AUTO_BIND=true
+      # Web-grensesnitt port
+      - WEB_PORT=8080
 
     logging:
       driver: json-file

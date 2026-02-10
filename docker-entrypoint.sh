@@ -84,7 +84,15 @@ fi
 echo "=============================================="
 echo ""
 
+# Start web-grensesnitt
+WEB_PORT="${WEB_PORT:-8080}"
+echo ""
+echo "[Web] Starter web-grensesnitt pa port ${WEB_PORT}..."
+python3 /app/web_ui.py &
+echo "      http://${IP:-localhost}:${WEB_PORT}"
+
 # Hold containeren kjorende og overvak
+echo ""
 echo "Overvakning startet (sjekker hvert ${POLL_INTERVALL}s)..."
 while true; do
     # Sjekk at usbipd kjorer
