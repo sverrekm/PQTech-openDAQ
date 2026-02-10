@@ -1,0 +1,49 @@
+services:
+  dewesoft-maaling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Antall parallelle kompileringsjobber (sett lavt på Pi med lite RAM)
+        PARALLELLE_JOBBER: 2
+    image: dewesoft-maaling:latest
+    container_name: dewesoft-maaling
+    restart: unless-stopped
+
+    # USB-tilgang til Dewesoft SIRIUS
+    privileged: true
+    volumes:
+      # Persistente målinger (tilgjengelig fra host)
+      - ./maalinger:/data/maalinger
+      # Konfigurasjonsfiler (legg inn din konfig her)
+      - ./konfig:/data/konfig
+
+    environment:
+      # Konfigurasjonsfil å bruke
+      - KONFIG_FIL=/data/konfig/konfig_strom_spenning.json
+      # Sekunder mellom målinger
+      - MAALE_INTERVALL=60
+      # Varighet per måling i sekunder
+      - MAALE_VARIGHET=5
+      # Filnavn-prefiks
+      - MAALE_PREFIKS=maaling
+      # Overstyr tilkobling (la stå tom for å bruke konfig-filen)
+      # Eksempler:
+      #   daq.opcua://192.168.1.100   (SIRIUS via OPC-UA)
+      #   daq.ns://192.168.1.100      (SIRIUS via native streaming)
+      #   daqref://device0             (simulator/ref-device)
+      - TILKOBLING=
+
+    # Begrens ressursbruk på Pi
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
