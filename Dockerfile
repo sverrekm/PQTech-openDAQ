@@ -23,6 +23,8 @@ ARG OPENDAQ_BRANCH=main
 # (Ubuntu 24.04 har cmake 3.28 — openDAQ krever minst 3.24)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    g++ \
+    gcc \
     git \
     cmake \
     ninja-build \
@@ -36,15 +38,16 @@ RUN apt-get update && apt-get install -y \
     libxi-dev \
     libxcursor-dev \
     libxrandr-dev \
-    libgl-dev \
+    libgl1-mesa-dev \
     libudev-dev \
     libfreetype6-dev \
     libusb-1.0-0-dev \
+    libssl-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Verifiser cmake-versjon
-RUN cmake --version
+# Verifiser verktoy
+RUN cmake --version && gcc --version && python3 --version && ninja --version
 
 # Klon openDAQ fra GitHub
 WORKDIR /src
@@ -56,6 +59,7 @@ RUN git clone --depth 1 --branch ${OPENDAQ_BRANCH} \
 #   - Moduler: ref-device, simulator, client, server, csv-recorder
 #   - Python-bindings aktivert
 #   - Tester deaktivert (spar tid/plass)
+# Logg cmake-output til fil saa feil blir synlige
 RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -73,7 +77,9 @@ RUN cmake -S /src -B /src/build -G Ninja \
     -DOPENDAQ_ALWAYS_FETCH_DEPENDENCIES=ON \
     -DOPENDAQ_ENABLE_TESTS=OFF \
     -DOPENDAQ_ENABLE_TEST_UTILS=OFF \
-    -DDAQMODULES_AUDIO_DEVICE_MODULE=OFF
+    -DDAQMODULES_AUDIO_DEVICE_MODULE=OFF \
+    2>&1 | tee /tmp/cmake_configure.log; \
+    test ${PIPESTATUS[0]} -eq 0 || (echo "=== CMAKE FEIL ===" && tail -100 /tmp/cmake_configure.log && exit 1)
 
 # Bygg (begrenset parallellitet for Pi med lite RAM)
 RUN cmake --build /src/build -j ${PARALLELLE_JOBBER}
