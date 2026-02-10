@@ -16,7 +16,7 @@
 # =============================================================
 
 # ---- Stage 1: Bygg openDAQ fra kildekode ----
-FROM ubuntu:24.04 AS builder
+FROM debian:bookworm AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PARALLELLE_JOBBER=2
@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     cmake \
     ninja-build \
+    mono-complete \
     python3 \
     python3-dev \
     python3-pip \
