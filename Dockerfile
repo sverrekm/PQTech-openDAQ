@@ -47,27 +47,26 @@ WORKDIR /src
 RUN git clone --depth 1 --branch ${OPENDAQ_BRANCH} \
     https://github.com/openDAQ/openDAQ.git .
 
-# Konfigurer CMake
+# Konfigurer CMake:
+#   - Protokoller: OPC-UA, native streaming, websocket
+#   - Moduler: ref-device, simulator, client, server, csv-recorder
+#   - Python-bindings aktivert
+#   - Tester deaktivert (spar tid/plass)
 RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCMAKE_INSTALL_PREFIX=/opt/opendaq \
-    # Protokoller for SIRIUS-tilkobling
     -DOPENDAQ_ENABLE_OPCUA=ON \
     -DOPENDAQ_ENABLE_NATIVE_STREAMING=ON \
     -DOPENDAQ_ENABLE_WEBSOCKET_STREAMING=ON \
-    # Enhetsmoduler
     -DDAQMODULES_REF_DEVICE_MODULE=ON \
     -DDAQMODULES_SIMULATOR_DEVICE_MODULE=ON \
     -DDAQMODULES_OPENDAQ_CLIENT_MODULE=ON \
     -DDAQMODULES_OPENDAQ_SERVER_MODULE=ON \
     -DDAQMODULES_REF_FB_MODULE=ON \
     -DDAQMODULES_BASIC_CSV_RECORDER_MODULE=ON \
-    # Python-bindings
     -DOPENDAQ_GENERATE_PYTHON_BINDINGS=ON \
-    # Avhengigheter bygges fra kildekode
     -DOPENDAQ_ALWAYS_FETCH_DEPENDENCIES=ON \
-    # Deaktiver unødvendig for produksjon
     -DOPENDAQ_ENABLE_TESTS=OFF \
     -DOPENDAQ_ENABLE_TEST_UTILS=OFF \
     -DDAQMODULES_AUDIO_DEVICE_MODULE=OFF
