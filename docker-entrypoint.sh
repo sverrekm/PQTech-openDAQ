@@ -78,8 +78,8 @@ echo "  Port: 3240"
 if [ -n "$BUSID" ]; then
     echo "  SIRIUS: $BUSID (delt)"
     echo ""
-    echo "  Pa Windows-PC, kjor:"
-    echo "    usbipd attach --remote ${IP:-<PI-IP>} --busid $BUSID"
+    echo "  Pa Windows-PC (krever usbip-win2):"
+    echo "    usbip.exe attach -r ${IP:-<PI-IP>} -b $BUSID"
 fi
 echo "=============================================="
 echo ""

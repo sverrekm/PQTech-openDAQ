@@ -413,7 +413,8 @@ tr:hover td { background: #0f172a; }
             <button class="btn-kopier" onclick="kopierCmd()">Kopier</button>
         </div>
         <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
-            Forst installer: <code style="color:#a5b4fc;">winget install usbipd</code>
+            Krever <a href="https://github.com/vadimgrn/usbip-win2/releases" target="_blank"
+            style="color:#60a5fa;">usbip-win2</a> installert pa Windows.
         </p>
     </div>
 </div>
@@ -503,7 +504,7 @@ function oppdaterUI(enheter, status) {
     if (delt) {
         winKort.style.display = 'block';
         document.getElementById('windows-cmd').textContent =
-            `usbipd attach --remote ${status.ip} --busid ${delt.busid}`;
+            `usbip.exe attach -r ${status.ip} -b ${delt.busid}`;
     } else {
         winKort.style.display = 'none';
     }
