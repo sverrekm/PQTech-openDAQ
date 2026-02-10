@@ -1,35 +1,44 @@
 services:
-  usbip-sirius:
-    build: .
-    image: usbip-sirius:latest
-    container_name: usbip-sirius
+  opendaq-sirius:
+    build:
+      context: .
+      args:
+        PARALLELLE_JOBBER: 2
+    image: opendaq-sirius:latest
+    container_name: opendaq-sirius
     restart: unless-stopped
 
-    # Krever privilegert modus for kjernemoduler og USB-tilgang
+    # USB-tilgang til SIRIUS
     privileged: true
 
-    # Host-nettverk slik at Windows-PC kan naa usbipd (port 3240)
+    # Host-nettverk for openDAQ-servere og web UI
     network_mode: host
 
     volumes:
-      # Tilgang til USB-enheter
+      # USB-enheter
       - /dev/bus/usb:/dev/bus/usb
-      # Kjernemoduler for usbip
-      - /lib/modules:/lib/modules:ro
+      # Maalinger (persistente)
+      - ./maalinger:/data/maalinger
 
     environment:
-      # Bus-ID for SIRIUS (valgfritt - auto-oppdagelse brukes ellers)
-      # Finn med: lsusb eller usbip list -l
-      - SIRIUS_BUSID=
-      # Sekunder mellom statussjekker
-      - POLL_INTERVALL=10
-      # Auto-bind SIRIUS naar den kobles til
-      - AUTO_BIND=true
+      # Tilkoblingsstreng (tom = auto-oppdagelse av SIRIUS USB)
+      # Eksempler:
+      #   daq.opcua://192.168.1.100   (OPC-UA)
+      #   daq.ns://192.168.1.100      (native streaming)
+      #   daqref://device0             (simulator)
+      - TILKOBLING=
+      # Sett til "true" for aa bruke simulator uten hardware
+      - BRUK_SIMULATOR=false
       # Web-grensesnitt port
       - WEB_PORT=8080
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
     logging:
       driver: json-file
       options:
-        max-size: "5m"
+        max-size: "10m"
         max-file: "3"

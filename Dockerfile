@@ -1,31 +1,124 @@
 # =============================================================
-# USB-over-IP Server for Dewesoft SIRIUS - Raspberry Pi 5
+# openDAQ Server for Dewesoft SIRIUS - Raspberry Pi 5
 # =============================================================
-# Deler SIRIUS USB-enhet over nettverket slik at DewesoftX
-# pa en Windows-PC kan koble til som om den var lokal.
+# Multi-stage build:
+#   Stage 1: Kompilerer openDAQ fra GitHub (OPC-UA, streaming, Python)
+#   Stage 2: Slank runtime med Flask web-grensesnitt
 #
-# Bygg:  docker build -t usbip-sirius .
-# Kjor:  docker compose up -d
+# Bygg paa Pi:
+#   docker build -t opendaq-sirius .
+#
+# Bygg fra Windows (kryss-kompilering):
+#   docker buildx build --platform linux/arm64 -t opendaq-sirius .
+#
+# Med faerre parallelle jobber (Pi med lite RAM):
+#   docker build --build-arg PARALLELLE_JOBBER=1 -t opendaq-sirius .
 # =============================================================
 
-FROM debian:bookworm-slim
+# ---- Stage 1: Bygg openDAQ fra kildekode ----
+FROM ubuntu:24.04 AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG PARALLELLE_JOBBER=2
+ARG OPENDAQ_BRANCH=main
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    usbip \
-    hwdata \
-    usbutils \
-    kmod \
-    iproute2 \
-    procps \
+    build-essential \
+    git \
+    cmake \
+    ninja-build \
     python3 \
+    python3-dev \
     python3-pip \
-    && pip3 install --no-cache-dir --break-system-packages flask \
+    python3-numpy \
+    lld \
+    pkg-config \
+    libx11-dev \
+    libxi-dev \
+    libxcursor-dev \
+    libxrandr-dev \
+    libgl1-mesa-dev \
+    libudev-dev \
+    libfreetype6-dev \
+    libusb-1.0-0-dev \
+    libssl-dev \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY docker-entrypoint.sh /entrypoint.sh
-COPY web_ui.py /app/web_ui.py
-RUN chmod +x /entrypoint.sh
+WORKDIR /src
+RUN git clone --depth 1 --branch ${OPENDAQ_BRANCH} \
+    https://github.com/openDAQ/openDAQ.git .
 
+RUN cmake -S /src -B /src/build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DCMAKE_INSTALL_PREFIX=/opt/opendaq \
+    -DOPENDAQ_ENABLE_OPCUA=ON \
+    -DOPENDAQ_ENABLE_NATIVE_STREAMING=ON \
+    -DOPENDAQ_ENABLE_WEBSOCKET_STREAMING=ON \
+    -DDAQMODULES_REF_DEVICE_MODULE=ON \
+    -DDAQMODULES_SIMULATOR_DEVICE_MODULE=ON \
+    -DDAQMODULES_OPENDAQ_CLIENT_MODULE=ON \
+    -DDAQMODULES_OPENDAQ_SERVER_MODULE=ON \
+    -DDAQMODULES_REF_FB_MODULE=ON \
+    -DOPENDAQ_GENERATE_PYTHON_BINDINGS=ON \
+    -DOPENDAQ_ALWAYS_FETCH_DEPENDENCIES=ON \
+    -DOPENDAQ_ENABLE_TESTS=OFF \
+    -DOPENDAQ_ENABLE_TEST_UTILS=OFF \
+    -DDAQMODULES_AUDIO_DEVICE_MODULE=OFF \
+    2>&1 | tee /tmp/cmake_configure.log \
+    || { echo "=== CMAKE CONFIGURE FEILET ==="; \
+         cat /tmp/cmake_configure.log; \
+         cat /src/build/CMakeFiles/CMakeError.log 2>/dev/null; \
+         exit 1; }
+
+RUN cmake --build /src/build -j ${PARALLELLE_JOBBER} \
+    2>&1 | tee /tmp/cmake_build.log \
+    || { echo "=== CMAKE BUILD FEILET ==="; \
+         tail -100 /tmp/cmake_build.log; \
+         exit 1; }
+
+RUN mkdir -p /opt/opendaq/lib /opt/opendaq/python && \
+    find /src/build/bin -name "*.so*" -exec cp -P {} /opt/opendaq/lib/ \; && \
+    find /src/build/bin -name "opendaq*.so" -exec cp {} /opt/opendaq/python/ \; && \
+    cp -r /src/bindings/python/package/opendaq/* /opt/opendaq/python/ 2>/dev/null || true
+
+
+# ---- Stage 2: Runtime ----
+FROM python:3.11-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libusb-1.0-0 \
+    libudev1 \
+    libstdc++6 \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir numpy flask
+
+COPY --from=builder /opt/opendaq/lib/ /usr/local/lib/
+COPY --from=builder /opt/opendaq/python/ /usr/local/lib/python3.11/site-packages/opendaq/
+
+RUN ldconfig
+
+RUN mkdir -p /app
+
+WORKDIR /app
+
+COPY opendaq_server.py .
+COPY web_ui.py .
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
+
+ENV OPENDAQ_MODULE_PATH=/usr/local/lib
+ENV LD_LIBRARY_PATH=/usr/local/lib
+ENV PYTHONUNBUFFERED=1
 ENV WEB_PORT=8080
+ENV TILKOBLING=""
 
-ENTRYPOINT ["/entrypoint.sh"]
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
+    CMD pgrep -f opendaq_server.py > /dev/null || exit 1
+
+ENTRYPOINT ["./docker-entrypoint.sh"]

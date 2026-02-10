@@ -1,10 +1,6 @@
 .git/
+maalinger/
 *.md
 *.png
 *.service
 setup_usbip.sh
-konfig/
-konfig_*.json
-strom_analysator_demo.py
-test_opendaq.py
-bygg_linux.sh
