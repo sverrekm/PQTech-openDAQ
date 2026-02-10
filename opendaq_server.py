@@ -2,25 +2,34 @@
 """
 openDAQ Server - Dewesoft SIRIUS over nettverk
 ================================================
-Oppdager SIRIUS via USB og eksponerer den over nettverket
-via OPC-UA og native streaming. DewesoftX kan deretter
-koble til via "Dewesoft NET" med Pi sin IP-adresse.
+Dobbel funksjon:
+  1. Eksponerer SIRIUS over nettverket for DewesoftX
+  2. Maaler autonomt og lagrer data lokalt
+
+DewesoftX kan koble til, konfigurere kanaler og analyse.
+Naar DewesoftX kobles fra, fortsetter Pi aa maale paa egenhaand
+med sist lagrede konfigurasjon.
 
 Bruk:
   python3 opendaq_server.py
   python3 opendaq_server.py --simulator
-  python3 opendaq_server.py --tilkobling daq.opcua://192.168.1.100
+  python3 opendaq_server.py --maale-intervall 60 --maale-varighet 5
 """
 
 import sys
 import os
 import json
+import csv
 import time
 import signal
 import logging
 import argparse
 import socket
+import threading
 from datetime import datetime
+from pathlib import Path
+
+import numpy as np
 
 try:
     import opendaq as daq
@@ -43,14 +52,18 @@ log = logging.getLogger('opendaq_server')
 # Global status delt med web UI
 server_status = {
     "kjorer": False,
-    "enhet": None,
     "enhet_navn": "",
     "tilkobling": "",
     "kanaler": [],
     "servere": [],
     "startet": None,
     "feil": None,
+    "siste_maaling": None,
+    "antall_maalinger": 0,
+    "autonom": False,
 }
+
+KONFIG_STI = Path("/data/konfig/enhet_konfig.json")
 
 
 def hent_ip():
@@ -84,23 +97,222 @@ def finn_sirius(instance):
     return sirius
 
 
-def list_kanaler(device, prefix=""):
-    """Rekursivt list alle kanaler paa en enhet."""
+def list_kanaler(device):
+    """List alle kanaler paa en enhet."""
     kanaler = []
     try:
         for ch in device.channels:
             navn = ch.name if hasattr(ch, 'name') else str(ch)
-            kanaler.append(f"{prefix}{navn}")
-        for sig in device.signals:
-            navn = sig.name if hasattr(sig, 'name') else str(sig)
-            kanaler.append(f"{prefix}[sig] {navn}")
+            kanaler.append(navn)
     except Exception as e:
         log.debug(f"Feil ved kanallisting: {e}")
     return kanaler
 
 
+def lagre_konfig(instance):
+    """Lagre gjeldende enhetskonfigurasjon til fil."""
+    try:
+        KONFIG_STI.parent.mkdir(parents=True, exist_ok=True)
+        konfig_str = instance.save_configuration()
+        with open(KONFIG_STI, 'w', encoding='utf-8') as f:
+            f.write(konfig_str)
+        log.info(f"Konfigurasjon lagret: {KONFIG_STI}")
+    except Exception as e:
+        log.warning(f"Kunne ikke lagre konfigurasjon: {e}")
+
+
+def last_konfig(instance):
+    """Last lagret enhetskonfigurasjon fra fil."""
+    if not KONFIG_STI.exists():
+        log.info("Ingen lagret konfigurasjon funnet")
+        return False
+    try:
+        with open(KONFIG_STI, 'r', encoding='utf-8') as f:
+            konfig_str = f.read()
+        instance.load_configuration(konfig_str)
+        log.info(f"Konfigurasjon lastet fra: {KONFIG_STI}")
+        return True
+    except Exception as e:
+        log.warning(f"Kunne ikke laste konfigurasjon: {e}")
+        return False
+
+
+class AutonomMaaler:
+    """
+    Maaler autonomt i bakgrunnen og lagrer data lokalt.
+    Kjorer uavhengig av om DewesoftX er tilkoblet.
+    """
+
+    def __init__(self, instance, device, utmappe, intervall, varighet,
+                 sample_rate, prefiks):
+        self.instance = instance
+        self.device = device
+        self.utmappe = Path(utmappe)
+        self.utmappe.mkdir(parents=True, exist_ok=True)
+        self.intervall = intervall
+        self.varighet = varighet
+        self.sample_rate = sample_rate
+        self.prefiks = prefiks
+        self._stopp = threading.Event()
+        self._traad = None
+
+    def start(self):
+        """Start autonom maaling i bakgrunnstraad."""
+        if self.intervall <= 0:
+            log.info("Autonom maaling deaktivert (intervall=0)")
+            return
+        self._traad = threading.Thread(target=self._maal_loop, daemon=True)
+        self._traad.start()
+        server_status["autonom"] = True
+        log.info(f"Autonom maaling startet: hvert {self.intervall}s, "
+                 f"varighet {self.varighet}s")
+
+    def stopp(self):
+        """Stopp autonom maaling."""
+        self._stopp.set()
+        if self._traad:
+            self._traad.join(timeout=10)
+        server_status["autonom"] = False
+
+    def _maal_loop(self):
+        """Hovedloop for autonom maaling."""
+        while not self._stopp.is_set():
+            try:
+                self._gjor_maaling()
+            except Exception as e:
+                log.error(f"Feil under maaling: {e}")
+
+            # Lagre konfigurasjon periodisk
+            try:
+                lagre_konfig(self.instance)
+            except Exception:
+                pass
+
+            # Vent til neste maaling
+            self._stopp.wait(timeout=self.intervall)
+
+    def _gjor_maaling(self):
+        """Utfor en enkelt maaling og lagre til fil."""
+        log.info(f"--- Autonom maaling #{server_status['antall_maalinger'] + 1} ---")
+
+        # Finn signaler aa lese
+        signaler = []
+        signal_navn = []
+        try:
+            for ch in self.device.channels:
+                for sig in ch.signals:
+                    signaler.append(sig)
+                    ch_navn = ch.name if hasattr(ch, 'name') else str(ch)
+                    sig_navn = sig.name if hasattr(sig, 'name') else str(sig)
+                    signal_navn.append(f"{ch_navn}/{sig_navn}")
+        except Exception as e:
+            log.warning(f"Feil ved signalsok: {e}")
+
+        if not signaler:
+            # Fallback: bruk toppnivaa-signaler
+            try:
+                for sig in self.device.signals:
+                    signaler.append(sig)
+                    signal_navn.append(sig.name if hasattr(sig, 'name') else str(sig))
+            except Exception:
+                pass
+
+        if not signaler:
+            log.warning("Ingen signaler aa lese")
+            return
+
+        # Opprett StreamReader
+        antall_samples = int(self.sample_rate * self.varighet)
+        try:
+            reader = daq.StreamReader(signaler[0])
+        except Exception as e:
+            log.error(f"Kunne ikke opprette StreamReader: {e}")
+            return
+
+        # Les data
+        log.info(f"Leser {antall_samples} samples ({self.varighet}s)...")
+        time.sleep(self.varighet)
+
+        try:
+            verdier = reader.read(antall_samples)
+        except Exception as e:
+            log.error(f"Feil ved lesing: {e}")
+            return
+
+        if verdier is None or len(verdier) == 0:
+            log.warning("Ingen data lest")
+            return
+
+        data = np.array(verdier, dtype=float)
+        log.info(f"Lest {len(data)} samples")
+
+        # Statistikk
+        if len(data) > 0:
+            rms = float(np.sqrt(np.mean(data**2)))
+            snitt = float(np.mean(data))
+            log.info(f"  RMS: {rms:.4f}, Snitt: {snitt:.4f}, "
+                     f"Min: {float(np.min(data)):.4f}, "
+                     f"Maks: {float(np.max(data)):.4f}")
+
+        # Lagre filer
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self._lagre_csv(data, signal_navn[0] if signal_navn else "signal", ts)
+        self._lagre_npz(data, signal_navn[0] if signal_navn else "signal", ts)
+        self._lagre_metadata(data, signal_navn, ts)
+
+        server_status["antall_maalinger"] += 1
+        server_status["siste_maaling"] = datetime.now().isoformat()
+
+    def _lagre_csv(self, data, navn, ts):
+        """Lagre maaling til CSV."""
+        filnavn = self.utmappe / f"{self.prefiks}_{ts}.csv"
+        dt = 1.0 / self.sample_rate
+        with open(filnavn, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([f"# Autonom maaling - {datetime.now().isoformat()}"])
+            writer.writerow(["Tid (s)", navn])
+            for i, v in enumerate(data):
+                writer.writerow([f"{i * dt:.6f}", f"{v:.6f}"])
+        log.info(f"  CSV: {filnavn}")
+
+    def _lagre_npz(self, data, navn, ts):
+        """Lagre maaling til NPZ."""
+        filnavn = self.utmappe / f"{self.prefiks}_{ts}.npz"
+        dt = 1.0 / self.sample_rate
+        tid = np.arange(len(data)) * dt
+        safe_navn = navn.replace(" ", "_").replace("/", "_")
+        np.savez_compressed(
+            filnavn,
+            **{f"{safe_navn}_tid": tid, f"{safe_navn}_verdier": data}
+        )
+        log.info(f"  NPZ: {filnavn}")
+
+    def _lagre_metadata(self, data, signal_navn, ts):
+        """Lagre metadata-JSON."""
+        filnavn = self.utmappe / f"{self.prefiks}_{ts}_metadata.json"
+        valid = data[~np.isnan(data)] if len(data) > 0 else data
+        meta = {
+            "tidspunkt": datetime.now().isoformat(),
+            "enhet": server_status["enhet_navn"],
+            "varighet_sekunder": self.varighet,
+            "sample_rate": self.sample_rate,
+            "antall_samples": len(data),
+            "signaler": signal_navn,
+            "statistikk": {
+                "rms": float(np.sqrt(np.mean(valid**2))) if len(valid) > 0 else None,
+                "snitt": float(np.mean(valid)) if len(valid) > 0 else None,
+                "std": float(np.std(valid)) if len(valid) > 0 else None,
+                "min": float(np.min(valid)) if len(valid) > 0 else None,
+                "maks": float(np.max(valid)) if len(valid) > 0 else None,
+            }
+        }
+        with open(filnavn, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False)
+        log.info(f"  Metadata: {filnavn}")
+
+
 def start_server(args):
-    """Start openDAQ server som eksponerer enhet over nettverket."""
+    """Start openDAQ server med autonom maaling."""
     global server_status
 
     log.info("=" * 60)
@@ -115,26 +327,20 @@ def start_server(args):
     tilkobling = ""
 
     if args.tilkobling:
-        # Bruk spesifisert tilkoblingsstreng
         tilkobling = args.tilkobling
         log.info(f"Kobler til: {tilkobling}")
         device = instance.add_device(tilkobling)
-
     elif args.simulator:
-        # Bruk referanseenhet (simulator)
         tilkobling = "daqref://device0"
         log.info(f"Starter simulator: {tilkobling}")
         device = instance.add_device(tilkobling)
-
     else:
-        # Auto-oppdagelse: sok etter SIRIUS
         sirius_info = finn_sirius(instance)
         if sirius_info:
             tilkobling = sirius_info.connection_string
             log.info(f"Kobler til SIRIUS: {tilkobling}")
             device = instance.add_device(tilkobling)
         else:
-            # Fallback til simulator
             log.warning("SIRIUS ikke funnet - bruker simulator")
             tilkobling = "daqref://device0"
             device = instance.add_device(tilkobling)
@@ -147,12 +353,15 @@ def start_server(args):
     enhet_navn = device.name if hasattr(device, 'name') else str(device)
     log.info(f"Tilkoblet: {enhet_navn}")
 
+    # Last lagret konfigurasjon (fra forrige DewesoftX-sesjon)
+    last_konfig(instance)
+
     # List kanaler
     kanaler = list_kanaler(device)
     for k in kanaler:
         log.info(f"  Kanal: {k}")
 
-    # Start servere (OPC-UA + native streaming)
+    # Start nettverksservere (OPC-UA + native streaming)
     log.info("")
     log.info("Starter nettverksservere...")
 
@@ -165,7 +374,6 @@ def start_server(args):
             log.info(f"  Server startet: {srv_navn}")
     except Exception as e:
         log.warning(f"add_standard_servers feilet: {e}")
-        # Proov individuelt
         for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming']:
             try:
                 s = instance.add_server(srv_type, None)
@@ -199,14 +407,32 @@ def start_server(args):
     log.info(f"    Settings > Devices > Dewesoft NET")
     log.info(f"    Manually add measurement unit")
     log.info(f"    Address: {ip}")
+    if args.maale_intervall > 0:
+        log.info("")
+        log.info(f"  Autonom maaling: hvert {args.maale_intervall}s")
+        log.info(f"  Varighet: {args.maale_varighet}s")
+        log.info(f"  Utmappe: {args.utmappe}")
     log.info("=" * 60)
+
+    # Start autonom maaling i bakgrunnen
+    maaler = AutonomMaaler(
+        instance=instance,
+        device=device,
+        utmappe=args.utmappe,
+        intervall=args.maale_intervall,
+        varighet=args.maale_varighet,
+        sample_rate=args.sample_rate,
+        prefiks=args.prefiks,
+    )
+    maaler.start()
 
     # Hold serveren kjorende
     stopp = False
 
     def signal_handler(sig, frame):
         nonlocal stopp
-        log.info("Mottok stoppsignal...")
+        log.info("Mottok stoppsignal - lagrer konfigurasjon...")
+        lagre_konfig(instance)
         stopp = True
 
     signal.signal(signal.SIGTERM, signal_handler)
@@ -218,13 +444,16 @@ def start_server(args):
     except KeyboardInterrupt:
         pass
 
-    log.info("Stopper servere...")
+    log.info("Stopper...")
+    maaler.stopp()
+    lagre_konfig(instance)
     server_status["kjorer"] = False
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='openDAQ Server - Eksponerer Dewesoft SIRIUS over nettverket'
+        description='openDAQ Server - Eksponerer Dewesoft SIRIUS over nettverket '
+                    'og maaler autonomt'
     )
     parser.add_argument(
         '--tilkobling', '-t',
@@ -236,8 +465,27 @@ def main():
         help='Bruk simulator (daqref://device0)'
     )
     parser.add_argument(
-        '--debug',
-        action='store_true',
+        '--maale-intervall', type=int, default=60,
+        help='Sekunder mellom autonome maalinger (0=deaktivert, standard: 60)'
+    )
+    parser.add_argument(
+        '--maale-varighet', type=float, default=5.0,
+        help='Varighet per maaling i sekunder (standard: 5)'
+    )
+    parser.add_argument(
+        '--sample-rate', type=int, default=1000,
+        help='Samples per sekund (standard: 1000)'
+    )
+    parser.add_argument(
+        '--utmappe', default='/data/maalinger',
+        help='Mappe for lagring av maalinger'
+    )
+    parser.add_argument(
+        '--prefiks', default='maaling',
+        help='Filnavn-prefiks (standard: maaling)'
+    )
+    parser.add_argument(
+        '--debug', action='store_true',
         help='Vis debug-meldinger'
     )
 

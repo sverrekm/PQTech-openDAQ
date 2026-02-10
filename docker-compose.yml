@@ -19,6 +19,8 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       # Maalinger (persistente)
       - ./maalinger:/data/maalinger
+      # Konfigurasjon (lagres mellom omstarter)
+      - ./konfig:/data/konfig
 
     environment:
       # Tilkoblingsstreng (tom = auto-oppdagelse av SIRIUS USB)
@@ -31,6 +33,11 @@ services:
       - BRUK_SIMULATOR=false
       # Web-grensesnitt port
       - WEB_PORT=8080
+      # Autonom maaling
+      - MAALE_INTERVALL=60
+      - MAALE_VARIGHET=5
+      - SAMPLE_RATE=1000
+      - MAALE_PREFIKS=maaling
 
     deploy:
       resources:

@@ -24,8 +24,24 @@ fi
 echo "  Web UI:     port ${WEB_PORT}"
 echo ""
 
+# Standardverdier for autonom maaling
+MAALE_INTERVALL="${MAALE_INTERVALL:-60}"
+MAALE_VARIGHET="${MAALE_VARIGHET:-5}"
+SAMPLE_RATE="${SAMPLE_RATE:-1000}"
+MAALE_PREFIKS="${MAALE_PREFIKS:-maaling}"
+
+echo "  Maaling:    hvert ${MAALE_INTERVALL}s, varighet ${MAALE_VARIGHET}s"
+echo "  Utmappe:    /data/maalinger"
+echo ""
+
 # Bygg openDAQ server-kommando
-SERVER_CMD=(python3 /app/opendaq_server.py)
+SERVER_CMD=(python3 /app/opendaq_server.py
+    --maale-intervall "${MAALE_INTERVALL}"
+    --maale-varighet "${MAALE_VARIGHET}"
+    --sample-rate "${SAMPLE_RATE}"
+    --prefiks "${MAALE_PREFIKS}"
+    --utmappe /data/maalinger
+)
 
 if [ -n "${TILKOBLING}" ]; then
     SERVER_CMD+=(--tilkobling "${TILKOBLING}")

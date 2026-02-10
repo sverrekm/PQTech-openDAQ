@@ -53,11 +53,18 @@ def hent_status():
     kanaler = []
     servere = []
 
+    siste_maaling = None
+    antall_maalinger = 0
+    autonom = False
+
     try:
         from opendaq_server import server_status
         enhet_navn = server_status.get("enhet_navn", "")
         kanaler = server_status.get("kanaler", [])
         servere = server_status.get("servere", [])
+        siste_maaling = server_status.get("siste_maaling")
+        antall_maalinger = server_status.get("antall_maalinger", 0)
+        autonom = server_status.get("autonom", False)
         if server_status.get("kjorer"):
             server_kjorer = True
     except Exception:
@@ -77,6 +84,9 @@ def hent_status():
         "kanaler": kanaler,
         "servere": servere,
         "usb_enheter": usb_enheter,
+        "siste_maaling": siste_maaling,
+        "antall_maalinger": antall_maalinger,
+        "autonom": autonom,
     }
 
 
@@ -289,6 +299,28 @@ body {
         <div id="kanal-tags" class="kanal-liste"></div>
     </div>
 
+    <div class="kort">
+        <h2>Autonom maaling</h2>
+        <div class="info-grid">
+            <div class="info-boks">
+                <div class="label">Status</div>
+                <div class="verdi" id="info-autonom">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Antall maalinger</div>
+                <div class="verdi" id="info-antall">0</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Siste maaling</div>
+                <div class="verdi" id="info-siste" style="font-size:0.85rem;">-</div>
+            </div>
+        </div>
+        <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
+            Pi maaler og lagrer data lokalt, uavhengig av DewesoftX-tilkobling.
+            Filer lagres i <code style="color:#a5b4fc;">/data/maalinger/</code>
+        </p>
+    </div>
+
     <div class="kort" id="dewesoft-kort">
         <h2>Koble til fra DewesoftX</h2>
         <ol class="steg">
@@ -358,6 +390,13 @@ function oppdaterUI(s) {
     } else {
         tags.innerHTML = '';
     }
+
+    // Autonom maaling
+    document.getElementById('info-autonom').textContent =
+        s.autonom ? 'Aktiv' : 'Inaktiv';
+    document.getElementById('info-antall').textContent = s.antall_maalinger || '0';
+    document.getElementById('info-siste').textContent =
+        s.siste_maaling ? new Date(s.siste_maaling).toLocaleString('no-NO') : '-';
 
     // DewesoftX adresse
     document.getElementById('pi-adresse').textContent = s.ip || '-';
