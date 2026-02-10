@@ -1,68 +1,107 @@
 #!/bin/bash
 # =============================================================
-# Dewesoft Målesystem - Docker Entrypoint
+# USB-over-IP Entrypoint - Dewesoft SIRIUS
 # =============================================================
-# Starter dewesoft_maaling.py som bakgrunnstjeneste.
-# Håndterer graceful shutdown via SIGTERM.
-#
-# Miljøvariabler:
-#   KONFIG_FIL       - Sti til konfigurasjonsfil (standard: /data/konfig/konfig_strom_spenning.json)
-#   MAALE_INTERVALL   - Sekunder mellom målinger (standard: 60)
-#   MAALE_VARIGHET    - Varighet per måling i sekunder (standard: 5)
-#   MAALE_PREFIKS     - Filnavn-prefiks (standard: maaling)
-#   TILKOBLING        - Overstyr connection string (tom = bruk konfig)
-#   SAMPLE_RATE       - Overstyr sample rate (tom = bruk konfig)
+# Starter usbipd, finner SIRIUS og deler den over nettverket.
+# Kjorer som bakgrunnstjeneste i Docker.
 # =============================================================
 set -e
 
-# Standardverdier
-KONFIG_FIL="${KONFIG_FIL:-/data/konfig/konfig_strom_spenning.json}"
-MAALE_INTERVALL="${MAALE_INTERVALL:-60}"
-MAALE_VARIGHET="${MAALE_VARIGHET:-5}"
-MAALE_PREFIKS="${MAALE_PREFIKS:-maaling}"
+POLL_INTERVALL="${POLL_INTERVALL:-10}"
+AUTO_BIND="${AUTO_BIND:-true}"
 
 echo "=============================================="
-echo "  Dewesoft SIRIUS Målesystem - Docker"
+echo "  USB-over-IP Server - Dewesoft SIRIUS"
+echo "  $(date)"
 echo "=============================================="
 echo ""
-echo "  Konfig:       ${KONFIG_FIL}"
-echo "  Intervall:    ${MAALE_INTERVALL}s"
-echo "  Varighet:     ${MAALE_VARIGHET}s"
-echo "  Prefiks:      ${MAALE_PREFIKS}"
-echo "  Tilkobling:   ${TILKOBLING:-fra konfig}"
-echo "  Utmappe:      /data/maalinger"
+
+# Last kjernemoduler (krever --privileged)
+echo "[1/3] Laster kjernemoduler..."
+modprobe usbip-core 2>/dev/null || echo "  usbip-core allerede lastet"
+modprobe usbip-host 2>/dev/null || echo "  usbip-host allerede lastet"
+echo "      OK"
+
+# Funksjon for aa finne SIRIUS
+finn_sirius() {
+    local busid=""
+
+    # Sok etter Dewesoft/SIRIUS/Dewetron i USB-enheter
+    for dev in $(usbip list -l 2>/dev/null | grep "busid" | awk '{print $3}'); do
+        local info
+        info=$(usbip list -l 2>/dev/null | grep -A1 "$dev")
+        if echo "$info" | grep -qi "dewesoft\|sirius\|dewetron"; then
+            busid="$dev"
+            break
+        fi
+    done
+
+    # Bruk miljovariabel som fallback
+    if [ -z "$busid" ] && [ -n "$SIRIUS_BUSID" ]; then
+        busid="$SIRIUS_BUSID"
+    fi
+
+    echo "$busid"
+}
+
+# Start usbipd daemon
+echo ""
+echo "[2/3] Starter usbipd daemon..."
+usbipd -D
+echo "      usbipd startet (port 3240)"
+
+# Finn og del SIRIUS
+echo ""
+echo "[3/3] Soker etter SIRIUS..."
+
+BUSID=$(finn_sirius)
+
+if [ -n "$BUSID" ]; then
+    usbip bind -b "$BUSID" 2>/dev/null && \
+        echo "      SIRIUS delt: busid=$BUSID" || \
+        echo "      Allerede delt eller feil ved binding av $BUSID"
+else
+    echo "      SIRIUS ikke funnet ved oppstart"
+    echo "      Tilgjengelige USB-enheter:"
+    usbip list -l 2>/dev/null || echo "        (ingen)"
+    echo ""
+    echo "      Sett SIRIUS_BUSID miljovariabel eller koble til SIRIUS"
+fi
+
+# Vis tilkoblingsinfo
+IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+echo ""
+echo "=============================================="
+echo "  USB-over-IP Server kjorer"
+echo "  IP: ${IP:-ukjent}"
+echo "  Port: 3240"
+if [ -n "$BUSID" ]; then
+    echo "  SIRIUS: $BUSID (delt)"
+    echo ""
+    echo "  Pa Windows-PC, kjor:"
+    echo "    usbipd attach --remote ${IP:-<PI-IP>} --busid $BUSID"
+fi
+echo "=============================================="
 echo ""
 
-# Sjekk at konfigurasjonsfil finnes
-if [ ! -f "${KONFIG_FIL}" ]; then
-    echo "[FEIL] Konfigurasjonsfil ikke funnet: ${KONFIG_FIL}"
-    echo "       Legg en konfig-fil i ./konfig/ mappen"
-    echo "       Tilgjengelige filer i /data/konfig/:"
-    ls -la /data/konfig/ 2>/dev/null || echo "       (tom mappe)"
-    exit 1
-fi
+# Hold containeren kjorende og overvak
+echo "Overvakning startet (sjekker hvert ${POLL_INTERVALL}s)..."
+while true; do
+    # Sjekk at usbipd kjorer
+    if ! pgrep -x usbipd > /dev/null; then
+        echo "[$(date +%H:%M:%S)] usbipd stoppet - starter pa nytt..."
+        usbipd -D
+    fi
 
-# Bygg kommando
-CMD=(python3 /app/dewesoft_maaling.py
-    --konfig "${KONFIG_FIL}"
-    --varighet "${MAALE_VARIGHET}"
-    --gjenta "${MAALE_INTERVALL}"
-    --prefiks "${MAALE_PREFIKS}"
-    --utmappe /data/maalinger
-)
+    # Sjekk om SIRIUS er tilkoblet og delt
+    if [ "$AUTO_BIND" = "true" ]; then
+        CURRENT_BUSID=$(finn_sirius)
+        if [ -n "$CURRENT_BUSID" ]; then
+            # Proov aa binde hvis ikke allerede delt
+            usbip bind -b "$CURRENT_BUSID" 2>/dev/null && \
+                echo "[$(date +%H:%M:%S)] SIRIUS tilkoblet og delt: $CURRENT_BUSID"
+        fi
+    fi
 
-# Legg til tilkobling hvis satt
-if [ -n "${TILKOBLING}" ]; then
-    CMD+=(--tilkobling "${TILKOBLING}")
-fi
-
-# Legg til sample rate hvis satt
-if [ -n "${SAMPLE_RATE}" ]; then
-    CMD+=(--sample-rate "${SAMPLE_RATE}")
-fi
-
-echo "Starter: ${CMD[*]}"
-echo ""
-
-# Kjør med signal-forwarding for graceful shutdown
-exec "${CMD[@]}"
+    sleep "$POLL_INTERVALL"
+done

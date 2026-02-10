@@ -1,36 +1,10 @@
-# Lokal Windows-build (openDAQ bygges fra GitHub i containeren)
-build/
-
-# Git (kildekode klones fra GitHub i builder-stage)
 .git/
-.github/
-
-# Lokale målinger og konfig (monteres som volum)
-maalinger/
-
-# Genererte filer
-*.png
-*.npz
-*.pyc
-__pycache__/
-lagret_oppsett.json
-
-# IDE og OS
-.vscode/
-.idea/
-Thumbs.db
-.DS_Store
-
-# Store unødvendige filer
-bindings/
-*.pyd
 *.md
-LICENSE
-antora-playbook*.yml
-opendaq_version_bump.py
+*.png
+*.service
+setup_usbip.sh
+konfig/
+konfig_*.json
 strom_analysator_demo.py
 test_opendaq.py
-strom_analyse_*.png
 bygg_linux.sh
-CMake*
-opendaq_version

@@ -1,0 +1,21 @@
+[Unit]
+Description=USB-over-IP Server for Dewesoft SIRIUS
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Last kjernemoduler
+ExecStartPre=/sbin/modprobe usbip-core
+ExecStartPre=/sbin/modprobe usbip-host
+
+# Start usbipd daemon
+ExecStart=/usr/sbin/usbipd -D
+
+# Stopp daemon
+ExecStop=/usr/bin/killall usbipd
+
+[Install]
+WantedBy=multi-user.target
