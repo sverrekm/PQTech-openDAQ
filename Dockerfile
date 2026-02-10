@@ -45,11 +45,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+SHELL ["/bin/bash", "-c"]
+
 WORKDIR /src
 RUN git clone --depth 1 --branch ${OPENDAQ_BRANCH} \
     https://github.com/openDAQ/openDAQ.git .
 
-RUN set -o pipefail && cmake -S /src -B /src/build -G Ninja \
+RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCMAKE_INSTALL_PREFIX=/opt/opendaq \
@@ -66,25 +68,15 @@ RUN set -o pipefail && cmake -S /src -B /src/build -G Ninja \
     -DOPENDAQ_ENABLE_TESTS=OFF \
     -DOPENDAQ_ENABLE_TEST_UTILS=OFF \
     -DDAQMODULES_AUDIO_DEVICE_MODULE=OFF \
-    2>&1 | tee /tmp/cmake_configure.log; \
-    CMAKE_RC=${PIPESTATUS[0]}; \
-    if [ $CMAKE_RC -ne 0 ]; then \
-        echo "=== CMAKE CONFIGURE FEILET (exit code: $CMAKE_RC) ==="; \
-        echo "=== CMakeError.log ==="; \
-        cat /src/build/CMakeFiles/CMakeError.log 2>/dev/null || true; \
-        echo "=== CMakeOutput.log (siste 50 linjer) ==="; \
-        tail -50 /src/build/CMakeFiles/CMakeOutput.log 2>/dev/null || true; \
-        exit 1; \
-    fi
+    || { echo "=== CMAKE CONFIGURE FEILET ==="; \
+         echo "=== CMakeError.log ==="; \
+         cat /src/build/CMakeFiles/CMakeError.log 2>/dev/null; \
+         echo "=== CMakeOutput.log (siste 50 linjer) ==="; \
+         tail -50 /src/build/CMakeFiles/CMakeOutput.log 2>/dev/null; \
+         exit 1; }
 
-RUN set -o pipefail && cmake --build /src/build -j ${PARALLELLE_JOBBER} \
-    2>&1 | tee /tmp/cmake_build.log; \
-    BUILD_RC=${PIPESTATUS[0]}; \
-    if [ $BUILD_RC -ne 0 ]; then \
-        echo "=== CMAKE BUILD FEILET (exit code: $BUILD_RC) ==="; \
-        tail -100 /tmp/cmake_build.log; \
-        exit 1; \
-    fi
+RUN cmake --build /src/build -j ${PARALLELLE_JOBBER} \
+    || { echo "=== CMAKE BUILD FEILET ==="; exit 1; }
 
 RUN mkdir -p /opt/opendaq/lib /opt/opendaq/python && \
     find /src/build/bin -name "*.so*" -exec cp -P {} /opt/opendaq/lib/ \; && \
