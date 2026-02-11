@@ -38,7 +38,7 @@ except ImportError:
 from sirius_protokoll_impl import (
     SiriusProtokoll,
     DEWESOFT_VID, SIRIUS_PID,
-    EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN,
+    EP_CMD_IN, EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN,
     ALLE_SLOTTER,
     REG_CMD, REG_COMMIT, REG_SAMPLE_CFG,
     REG_TRIG_33, REG_TRIG_08, REG_TRIG_0B, REG_TRIG_0A,
@@ -160,32 +160,62 @@ class SiriusDriver:
 
         log.info(f"SIRIUS funnet: Bus {dev.bus}, Adresse {dev.address}")
 
-        # Reset USB-enhet for aa rydde opp
+        # VIKTIG: IKKJE gjer dev.reset() - det forstyrrer FX2-firmware og
+        # gjer at enheten responderer med all-0xFF paa alle kommandoar.
+
+        # Logg USB-deskriptorar for feilsoeking
         try:
-            dev.reset()
-            log.debug("USB reset OK")
+            cfg = dev.get_active_configuration()
+            if cfg:
+                log.info(f"  USB-konfig: #{cfg.bConfigurationValue}, "
+                         f"{cfg.bNumInterfaces} interface(s)")
+                for intf in cfg:
+                    log.info(f"  Interface {intf.bInterfaceNumber}: "
+                             f"{intf.bNumEndpoints} endepunkt, "
+                             f"klasse=0x{intf.bInterfaceClass:02X}")
+            else:
+                log.info("  Ingen aktiv USB-konfigurasjon")
+        except Exception as e:
+            log.debug(f"  Kunne ikkje lese USB-deskriptorar: {e}")
+
+        # Frigjor kernel-driver paa alle interface
+        for iface in range(3):
+            try:
+                if dev.is_kernel_driver_active(iface):
+                    dev.detach_kernel_driver(iface)
+                    log.debug(f"Kernel-driver frigitt for interface {iface}")
+            except (usb.core.USBError, NotImplementedError) as e:
+                log.debug(f"detach_kernel_driver({iface}): {e}")
+
+        # Sett konfigurasjon (hopp over viss allereie satt)
+        try:
+            cfg = dev.get_active_configuration()
+            if cfg is None:
+                dev.set_configuration()
+                log.debug("set_configuration OK")
+            else:
+                log.debug(f"Konfigurasjon allereie aktiv: #{cfg.bConfigurationValue}")
         except usb.core.USBError as e:
-            log.debug(f"USB reset feilet (ikkje kritisk): {e}")
+            # "Resource busy" er OK - betyr allereie konfigurert
+            if "Resource busy" in str(e) or "errno 16" in str(e).lower():
+                log.debug(f"set_configuration: allereie konfigurert ({e})")
+            else:
+                raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
-        # Frigjor kernel-driver paa interface 0
+        # Klaim alle interface (endepunkta kan vaere paa ulike interface)
         try:
-            if dev.is_kernel_driver_active(0):
-                dev.detach_kernel_driver(0)
-                log.debug("Kernel-driver frigitt for interface 0")
-        except (usb.core.USBError, NotImplementedError) as e:
-            log.debug(f"detach_kernel_driver: {e}")
-
-        # Sett konfigurasjon
-        try:
-            dev.set_configuration()
-            log.debug("set_configuration OK")
-        except usb.core.USBError as e:
-            raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
-
-        # Klaim interface
-        try:
-            usb.util.claim_interface(dev, 0)
-            log.debug("Interface 0 klaimet")
+            cfg = dev.get_active_configuration()
+            if cfg:
+                for intf in cfg:
+                    try:
+                        usb.util.claim_interface(dev, intf.bInterfaceNumber)
+                        log.info(f"  Interface {intf.bInterfaceNumber} klaimet "
+                                 f"({intf.bNumEndpoints} endepunkt)")
+                    except usb.core.USBError as e:
+                        log.debug(f"  claim_interface({intf.bInterfaceNumber}): {e}")
+            else:
+                usb.util.claim_interface(dev, 0)
+                log.info("  Interface 0 klaimet (fallback)")
         except usb.core.USBError as e:
             log.debug(f"claim_interface: {e}")
 
@@ -193,6 +223,31 @@ class SiriusDriver:
         self._proto = SiriusProtokoll(dev)
         self._tilkoblet = True
         self._rekoble_forsok = 0
+
+        # Flush EP1 IN for aa fjerne gammal data fraa tidlegare session
+        log.info("Flushar EP1 IN...")
+        self._proto.flush_endepunkt(EP_CMD_IN, forsok=10)
+
+        # Test tilkoblinga med AE foer full init
+        log.info("Testar tilkobling med AE heartbeat...")
+        try:
+            test = self._proto.send_telemetri()
+            all_ff = all(b == 0xFF for b in test)
+            log.info(f"  AE test-svar: {test[:16].hex()} "
+                     f"({'ALL-FF - eining responderer ikkje ennaa' if all_ff else 'OK'})")
+            if all_ff:
+                log.warning(
+                    "Enheten gir all-0xFF svar. "
+                    "Proever EP1 flush + ny AE etter kort pause..."
+                )
+                time.sleep(0.5)
+                self._proto.flush_endepunkt(EP_CMD_IN, forsok=10)
+                test2 = self._proto.send_telemetri()
+                all_ff2 = all(b == 0xFF for b in test2)
+                log.info(f"  AE test #2: {test2[:16].hex()} "
+                         f"({'FRAMLEIS ALL-FF' if all_ff2 else 'OK'})")
+        except SiriusUSBFeil as e:
+            log.warning(f"  AE test feilet: {e}")
 
         # Kjoer full initialisering (repliserer DewesoftX)
         self._initialiser()
@@ -208,7 +263,15 @@ class SiriusDriver:
 
         if self._dev is not None:
             try:
-                usb.util.release_interface(self._dev, 0)
+                cfg = self._dev.get_active_configuration()
+                if cfg:
+                    for intf in cfg:
+                        try:
+                            usb.util.release_interface(self._dev, intf.bInterfaceNumber)
+                        except Exception:
+                            pass
+                else:
+                    usb.util.release_interface(self._dev, 0)
             except Exception:
                 pass
             try:
@@ -254,12 +317,26 @@ class SiriusDriver:
 
         # ---- Fase 1: Heartbeat-sjekk ----
         log.info("  Fase 1: Heartbeat-sjekk...")
+        alle_ff_teller = 0
         for i in range(4):
             try:
                 svar = proto.send_telemetri()
-                log.debug(f"    AE #{i+1}: {svar[:6].hex()}")
+                er_ff = all(b == 0xFF for b in svar)
+                if er_ff:
+                    alle_ff_teller += 1
+                log.info(f"    AE #{i+1}: {svar[:8].hex()} "
+                         f"({len(svar)}B{' ALL-FF' if er_ff else ''})")
             except SiriusUSBFeil as e:
                 log.warning(f"    AE #{i+1} feilet: {e}")
+
+        if alle_ff_teller >= 4:
+            log.error(
+                "ALLE AE-svar er 0xFF! Enheten responderer ikkje paa kommandoar. "
+                "Mogelege aarsaker: "
+                "1) FX2-firmware ikkje lasta / korrumpert, "
+                "2) USB-reset har forstyrra firmware, "
+                "3) Enheten treng straumsykling (koble fraa/til USB-kabelen)"
+            )
 
         # ---- Fase 2: Enhetsoppdaging ----
         log.info("  Fase 2: Enhetsoppdaging...")
@@ -268,7 +345,8 @@ class SiriusDriver:
         try:
             fw = proto.les_fw_versjon()
             self._enhetsinfo.fw_versjon = fw
-            log.info(f"    FW-versjon: {fw[:4].hex()}")
+            er_ff = all(b == 0xFF for b in fw)
+            log.info(f"    FW-versjon: {fw[:8].hex()} ({len(fw)}B{' ALL-FF' if er_ff else ''})")
         except SiriusUSBFeil as e:
             log.warning(f"    FW-versjon feilet: {e}")
 
@@ -282,7 +360,8 @@ class SiriusDriver:
         try:
             slot_map = proto.hent_slot_tilstedevaerelse()
             self._enhetsinfo.slot_tilstedevaerelse = slot_map
-            log.info(f"    Slot-kart: {slot_map[:16].hex()}")
+            er_ff = all(b == 0xFF for b in slot_map)
+            log.info(f"    Slot-kart: {slot_map[:16].hex()} ({len(slot_map)}B{' ALL-FF' if er_ff else ''})")
         except SiriusUSBFeil as e:
             log.warning(f"    Slot-tilstedevaerelse feilet: {e}")
 
@@ -290,19 +369,23 @@ class SiriusDriver:
         try:
             slot_types = proto.hent_slot_typer()
             self._enhetsinfo.slot_typer = slot_types
-            log.info(f"    Slot-typer: {slot_types[:16].hex()}")
+            er_ff = all(b == 0xFF for b in slot_types)
+            log.info(f"    Slot-typer: {slot_types[:16].hex()} ({len(slot_types)}B{' ALL-FF' if er_ff else ''})")
         except SiriusUSBFeil as e:
             log.warning(f"    Slot-typer feilet: {e}")
 
         # EEPROM-lesing (A8) - enhetsstreng og serienummer
         try:
             eeprom = proto.les_eeprom(0x00, 0x00)
-            tekst = eeprom.rstrip(b'\x00\xff').decode('ascii', errors='replace')
-            if tekst:
-                self._enhetsinfo.enhetsstreng = tekst[:8]
-                self._enhetsinfo.serienummer = tekst[8:].strip('\x00').strip()
-                log.info(f"    Eining: {self._enhetsinfo.enhetsstreng}")
-                log.info(f"    Serienr: {self._enhetsinfo.serienummer}")
+            er_ff = all(b == 0xFF for b in eeprom)
+            log.info(f"    EEPROM raa: {eeprom[:16].hex()} ({len(eeprom)}B{' ALL-FF' if er_ff else ''})")
+            if not er_ff:
+                tekst = eeprom.rstrip(b'\x00\xff').decode('ascii', errors='replace')
+                if tekst:
+                    self._enhetsinfo.enhetsstreng = tekst[:8]
+                    self._enhetsinfo.serienummer = tekst[8:].strip('\x00').strip()
+                    log.info(f"    Eining: {self._enhetsinfo.enhetsstreng}")
+                    log.info(f"    Serienr: {self._enhetsinfo.serienummer}")
         except SiriusUSBFeil as e:
             log.warning(f"    EEPROM feilet: {e}")
             # Fallback: proev E3 (FX2-lag)
