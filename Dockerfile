@@ -103,6 +103,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
     libudev1 \
     libstdc++6 \
+    libxrandr2 \
     procps \
     && rm -rf /var/lib/apt/lists/*
 

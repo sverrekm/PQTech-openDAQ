@@ -51,6 +51,9 @@ if [ "${BRUK_SIMULATOR}" = "true" ]; then
     SERVER_CMD+=(--simulator)
 fi
 
+# openDAQ laster moduler fra CWD - bytt til modulkatalogen
+cd /usr/local/lib
+
 # Start web-grensesnitt i bakgrunnen
 echo "[1/2] Starter web-grensesnitt paa port ${WEB_PORT}..."
 python3 /app/web_ui.py &
