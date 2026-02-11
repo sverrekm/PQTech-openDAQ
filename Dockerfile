@@ -112,7 +112,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir numpy flask
+RUN pip install --no-cache-dir numpy flask pyusb
 
 COPY --from=builder /opt/opendaq/lib/ /usr/local/lib/
 COPY --from=builder /opt/opendaq/python/ /usr/local/lib/python3.11/site-packages/opendaq/
@@ -126,6 +126,7 @@ WORKDIR /app
 COPY opendaq_server.py .
 COPY web_ui.py .
 COPY usbip_manager.py .
+COPY sirius_usb_probe.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 

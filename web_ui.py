@@ -12,6 +12,7 @@ Apne: http://<pi-ip>:8080
 import os
 import subprocess
 import socket
+import threading
 
 from flask import Flask, jsonify, request
 
@@ -122,6 +123,51 @@ def api_koble_til():
         return jsonify({"suksess": suksess, "melding": melding})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+# --- SIRIUS USB Probe API ---
+
+_probe_resultat = {"status": "idle", "output": "", "rapport": None}
+_probe_lock = threading.Lock()
+
+
+@app.route("/api/probe/kjor", methods=["POST"])
+def api_probe_kjor():
+    """Kjor SIRIUS USB probe i bakgrunnen."""
+    with _probe_lock:
+        if _probe_resultat["status"] == "running":
+            return jsonify({"suksess": False, "melding": "Probe kjorer allerede"})
+        _probe_resultat.update({"status": "running", "output": "", "rapport": None})
+
+    def _kjor_probe():
+        try:
+            r = subprocess.run(
+                ["python3", "/app/sirius_usb_probe.py", "--full", "--debug"],
+                capture_output=True, text=True, timeout=30,
+                cwd="/app"
+            )
+            with _probe_lock:
+                _probe_resultat.update({
+                    "status": "done",
+                    "output": r.stdout + ("\n--- STDERR ---\n" + r.stderr if r.stderr else ""),
+                    "returncode": r.returncode,
+                })
+        except subprocess.TimeoutExpired:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": "Timeout (30s)"})
+        except Exception as e:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": str(e)})
+
+    threading.Thread(target=_kjor_probe, daemon=True).start()
+    return jsonify({"suksess": True, "melding": "Probe startet"})
+
+
+@app.route("/api/probe/status")
+def api_probe_status():
+    """Returnerer probe-status og output."""
+    with _probe_lock:
+        return jsonify(dict(_probe_resultat))
 
 
 # --- USB/IP API ---
@@ -514,6 +560,24 @@ body {
         </p>
     </div>
 
+    <div class="kort" id="probe-kort">
+        <h2>USB Probe &mdash; Direkte SIRIUS-kommunikasjon</h2>
+        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:0.75rem;">
+            Test direkte USB-kommunikasjon med SIRIUS via libusb/pyusb.
+            Proober FX2 (Cypress) kommandoprotokoll og leser USB-deskriptorer.
+        </p>
+        <div class="usbip-knapper">
+            <button class="btn btn-blaa" id="btn-probe" onclick="kjorProbe()">
+                Kjor USB Probe
+            </button>
+        </div>
+        <div id="probe-status" class="melding" style="display:none;"></div>
+        <pre id="probe-output" style="display:none; background:#0f172a; border:1px solid #334155;
+             border-radius:0.5rem; padding:1rem; margin-top:0.75rem; font-size:0.75rem;
+             color:#a5b4fc; max-height:400px; overflow-y:auto; white-space:pre-wrap;
+             font-family:'Consolas','Monaco',monospace;"></pre>
+    </div>
+
     <div class="kort" id="usbip-kort">
         <h2>USB/IP &mdash; DEL SIRIUS</h2>
         <div class="usbip-status-rad">
@@ -812,6 +876,63 @@ function visMelding(tekst, erFeil) {
     }
     el.textContent = tekst;
     el.className = 'melding ' + (erFeil ? 'melding-feil' : 'melding-ok');
+}
+
+// --- USB Probe ---
+let probePolling = null;
+
+async function kjorProbe() {
+    const btn = document.getElementById('btn-probe');
+    const statusEl = document.getElementById('probe-status');
+    const outputEl = document.getElementById('probe-output');
+    btn.disabled = true;
+    btn.textContent = 'Kjorer probe...';
+    statusEl.textContent = 'Starter USB probe...';
+    statusEl.className = 'melding melding-ok';
+    statusEl.style.display = 'block';
+    outputEl.style.display = 'block';
+    outputEl.textContent = 'Venter paa resultat...\\n';
+
+    try {
+        const res = await fetch('/api/probe/kjor', {method: 'POST'});
+        const data = await res.json();
+        if (!data.suksess) {
+            statusEl.textContent = data.melding;
+            statusEl.className = 'melding melding-feil';
+            btn.disabled = false;
+            btn.textContent = 'Kjor USB Probe';
+            return;
+        }
+    } catch (e) {
+        statusEl.textContent = 'Nettverksfeil: ' + e.message;
+        statusEl.className = 'melding melding-feil';
+        btn.disabled = false;
+        btn.textContent = 'Kjor USB Probe';
+        return;
+    }
+
+    // Poll for resultat
+    probePolling = setInterval(async () => {
+        try {
+            const res = await fetch('/api/probe/status');
+            const data = await res.json();
+            if (data.status === 'done' || data.status === 'error') {
+                clearInterval(probePolling);
+                probePolling = null;
+                outputEl.textContent = data.output || '(tomt resultat)';
+                statusEl.textContent = data.status === 'done'
+                    ? 'Probe fullfort (returncode: ' + (data.returncode || 0) + ')'
+                    : 'Probe feilet';
+                statusEl.className = 'melding ' + (data.status === 'done' ? 'melding-ok' : 'melding-feil');
+                btn.disabled = false;
+                btn.textContent = 'Kjor USB Probe';
+            } else if (data.status === 'running') {
+                outputEl.textContent = 'Probe kjorer...\\n' + (data.output || '');
+            }
+        } catch (e) {
+            // Ignorer midlertidige feil
+        }
+    }, 1000);
 }
 
 hentData();
