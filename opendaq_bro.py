@@ -92,56 +92,59 @@ class OpenDAQBro:
         try:
             log.info("Startar openDAQ nettverksbro...")
 
-            # openDAQ lastar .module.so fraa CWD.
-            # Midlertidig chdir til module_path, gjenopprett etterpaa.
+            # openDAQ lastar .module.so fraa CWD (lazy, ogsaa ved add_device/add_server).
+            # Hald CWD paa module_path under HEILE initialiseringa.
             opprinnelig_cwd = os.getcwd()
             try:
                 if os.path.isdir(self._module_path):
                     os.chdir(self._module_path)
-                    log.debug(f"  CWD midlertidig: {self._module_path}")
+                    log.info(f"  CWD midlertidig: {self._module_path}")
+
                 self._instance = _daq.Instance()
+                log.info("  Instance oppretta")
+
+                # Legg til referanse-enhet (simulerte kanalar)
+                self._device = self._instance.add_device("daqref://device0")
+                enhet_namn = ""
+                try:
+                    enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
+                except Exception:
+                    enhet_namn = "RefDevice0"
+                log.info(f"  Referanse-enhet: {enhet_namn}")
+
+                # List kanalar
+                kanalar = []
+                try:
+                    for ch in self._device.channels:
+                        namn = ch.name if hasattr(ch, 'name') else str(ch)
+                        kanalar.append(namn)
+                    log.info(f"  Kanalar: {len(kanalar)}")
+                except Exception as e:
+                    log.warning(f"  Kanallisting feilet: {e}")
+
+                # Start standard servere (OPC-UA + Native Streaming + WebSocket)
+                servere = []
+                try:
+                    srv_list = self._instance.add_standard_servers()
+                    for s in srv_list:
+                        srv_id = s.id if hasattr(s, 'id') else str(s)
+                        servere.append(srv_id)
+                        log.info(f"  Server: {srv_id}")
+                except Exception as e:
+                    log.warning(f"  add_standard_servers feilet: {e}")
+                    # Fallback: proev individuelt
+                    for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
+                                     'OpenDAQNativeStreaming']:
+                        try:
+                            self._instance.add_server(srv_type, None)
+                            servere.append(srv_type)
+                            log.info(f"  Server (fallback): {srv_type}")
+                        except Exception as e2:
+                            log.debug(f"  {srv_type}: {e2}")
+
             finally:
                 os.chdir(opprinnelig_cwd)
                 log.debug(f"  CWD gjenoppretta: {opprinnelig_cwd}")
-
-            # Legg til referanse-enhet (simulerte kanalar)
-            self._device = self._instance.add_device("daqref://device0")
-            enhet_namn = ""
-            try:
-                enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
-            except Exception:
-                enhet_namn = "RefDevice0"
-            log.info(f"  Referanse-enhet: {enhet_namn}")
-
-            # List kanalar
-            kanalar = []
-            try:
-                for ch in self._device.channels:
-                    namn = ch.name if hasattr(ch, 'name') else str(ch)
-                    kanalar.append(namn)
-                log.info(f"  Kanalar: {len(kanalar)}")
-            except Exception as e:
-                log.warning(f"  Kanallisting feilet: {e}")
-
-            # Start standard servere (OPC-UA + Native Streaming + WebSocket)
-            servere = []
-            try:
-                srv_list = self._instance.add_standard_servers()
-                for s in srv_list:
-                    srv_id = s.id if hasattr(s, 'id') else str(s)
-                    servere.append(srv_id)
-                    log.info(f"  Server: {srv_id}")
-            except Exception as e:
-                log.warning(f"  add_standard_servers feilet: {e}")
-                # Fallback: proev individuelt
-                for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
-                                 'OpenDAQNativeStreaming']:
-                    try:
-                        self._instance.add_server(srv_type, None)
-                        servere.append(srv_type)
-                        log.info(f"  Server (fallback): {srv_type}")
-                    except Exception as e2:
-                        log.debug(f"  {srv_type}: {e2}")
 
             ip = self._hent_ip()
 
