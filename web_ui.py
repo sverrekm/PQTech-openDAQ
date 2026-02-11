@@ -28,6 +28,8 @@ try:
         stopp_driver_streaming as _sirius_stopp,
         hent_siste_data as _sirius_hent_data,
         rekoble_driver as _sirius_rekoble,
+        hent_logg as _sirius_hent_logg,
+        send_debug_kommando as _sirius_debug_cmd,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -438,6 +440,32 @@ def api_sirius_rekoble():
         return jsonify({"suksess": suksess, "melding": melding})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+# --- Logg og Debug API ---
+
+@app.route("/api/logg")
+def api_logg():
+    """Returner dei siste logg-linjene (ring buffer)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"linjer": [], "feil": "SIRIUS-driver ikkje lasta"})
+    antall = request.args.get("antall", 200, type=int)
+    linjer = _sirius_hent_logg(min(antall, 500))
+    return jsonify({"linjer": linjer, "antall": len(linjer)})
+
+
+@app.route("/api/debug/kommando", methods=["POST"])
+def api_debug_kommando():
+    """Send ein raa USB-kommando og returner hex-svar."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"feil": "SIRIUS-driver ikkje lasta"}), 503
+    data = request.get_json(silent=True) or {}
+    kommando = data.get("kommando", "").strip()
+    if not kommando:
+        return jsonify({"feil": "Mangler 'kommando' (hex-streng)"}), 400
+    poll = data.get("poll", False)
+    resultat = _sirius_debug_cmd(kommando, poll=poll)
+    return jsonify(resultat)
 
 
 # --- USB/IP API ---

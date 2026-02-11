@@ -37,6 +37,36 @@ logging.basicConfig(
 log = logging.getLogger('sirius_server')
 
 
+# --- Logg-ringbuffer for fjern-tilgang via web API ---
+
+class LoggRingBuffer(logging.Handler):
+    """Lagrar dei siste N logg-linjene i minnet for web-API."""
+
+    def __init__(self, kapasitet=500):
+        super().__init__()
+        self._linjer = []
+        self._kapasitet = kapasitet
+        self._lock = threading.Lock()
+
+    def emit(self, record):
+        linje = self.format(record)
+        with self._lock:
+            self._linjer.append(linje)
+            if len(self._linjer) > self._kapasitet:
+                self._linjer = self._linjer[-self._kapasitet:]
+
+    def hent_linjer(self, antall=200):
+        with self._lock:
+            return list(self._linjer[-antall:])
+
+
+_logg_buffer = LoggRingBuffer(kapasitet=500)
+_logg_buffer.setFormatter(logging.Formatter(
+    '%(asctime)s [%(name)s/%(levelname)s] %(message)s', datefmt='%H:%M:%S'
+))
+logging.getLogger().addHandler(_logg_buffer)
+
+
 # Global status delt med web UI (samme moenster som opendaq_server.py)
 server_status = {
     "kjorer": False,
@@ -252,6 +282,64 @@ class SiriusAutonomMaaler:
         with open(filnavn, 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
         log.info(f"  Metadata: {filnavn}")
+
+
+def hent_logg(antall=200):
+    """Hent dei siste N logg-linjene for web API."""
+    return _logg_buffer.hent_linjer(antall)
+
+
+def send_debug_kommando(hex_kommando, poll=False):
+    """
+    Send ein raa USB-kommando og returner svar som hex.
+
+    Args:
+        hex_kommando: Kommando som hex-streng (f.eks. "AE1F0C")
+        poll: Viss True, bruk AD+B1 poll-mekanismen
+
+    Returns:
+        dict med sendt, svar, lengde, feil
+    """
+    with _lock:
+        if _driver is None or not _driver.er_tilkoblet():
+            return {"feil": "Ikkje tilkobla"}
+        proto = _driver._proto
+        if proto is None:
+            return {"feil": "Protokoll ikkje klar"}
+
+    try:
+        kommando_bytes = bytes.fromhex(hex_kommando)
+    except ValueError as e:
+        return {"feil": f"Ugyldig hex: {e}"}
+
+    resultat = {"sendt": hex_kommando.lower(), "lengde_sendt": len(kommando_bytes)}
+
+    try:
+        if poll and len(kommando_bytes) >= 15 and kommando_bytes[0] == 0xAD:
+            # AD+B1 poll: parse op, slot, reg fraa kommandoen
+            op = kommando_bytes[6]
+            slot = kommando_bytes[10]
+            reg = kommando_bytes[11]
+            data = kommando_bytes[12:15] if len(kommando_bytes) >= 15 else None
+            svar = proto.send_ad_og_poll(op, slot, reg, data, maks_forsok=5)
+            resultat["modus"] = "ad_poll"
+        else:
+            # Enkel send+les
+            svar = proto.send_raa_kommando(kommando_bytes, timeout=2000)
+            resultat["modus"] = "enkel"
+
+        resultat["svar"] = svar.hex()
+        resultat["svar_ascii"] = ''.join(
+            chr(b) if 0x20 <= b <= 0x7E else '.' for b in svar
+        )
+        resultat["lengde_svar"] = len(svar)
+        resultat["all_ff"] = all(b == 0xFF for b in svar)
+        resultat["all_00"] = all(b == 0x00 for b in svar)
+
+    except Exception as e:
+        resultat["feil"] = str(e)
+
+    return resultat
 
 
 def hent_driver_status():
