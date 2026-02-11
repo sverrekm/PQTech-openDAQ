@@ -35,7 +35,10 @@ echo "  Utmappe:    /data/maalinger"
 echo ""
 
 # Bygg openDAQ server-kommando
-SERVER_CMD=(python3 /app/opendaq_server.py
+# Bruker python3 -m fordi openDAQ ModuleManager trenger '' i sys.path
+# for aa finne .module.so-filer i CWD
+export PYTHONPATH=/app
+SERVER_CMD=(python3 -m opendaq_server
     --maale-intervall "${MAALE_INTERVALL}"
     --maale-varighet "${MAALE_VARIGHET}"
     --sample-rate "${SAMPLE_RATE}"
@@ -51,12 +54,12 @@ if [ "${BRUK_SIMULATOR}" = "true" ]; then
     SERVER_CMD+=(--simulator)
 fi
 
-# openDAQ laster moduler fra CWD - bytt til modulkatalogen
+# openDAQ laster moduler fra CWD via '' i sys.path
 cd /usr/local/lib
 
 # Start web-grensesnitt i bakgrunnen
 echo "[1/2] Starter web-grensesnitt paa port ${WEB_PORT}..."
-python3 /app/web_ui.py &
+PYTHONPATH=/app python3 -m web_ui &
 WEB_PID=$!
 echo "      OK (PID: ${WEB_PID})"
 

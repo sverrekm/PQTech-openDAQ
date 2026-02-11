@@ -104,6 +104,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libudev1 \
     libstdc++6 \
     libxrandr2 \
+    libxcursor1 \
+    libxi6 \
+    libfreetype6 \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
