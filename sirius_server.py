@@ -342,6 +342,49 @@ def send_debug_kommando(hex_kommando, poll=False):
     return resultat
 
 
+def frigjor_usb():
+    """Frigjor SIRIUS USB-enheten slik at USB/IP kan bruke den.
+
+    Stoppar streaming og koplar fraa driveren fullstendig.
+    Returns:
+        (suksess, melding)
+    """
+    global _driver, _maaler
+    with _lock:
+        if _driver is None:
+            return True, "Driver ikkje aktiv"
+
+        try:
+            # Stopp autonom maaling
+            if _maaler is not None:
+                try:
+                    _maaler.stopp()
+                except Exception:
+                    pass
+                _maaler = None
+
+            # Koble fraa USB
+            _driver.koble_fra()
+            _driver = None
+
+            server_status.update({
+                "tilkoblet": False,
+                "streamer": False,
+                "feil": None,
+                "enhet_navn": "",
+                "serienummer": "",
+                "kanaler": [],
+                "slot_info": [],
+            })
+
+            log.info("USB frigjort for USB/IP-deling")
+            return True, "USB frigjort - klar for USB/IP"
+
+        except Exception as e:
+            log.error(f"Feil ved frigjering av USB: {e}")
+            return False, str(e)
+
+
 def hent_driver_status():
     """Hent driver-status for web API."""
     with _lock:

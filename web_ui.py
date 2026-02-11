@@ -30,6 +30,7 @@ try:
         rekoble_driver as _sirius_rekoble,
         hent_logg as _sirius_hent_logg,
         send_debug_kommando as _sirius_debug_cmd,
+        frigjor_usb as _sirius_frigjor_usb,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -478,7 +479,19 @@ def api_usbip_status():
 
 @app.route("/api/usbip/del", methods=["POST"])
 def api_usbip_del():
-    """Start USB-deling (bind + usbipd)."""
+    """Start USB-deling (bind + usbipd).
+
+    Frigjer SIRIUS fraa native driver fyrst (dei er gjensidig ekskluderande).
+    """
+    # Frigjor USB fraa native driver foerst
+    if SIRIUS_DIREKTE:
+        ok, msg = _sirius_frigjor_usb()
+        if not ok:
+            return jsonify({"suksess": False, "melding": f"Kunne ikkje frigjere USB: {msg}"})
+
+    import time
+    time.sleep(1)  # Kort pause slik at USB-enheten vert tilgjengeleg
+
     suksess, melding = usbip_manager.del_enhet()
     status = usbip_manager.hent_usbip_status()
     return jsonify({"suksess": suksess, "melding": melding, "status": status})
@@ -486,10 +499,26 @@ def api_usbip_del():
 
 @app.route("/api/usbip/stopp", methods=["POST"])
 def api_usbip_stopp():
-    """Stopp USB-deling (unbind)."""
+    """Stopp USB-deling (unbind) og rekoblar native driver."""
     suksess, melding = usbip_manager.stopp_deling()
+
+    # Rekoblar native driver automatisk
+    rekoble_msg = ""
+    if SIRIUS_DIREKTE:
+        import time
+        time.sleep(1)
+        try:
+            ok, rmsg = _sirius_rekoble()
+            rekoble_msg = f" Native driver: {'rekobla' if ok else rmsg}"
+        except Exception as e:
+            rekoble_msg = f" Native driver: feil ({e})"
+
     status = usbip_manager.hent_usbip_status()
-    return jsonify({"suksess": suksess, "melding": melding, "status": status})
+    return jsonify({
+        "suksess": suksess,
+        "melding": melding + rekoble_msg,
+        "status": status,
+    })
 
 
 # --- HTML ---
