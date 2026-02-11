@@ -99,8 +99,30 @@ class OpenDAQBro:
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
             log.info(f"  Modulstiar: {list(builder.module_paths_list)}")
+
+            # List .module.so-filer i modulstiane
+            for mpath in list(builder.module_paths_list):
+                try:
+                    import glob as _glob
+                    modulfiler = _glob.glob(os.path.join(mpath, "*.module.so"))
+                    log.info(f"  {mpath}: {len(modulfiler)} .module.so-filer")
+                    for mf in sorted(modulfiler):
+                        log.info(f"    {os.path.basename(mf)}")
+                except Exception as e:
+                    log.warning(f"  Kunne ikkje liste {mpath}: {e}")
+
             self._instance = builder.build()
             log.info("  Instance oppretta")
+
+            # List lasta modular
+            try:
+                modular = self._instance.modules
+                log.info(f"  Lasta modular: {len(modular)}")
+                for mod in modular:
+                    mod_id = mod.id if hasattr(mod, 'id') else str(mod)
+                    log.info(f"    {mod_id}")
+            except Exception as e:
+                log.warning(f"  Kunne ikkje liste modular: {e}")
 
             # Legg til referanse-enhet (simulerte kanalar)
             self._device = self._instance.add_device("daqref://device0")
@@ -139,7 +161,7 @@ class OpenDAQBro:
                         servere.append(srv_type)
                         log.info(f"  Server (fallback): {srv_type}")
                     except Exception as e2:
-                        log.debug(f"  {srv_type}: {e2}")
+                        log.warning(f"  {srv_type} feilet: {e2}")
 
             ip = self._hent_ip()
 
