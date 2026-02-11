@@ -170,6 +170,44 @@ def api_probe_status():
         return jsonify(dict(_probe_resultat))
 
 
+@app.route("/api/probe/protokoll", methods=["POST"])
+def api_probe_protokoll():
+    """Kjor SIRIUS protokoll-skanning (kommandoskanning + datastroemmer)."""
+    data = request.get_json(silent=True) or {}
+    modus = data.get("modus", "full")  # full, scan, stream, multi
+
+    with _probe_lock:
+        if _probe_resultat["status"] == "running":
+            return jsonify({"suksess": False, "melding": "Probe kjorer allerede"})
+        _probe_resultat.update({"status": "running", "output": "", "rapport": None})
+
+    flagg = {"full": "--full", "scan": "--scan", "stream": "--stream", "multi": "--multi"}
+    flagg_arg = flagg.get(modus, "--full")
+
+    def _kjor():
+        try:
+            r = subprocess.run(
+                ["python3", "/app/sirius_protokoll.py", flagg_arg, "--debug"],
+                capture_output=True, text=True, timeout=120,
+                cwd="/app"
+            )
+            with _probe_lock:
+                _probe_resultat.update({
+                    "status": "done",
+                    "output": r.stdout + ("\n--- STDERR ---\n" + r.stderr if r.stderr else ""),
+                    "returncode": r.returncode,
+                })
+        except subprocess.TimeoutExpired:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": "Timeout (120s)"})
+        except Exception as e:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": str(e)})
+
+    threading.Thread(target=_kjor, daemon=True).start()
+    return jsonify({"suksess": True, "melding": f"Protokoll-skanning startet ({modus})"})
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -568,7 +606,16 @@ body {
         </p>
         <div class="usbip-knapper">
             <button class="btn btn-blaa" id="btn-probe" onclick="kjorProbe()">
-                Kjor USB Probe
+                USB Deskriptorer
+            </button>
+            <button class="btn btn-gronn" id="btn-proto-scan" onclick="kjorProtokoll('scan')">
+                Skann kommandoer
+            </button>
+            <button class="btn btn-gronn" id="btn-proto-stream" onclick="kjorProtokoll('stream')">
+                Les datastroemmer
+            </button>
+            <button class="btn btn-gronn" id="btn-proto-full" onclick="kjorProtokoll('full')">
+                Full analyse
             </button>
         </div>
         <div id="probe-status" class="melding" style="display:none;"></div>
@@ -933,6 +980,62 @@ async function kjorProbe() {
             // Ignorer midlertidige feil
         }
     }, 1000);
+}
+
+async function kjorProtokoll(modus) {
+    const btn = document.getElementById('btn-proto-' + modus);
+    const statusEl = document.getElementById('probe-status');
+    const outputEl = document.getElementById('probe-output');
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full'];
+    alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
+    btn.textContent = 'Kjorer...';
+    statusEl.textContent = 'Starter protokoll-skanning (' + modus + ')...';
+    statusEl.className = 'melding melding-ok';
+    statusEl.style.display = 'block';
+    outputEl.style.display = 'block';
+    outputEl.textContent = 'Venter paa resultat...\\n';
+
+    try {
+        const res = await fetch('/api/probe/protokoll', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({modus: modus})
+        });
+        const data = await res.json();
+        if (!data.suksess) {
+            statusEl.textContent = data.melding;
+            statusEl.className = 'melding melding-feil';
+            alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+            return;
+        }
+    } catch (e) {
+        statusEl.textContent = 'Nettverksfeil: ' + e.message;
+        statusEl.className = 'melding melding-feil';
+        alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+        return;
+    }
+
+    // Poll for resultat (gjenbruk probe-polling)
+    if (probePolling) clearInterval(probePolling);
+    probePolling = setInterval(async () => {
+        try {
+            const res = await fetch('/api/probe/status');
+            const data = await res.json();
+            if (data.status === 'done' || data.status === 'error') {
+                clearInterval(probePolling);
+                probePolling = null;
+                outputEl.textContent = data.output || '(tomt resultat)';
+                statusEl.textContent = data.status === 'done'
+                    ? 'Analyse fullfort'
+                    : 'Analyse feilet';
+                statusEl.className = 'melding ' + (data.status === 'done' ? 'melding-ok' : 'melding-feil');
+                alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+                btn.textContent = btn.dataset.originalText || btn.textContent;
+            } else if (data.status === 'running') {
+                outputEl.textContent = 'Analyse kjorer...\\n' + (data.output || '');
+            }
+        } catch (e) {}
+    }, 1500);
 }
 
 hentData();

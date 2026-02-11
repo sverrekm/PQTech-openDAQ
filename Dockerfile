@@ -127,6 +127,7 @@ COPY opendaq_server.py .
 COPY web_ui.py .
 COPY usbip_manager.py .
 COPY sirius_usb_probe.py .
+COPY sirius_protokoll.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
