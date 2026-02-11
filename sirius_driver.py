@@ -200,16 +200,8 @@ class SiriusDriver:
         log.info("SIRIUS frakoblet")
 
     def er_tilkoblet(self) -> bool:
-        """Sjekk om enheten er tilkoblet."""
-        if not self._tilkoblet or self._dev is None:
-            return False
-        # Enkel helsesjekk
-        try:
-            self._proto.send_telemetri()
-            return True
-        except Exception:
-            self._tilkoblet = False
-            return False
+        """Sjekk om enheten er tilkoblet (kun tilstandssjekk, ingen USB I/O)."""
+        return self._tilkoblet and self._dev is not None
 
     def rekoble(self) -> bool:
         """
