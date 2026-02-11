@@ -366,9 +366,10 @@ class SiriusDriver:
         self._stopp_event.set()
         self._streamer = False
 
-        if self._adc_traad and self._adc_traad.is_alive():
+        current = threading.current_thread()
+        if self._adc_traad and self._adc_traad.is_alive() and self._adc_traad is not current:
             self._adc_traad.join(timeout=5)
-        if self._heartbeat_traad and self._heartbeat_traad.is_alive():
+        if self._heartbeat_traad and self._heartbeat_traad.is_alive() and self._heartbeat_traad is not current:
             self._heartbeat_traad.join(timeout=5)
 
         self._adc_traad = None
@@ -396,7 +397,7 @@ class SiriusDriver:
 
     def _adc_leser_loop(self):
         """Bakgrunnstraad: les ADC-data fra EP2 og parser."""
-        feil_teller = 0
+        io_feil_teller = 0
 
         while not self._stopp_event.is_set():
             try:
@@ -438,30 +439,41 @@ class SiriusDriver:
                         while len(self._data_buffer) > self._buffer_storrelse:
                             self._data_buffer.pop(0)
 
-                feil_teller = 0
+                io_feil_teller = 0
 
             except SiriusUSBFeil as e:
                 if self._stopp_event.is_set():
                     break
-                feil_teller += 1
-                if "timeout" in str(e).lower():
-                    log.debug(f"ADC timeout (hopper over)")
-                else:
-                    log.warning(f"ADC-feil ({feil_teller}): {e}")
 
-                if feil_teller >= self._maks_rekoble:
-                    log.error("For mange ADC-feil - proever rekobling")
-                    if not self.rekoble():
-                        log.error("Rekobling feilet - stopper streaming")
-                        self._streamer = False
-                        break
-                    feil_teller = 0
+                feil_str = str(e).lower()
+                if "timeout" in feil_str or "timed out" in feil_str:
+                    # Timeout er normalt - enheten sender ikke data foer
+                    # ADC-streaming er aktivert via register-skriving.
+                    # Bare vent og proev igjen.
+                    log.debug("ADC timeout (venter paa data)")
+                    self._stopp_event.wait(timeout=0.5)
+                    continue
+
+                # Ekte I/O-feil (Errno 5 etc.)
+                io_feil_teller += 1
+                log.warning(f"ADC I/O-feil ({io_feil_teller}): {e}")
+
+                if io_feil_teller >= 10:
+                    log.error(
+                        "For mange ADC I/O-feil - stopper streaming. "
+                        "Bruk Rekoble + Start streaming fra web UI."
+                    )
+                    self._streamer = False
+                    break
+
+                # Kort pause foer retry
+                self._stopp_event.wait(timeout=1.0)
 
             except Exception as e:
                 if self._stopp_event.is_set():
                     break
                 log.error(f"Uventet feil i ADC-loop: {e}")
-                time.sleep(0.1)
+                self._stopp_event.wait(timeout=1.0)
 
     def _heartbeat_loop(self):
         """Bakgrunnstraad: send AE telemetri + les EP4 periodisk."""
