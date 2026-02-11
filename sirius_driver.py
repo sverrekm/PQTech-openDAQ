@@ -156,21 +156,34 @@ class SiriusDriver:
 
         log.info(f"SIRIUS funnet: Bus {dev.bus}, Adresse {dev.address}")
 
-        # Frigjor fra kernel-driver (Linux)
+        # Reset USB-enhet for aa rydde opp etter forrige sesjon
         try:
-            for cfg in dev:
-                for intf in cfg:
-                    if dev.is_kernel_driver_active(intf.bInterfaceNumber):
-                        log.debug(f"Frigjor kernel-driver for interface {intf.bInterfaceNumber}")
-                        dev.detach_kernel_driver(intf.bInterfaceNumber)
-        except (usb.core.USBError, NotImplementedError):
-            pass
+            dev.reset()
+            log.debug("USB reset OK")
+        except usb.core.USBError as e:
+            log.debug(f"USB reset feilet (ikke kritisk): {e}")
+
+        # Frigjor kernel-driver paa interface 0 (same moenster som fungerende skript)
+        try:
+            if dev.is_kernel_driver_active(0):
+                dev.detach_kernel_driver(0)
+                log.debug("Kernel-driver frigitt for interface 0")
+        except (usb.core.USBError, NotImplementedError) as e:
+            log.debug(f"detach_kernel_driver: {e}")
 
         # Sett konfigurasjon
         try:
             dev.set_configuration()
+            log.debug("set_configuration OK")
         except usb.core.USBError as e:
-            log.warning(f"set_configuration feilet (kan allerede vaere satt): {e}")
+            raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
+
+        # Klaim interface eksplisitt
+        try:
+            usb.util.claim_interface(dev, 0)
+            log.debug("Interface 0 klaimet")
+        except usb.core.USBError as e:
+            log.debug(f"claim_interface: {e}")
 
         self._dev = dev
         self._proto = SiriusProtokoll(dev)
@@ -190,6 +203,10 @@ class SiriusDriver:
         self._tilkoblet = False
 
         if self._dev is not None:
+            try:
+                usb.util.release_interface(self._dev, 0)
+            except Exception:
+                pass
             try:
                 usb.util.dispose_resources(self._dev)
             except Exception as e:
