@@ -61,7 +61,7 @@ if [ "${NATIVE_SIRIUS}" = "true" ]; then
     # SIRIUS Direkte-modus (uten openDAQ SDK)
     # Bruker reverse-engineered USB-protokoll
     # ========================================
-    echo "Modus: SIRIUS Direkte (native USB-driver)"
+    echo "Modus: SIRIUS Direkte + openDAQ Nettverksservere"
     echo ""
 
     SERVER_CMD=(python3 -m sirius_server "${FELLES_ARGS[@]}")

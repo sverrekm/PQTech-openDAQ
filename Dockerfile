@@ -134,6 +134,7 @@ COPY sirius_sniffer.py .
 COPY sirius_protokoll_impl.py .
 COPY sirius_driver.py .
 COPY sirius_server.py .
+COPY opendaq_bro.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 

@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from sirius_driver import SiriusDriver, SiriusFeil, SiriusIkkeFunnet
+from opendaq_bro import OpenDAQBro
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +90,7 @@ server_status = {
 # Globale referanser for styring fra web UI
 _driver: SiriusDriver = None
 _maaler = None
+_opendaq_bro: OpenDAQBro = None
 _args = None
 _lock = threading.Lock()
 
@@ -411,6 +413,13 @@ def hent_enhetsinfo():
         return {}
 
 
+def hent_opendaq_status():
+    """Hent openDAQ bridge status for web API."""
+    if _opendaq_bro is not None:
+        return _opendaq_bro.hent_status()
+    return {"tilgjengelig": False, "aktiv": False, "feil": "Ikkje starta"}
+
+
 def start_driver_streaming(sample_rate=None, kanaler=None):
     """Start streaming fra web API."""
     global _driver
@@ -572,6 +581,17 @@ def start_server(args):
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()
 
+    # Start openDAQ nettverksservere (referanse-enhet for DewesoftX-tilkobling)
+    global _opendaq_bro
+    try:
+        _opendaq_bro = OpenDAQBro()
+        ok = _opendaq_bro.start()
+        if not ok:
+            log.info("  openDAQ bridge ikkje tilgjengeleg - kun native SIRIUS-modus")
+    except Exception as e:
+        log.warning(f"openDAQ bridge feilet: {e} - fortset utan nettverksservere")
+        _opendaq_bro = None
+
     # Start autonom maaling (kun hvis tilkoblet)
     if enhet_tilkoblet:
         _maaler = SiriusAutonomMaaler(
@@ -602,6 +622,8 @@ def start_server(args):
             # Oppdater daterate i status
             if _driver and _driver.streamer:
                 server_status["data_rate_kbs"] = _driver.data_rate_kbs
+            if _opendaq_bro and _opendaq_bro.tilgjengelig:
+                server_status["opendaq_bro"] = _opendaq_bro.hent_status()
             time.sleep(1)
     except KeyboardInterrupt:
         pass
@@ -609,6 +631,8 @@ def start_server(args):
     log.info("Stopper...")
     if _maaler:
         _maaler.stopp()
+    if _opendaq_bro:
+        _opendaq_bro.stopp()
     if _driver:
         _driver.koble_fra()
     server_status["kjorer"] = False

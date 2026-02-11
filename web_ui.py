@@ -31,6 +31,7 @@ try:
         hent_logg as _sirius_hent_logg,
         send_debug_kommando as _sirius_debug_cmd,
         frigjor_usb as _sirius_frigjor_usb,
+        hent_opendaq_status as _opendaq_hent_status,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -469,6 +470,19 @@ def api_debug_kommando():
     return jsonify(resultat)
 
 
+# --- openDAQ Bridge API ---
+
+@app.route("/api/opendaq/status")
+def api_opendaq_status():
+    """openDAQ bridge status (servere, portar, DewesoftX-tilkobling)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"tilgjengelig": False, "melding": "openDAQ bridge ikkje lasta"})
+    try:
+        return jsonify(_opendaq_hent_status())
+    except Exception as e:
+        return jsonify({"tilgjengelig": False, "feil": str(e)})
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -884,6 +898,50 @@ body {
             <button class="btn btn-blaa" id="btn-sirius-rekoble" onclick="siriusRekoble()">Rekoble</button>
         </div>
         <div id="sirius-melding" class="melding"></div>
+    </div>
+
+    <div class="kort" id="opendaq-bro-kort" style="display:none;">
+        <h2>openDAQ Nettverksservere</h2>
+        <div class="info-grid">
+            <div class="info-boks">
+                <div class="label">Status</div>
+                <div class="verdi" id="odaq-status">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Enhet</div>
+                <div class="verdi" id="odaq-enhet">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Kanalar</div>
+                <div class="verdi" id="odaq-kanalar">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Servere</div>
+                <div class="verdi" id="odaq-servere">-</div>
+            </div>
+        </div>
+        <div class="info-grid" style="margin-top:0.5rem;">
+            <div class="info-boks">
+                <div class="label">OPC-UA</div>
+                <div class="verdi" style="font-size:0.75rem;" id="odaq-opcua">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Native Streaming</div>
+                <div class="verdi" style="font-size:0.75rem;" id="odaq-ns">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">WebSocket</div>
+                <div class="verdi" style="font-size:0.75rem;" id="odaq-ws">-</div>
+            </div>
+        </div>
+        <div class="cmd-boks" style="margin-top:0.75rem;">
+            <code id="odaq-dewesoftx-addr">-</code>
+            <button class="btn-kopier" onclick="kopierTekst('odaq-dewesoftx-addr')">Kopier</button>
+        </div>
+        <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.5rem;">
+            DewesoftX: Settings &gt; Devices &gt; Dewesoft NET &gt; Manually add &gt; skriv inn adressa over.
+            <br>Fase 1: Referanse-enhet med simulerte kanalar.
+        </p>
     </div>
 
     <div class="kort">
@@ -1677,12 +1735,38 @@ async function siriusRekoble() {
     hentSiriusStatus();
 }
 
+async function hentOpendaqStatus() {
+    try {
+        const res = await fetch('/api/opendaq/status');
+        const s = await res.json();
+        const kort = document.getElementById('opendaq-bro-kort');
+        if (!s.tilgjengelig && !s.aktiv) { kort.style.display='none'; return; }
+        kort.style.display='block';
+        const st = document.getElementById('odaq-status');
+        st.textContent = s.aktiv ? 'Aktiv' : 'Inaktiv';
+        st.style.color = s.aktiv ? '#10b981' : '#ef4444';
+        document.getElementById('odaq-enhet').textContent = s.enhet_namn || '-';
+        document.getElementById('odaq-kanalar').textContent =
+            s.kanalar && s.kanalar.length > 0 ? s.kanalar.length : '-';
+        document.getElementById('odaq-servere').textContent =
+            s.servere && s.servere.length > 0 ? s.servere.length : '-';
+        const ip = s.ip || '-';
+        const p = s.porter || {};
+        document.getElementById('odaq-opcua').textContent = ip + ':' + (p.opcua || 4840);
+        document.getElementById('odaq-ns').textContent = ip + ':' + (p.native_streaming || 7420);
+        document.getElementById('odaq-ws').textContent = ip + ':' + (p.websocket || 7414);
+        document.getElementById('odaq-dewesoftx-addr').textContent = ip;
+    } catch(e) {}
+}
+
 hentData();
 hentUsbipStatus();
 hentSiriusStatus();
+hentOpendaqStatus();
 setInterval(hentData, 5000);
 setInterval(hentUsbipStatus, 5000);
 setInterval(hentSiriusStatus, 3000);
+setInterval(hentOpendaqStatus, 5000);
 </script>
 
 </body>
