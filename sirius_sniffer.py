@@ -280,51 +280,96 @@ def fang_med_cat(bus_num, varighet_sek=30):
 def parse_usbmon_linje(linje):
     """Parse en usbmon tekst-linje.
 
-    Format (tekst-API):
-      URB_TAG TIMESTAMP EVENT_TYPE ADDRESS:BUS_ID EP_NUM STATUS LENGTH DATA_TAG = DATA
+    Format (tekst-API /sys/kernel/debug/usb/usbmon/Xt):
+      URB_TAG TIMESTAMP EVENT_TYPE PIPE_INFO REST...
 
-    Eksempel:
-      ffff8880 3060475 S Ci:3:002:0 s 80 06 0100 0000 0012 18 <
-      ffff8880 3060480 C Ci:3:002:0 0 18 = 12010002 00000040 ed1c0210 ...
+    PIPE_INFO format: TYPE:BUS:DEV:EP
+      TYPE = Ci/Co (Control), Bi/Bo (Bulk), Ii/Io (Interrupt), Zi/Zo (Isoch)
+      BUS  = bus-nummer
+      DEV  = device-nummer (kan vaere 1-3 siffer)
+      EP   = endepunkt-nummer
+
+    Eksempler:
+      ffff8880 3060475 S Ci:3:003:0 s 80 06 0100 0000 0012 18 <
+      ffff8880 3060480 C Ci:3:003:0 0 18 = 12010002 00000040 ed1c0210
+      d5ea89c0 3895920� S Bo:3:003:1 -115 512 = 01000000 00000000...
+      d5ea89c0 3895921  C Bi:3:003:1 0 512 = 020b0101 ffffffff...
     """
-    if not linje:
+    if not linje or len(linje) < 10:
         return None
 
     deler = linje.split()
-    if len(deler) < 5:
+    if len(deler) < 4:
         return None
 
     try:
         urb_tag = deler[0]
         timestamp = deler[1]
         event_type = deler[2]  # S=Submit, C=Complete, E=Error
-        adresse = deler[3]     # Type:Bus:Dev:EP
+        pipe_info = deler[3]   # Type:Bus:Dev:EP
 
         pakke = {
             "tid": timestamp,
             "hendelse": event_type,
-            "adresse": adresse,
+            "pipe": pipe_info,
             "raa": linje,
         }
 
-        # Parse adresse
-        if ':' in adresse:
-            addr_deler = adresse.split(':')
+        # Parse pipe_info (Type:Bus:Dev:EP)
+        if ':' in pipe_info:
+            addr_deler = pipe_info.split(':')
             if len(addr_deler) >= 4:
-                pakke["transfer_type"] = addr_deler[0]  # Ci, Co, Bi, Bo, Ii, Io
-                pakke["bus"] = addr_deler[1]
-                pakke["dev"] = addr_deler[2]
-                pakke["ep"] = addr_deler[3]
+                pakke["transfer_type"] = addr_deler[0]  # Bi, Bo, Ci, Co, etc.
+                pakke["bus"] = int(addr_deler[1])
+                pakke["dev"] = int(addr_deler[2])       # Konverter til int (003 -> 3)
+                pakke["ep"] = int(addr_deler[3])
+
+                # Retning fra transfer_type
+                if len(addr_deler[0]) >= 2:
+                    pakke["retning"] = "IN" if addr_deler[0][-1] == 'i' else "OUT"
+                    pakke["type_kort"] = addr_deler[0][0]  # B=Bulk, C=Control, etc.
+
+        # Parse resten avhengig av hendelsestype
+        rest = deler[4:]
+
+        if event_type == 'S':  # Submit
+            # For Submit: status er ofte '-115' (EINPROGRESS), deretter lengde
+            # S Bi:3:003:2 -115 512 <
+            # S Bo:3:003:1 -115 512 = DATA...
+            # S Co:3:003:0 s 80 06 0100 0000 0012 18 <
+            if rest:
+                # Sjekk for kontroll-setup (starter med 's')
+                if rest[0] == 's' and len(rest) >= 7:
+                    pakke["setup"] = ' '.join(rest[1:7])
+
+        elif event_type == 'C':  # Complete
+            # For Complete: foerste er status (0=OK), deretter lengde
+            # C Bi:3:003:2 0 512 = DATA...
+            if rest:
+                try:
+                    pakke["status"] = int(rest[0])
+                except ValueError:
+                    pakke["status_str"] = rest[0]
+
+                if len(rest) > 1:
+                    try:
+                        pakke["lengde"] = int(rest[1])
+                    except ValueError:
+                        pass
 
         # Finn data (etter '=' tegn)
         if '=' in linje:
             data_idx = linje.index('=') + 1
-            data_hex = linje[data_idx:].strip().replace(' ', '')
+            data_str = linje[data_idx:].strip()
+            # usbmon bruker mellomrom-separerte 32-bit words
+            data_hex = data_str.replace(' ', '')
             pakke["data"] = data_hex
+            pakke["data_lengde"] = len(data_hex) // 2
 
         return pakke
 
-    except Exception:
+    except Exception as e:
+        log.debug(f"Parse-feil for '{linje[:80]}': {e}")
         return None
 
 
@@ -338,58 +383,119 @@ def analyser_fangst(pakker, dev_num=None):
     print(f"  Trafikkanalyse ({len(pakker)} pakker)")
     print(f"{'='*70}")
 
+    # Vis alle enheter i fangsten
+    enheter = Counter()
+    for p in pakker:
+        dev = p.get("dev", "?")
+        enheter[dev] += 1
+    print(f"  Enheter i fangsten: {dict(enheter)}")
+
     # Filtrer paa SIRIUS device_num hvis kjent
-    if dev_num:
-        sirius_pakker = [p for p in pakker if p.get("dev") == str(dev_num)]
+    if dev_num is not None:
+        sirius_pakker = [p for p in pakker if p.get("dev") == dev_num]
         print(f"  SIRIUS-pakker (dev={dev_num}): {len(sirius_pakker)}")
     else:
         sirius_pakker = pakker
 
     if not sirius_pakker:
         print("  Ingen SIRIUS-pakker funnet")
-        # Vis alle enheter
-        enheter = Counter()
-        for p in pakker:
-            dev = p.get("dev", "?")
-            enheter[dev] += 1
-        print(f"  Enheter i fangsten: {dict(enheter)}")
+        # Vis de foerste 10 raa-linjene for feilsoeking
+        print(f"\n  Foerste 10 pakker (raa):")
+        for p in pakker[:10]:
+            raa = p.get("raa", "?")
+            print(f"    {raa[:100]}")
         return
 
-    # Grupper etter endepunkt
+    # Grupper etter endepunkt og retning
     ep_stats = defaultdict(lambda: {"count": 0, "bytes": 0, "eksempler": []})
 
     for p in sirius_pakker:
         ep = p.get("ep", "?")
-        transfer = p.get("transfer_type", "?")
+        retning = p.get("retning", "?")
         hendelse = p.get("hendelse", "?")
+        transfer = p.get("type_kort", "?")
         data = p.get("data", "")
 
-        noekkel = f"{transfer}:EP{ep}"
+        noekkel = f"EP{ep} {retning} ({transfer})"
         ep_stats[noekkel]["count"] += 1
-        ep_stats[noekkel]["bytes"] += len(data) // 2 if data else 0
+        ep_stats[noekkel]["bytes"] += p.get("data_lengde", 0)
 
-        if len(ep_stats[noekkel]["eksempler"]) < 10:
+        if len(ep_stats[noekkel]["eksempler"]) < 20:
             ep_stats[noekkel]["eksempler"].append({
                 "hendelse": hendelse,
-                "data": data[:64] if data else "",
-                "lengde": len(data) // 2 if data else 0,
+                "data": data[:80] if data else "",
+                "data_lengde": p.get("data_lengde", 0),
+                "status": p.get("status", ""),
             })
 
     print(f"\n  Per endepunkt:")
-    print(f"  {'Endepunkt':<20s} {'Pakker':>8s} {'Bytes':>10s}")
-    print(f"  {'-'*42}")
+    print(f"  {'Endepunkt':<25s} {'Pakker':>8s} {'Bytes':>10s}")
+    print(f"  {'-'*47}")
 
     for ep, stats in sorted(ep_stats.items()):
-        print(f"  {ep:<20s} {stats['count']:>8d} {stats['bytes']:>10d}")
+        print(f"  {ep:<25s} {stats['count']:>8d} {stats['bytes']:>10d}")
 
-    # Vis eksempler per endepunkt
+    # Vis data-eksempler per endepunkt (fokus paa kommandoer)
     for ep, stats in sorted(ep_stats.items()):
-        if stats["eksempler"]:
-            print(f"\n  {ep} - Eksempler:")
-            for ex in stats["eksempler"][:5]:
+        if not stats["eksempler"]:
+            continue
+
+        # Vis eksempler - kun de med data
+        data_eksempler = [e for e in stats["eksempler"] if e["data"]]
+        if data_eksempler:
+            print(f"\n  {ep} - Data ({len(data_eksempler)} pakker med innhold):")
+            # Vis unike data-moenstre
+            unike = {}
+            for ex in data_eksempler:
+                foerste = ex["data"][:16]  # Foerste 8 bytes
+                if foerste not in unike:
+                    unike[foerste] = ex
+            for foerste, ex in list(unike.items())[:10]:
                 h = ex["hendelse"]
-                d = ex["data"][:48] if ex["data"] else "(tom)"
-                print(f"    [{h}] {ex['lengde']:>4d}B: {d}")
+                d = ex["data"][:64]
+                print(f"    [{h}] {ex['data_lengde']:>4d}B: {d}")
+
+    # Spesiell analyse: Finn kommando-svar par (EP1 OUT -> EP1 IN)
+    print(f"\n{'='*70}")
+    print(f"  Kommando-svar analyse (EP1)")
+    print(f"{'='*70}")
+
+    ep1_out = [p for p in sirius_pakker
+               if p.get("ep") == 1 and p.get("retning") == "OUT"
+               and p.get("hendelse") == "S" and p.get("data")]
+    ep1_in = [p for p in sirius_pakker
+              if p.get("ep") == 1 and p.get("retning") == "IN"
+              and p.get("hendelse") == "C" and p.get("data")]
+
+    print(f"  EP1 OUT (kommandoer sendt):  {len(ep1_out)}")
+    print(f"  EP1 IN (svar mottatt):       {len(ep1_in)}")
+
+    if ep1_out:
+        print(f"\n  Kommandoer sendt av DewesoftX:")
+        for i, p in enumerate(ep1_out[:30]):
+            data = p.get("data", "")
+            # Vis foerste bytes som er mest interessante
+            print(f"    [{i:3d}] {data[:64]}")
+
+    if ep1_in:
+        print(f"\n  Svar fra SIRIUS:")
+        unike_svar = {}
+        for p in ep1_in:
+            data = p.get("data", "")
+            foerste = data[:8]
+            if foerste not in unike_svar:
+                unike_svar[foerste] = data
+        for foerste, data in list(unike_svar.items())[:15]:
+            print(f"    {data[:64]}")
+
+    # EP8 OUT analyse (data til enhet)
+    ep8_out = [p for p in sirius_pakker
+               if p.get("ep") == 8 and p.get("retning") == "OUT"
+               and p.get("data")]
+    if ep8_out:
+        print(f"\n  EP8 OUT (data til SIRIUS): {len(ep8_out)} pakker")
+        for p in ep8_out[:10]:
+            print(f"    {p.get('data', '')[:64]}")
 
     return ep_stats
 
@@ -404,45 +510,29 @@ def analyser_raa_linjer(linjer, dev_filter=None):
     print(f"  Raa usbmon-analyse ({len(linjer)} linjer)")
     print(f"{'='*70}")
 
-    # Grupper og tell
-    hendelser = Counter()
-    endepunkter = Counter()
-    data_pakker = []
-
+    # Parse alle linjer med den forbedrede parseren
+    pakker = []
+    feilet = 0
     for linje in linjer:
-        deler = linje.split()
-        if len(deler) < 4:
-            continue
+        p = parse_usbmon_linje(linje)
+        if p:
+            pakker.append(p)
+        else:
+            feilet += 1
 
-        hendelse = deler[2] if len(deler) > 2 else "?"
-        adresse = deler[3] if len(deler) > 3 else "?"
+    print(f"  Parset: {len(pakker)} OK, {feilet} feilet")
 
-        hendelser[hendelse] += 1
-        endepunkter[adresse] += 1
+    if pakker:
+        # Vis foerste 3 raa linjer for format-verifisering
+        print(f"\n  Foerste 3 raa linjer:")
+        for linje in linjer[:3]:
+            print(f"    {linje[:120]}")
 
-        # Filtrer paa device
-        if dev_filter and f":{dev_filter}:" not in adresse:
-            continue
+        # Bruk den forbedrede analysatoren
+        dev_num = int(dev_filter) if dev_filter else None
+        return analyser_fangst(pakker, dev_num)
 
-        # Samle data-pakker
-        if '=' in linje:
-            data_pakker.append(linje)
-
-    print(f"\n  Hendelsestyper: {dict(hendelser)}")
-    print(f"\n  Topp 10 endepunkter:")
-    for addr, count in endepunkter.most_common(10):
-        print(f"    {addr}: {count}")
-
-    if data_pakker:
-        print(f"\n  Data-pakker med innhold ({len(data_pakker)} stk):")
-        for p in data_pakker[:20]:
-            # Begrens visning
-            if len(p) > 120:
-                print(f"    {p[:120]}...")
-            else:
-                print(f"    {p}")
-
-    return data_pakker
+    return None
 
 
 def main():

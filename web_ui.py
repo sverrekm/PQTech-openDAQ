@@ -13,8 +13,9 @@ import os
 import subprocess
 import socket
 import threading
+import glob as glob_mod
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 import usbip_manager
 
@@ -320,6 +321,33 @@ def api_probe_sniffer():
 
     threading.Thread(target=_kjor, daemon=True).start()
     return jsonify({"suksess": True, "melding": f"Sniffer startet ({varighet}s)"})
+
+
+@app.route("/api/probe/rapporter")
+def api_probe_rapporter():
+    """List tilgjengelige rapportfiler."""
+    rapporter = []
+    for moenster in ["sirius_*.json", "sirius_*.csv", "sirius_*.npz"]:
+        for fil in glob_mod.glob(os.path.join("/app", moenster)):
+            rapporter.append({
+                "filnavn": os.path.basename(fil),
+                "storrelse": os.path.getsize(fil),
+                "endret": os.path.getmtime(fil),
+            })
+    rapporter.sort(key=lambda r: r["endret"], reverse=True)
+    return jsonify({"rapporter": rapporter})
+
+
+@app.route("/api/probe/last-ned/<filnavn>")
+def api_probe_last_ned(filnavn):
+    """Last ned en rapportfil."""
+    # Sikkerhet: kun filer i /app som starter med sirius_
+    if not filnavn.startswith("sirius_") or ".." in filnavn:
+        return jsonify({"feil": "Ugyldig filnavn"}), 400
+    fil_path = os.path.join("/app", filnavn)
+    if not os.path.isfile(fil_path):
+        return jsonify({"feil": "Fil ikke funnet"}), 404
+    return send_file(fil_path, as_attachment=True)
 
 
 # --- USB/IP API ---
@@ -713,53 +741,60 @@ body {
     </div>
 
     <div class="kort" id="probe-kort">
-        <h2>USB Probe &mdash; Direkte SIRIUS-kommunikasjon</h2>
-        <p style="color:#94a3b8; font-size:0.85rem; margin-bottom:0.75rem;">
-            Test direkte USB-kommunikasjon med SIRIUS via libusb/pyusb.
-            Proober FX2 (Cypress) kommandoprotokoll og leser USB-deskriptorer.
-        </p>
-        <div class="usbip-knapper">
-            <button class="btn btn-blaa" id="btn-probe" onclick="kjorProbe()">
-                USB Deskriptorer
-            </button>
-            <button class="btn btn-gronn" id="btn-proto-scan" onclick="kjorProtokoll('scan')">
-                Skann kommandoer
-            </button>
-            <button class="btn btn-gronn" id="btn-proto-stream" onclick="kjorProtokoll('stream')">
-                Les datastroemmer
-            </button>
-            <button class="btn btn-gronn" id="btn-proto-full" onclick="kjorProtokoll('full')">
-                Full analyse
-            </button>
-            <button class="btn btn-blaa" id="btn-dekod-info" onclick="kjorDekoder('info')">
-                Dekod enhetsinfo
-            </button>
-            <button class="btn btn-blaa" id="btn-dekod-stream" onclick="kjorDekoder('stream')">
-                Start stroemming
-            </button>
-            <button class="btn btn-gronn" id="btn-adc" onclick="kjorAdc(5)" style="background:#1e3a5f;color:#fbbf24;font-weight:600;">
-                Les ADC (5s)
-            </button>
-            <button class="btn btn-gronn" id="btn-adc-lagre" onclick="kjorAdc(10, true)" style="background:#065f46;color:#fbbf24;font-weight:600;">
-                Les + Lagre (10s)
-            </button>
-        </div>
-        <div style="margin-top:0.75rem; padding:0.5rem 0.75rem; background:#1e1b4b; border:1px solid #4338ca;
-             border-radius:0.5rem; display:flex; align-items:center; gap:0.75rem;">
+        <h2>SIRIUS USB-analyse</h2>
+
+        <div style="padding:0.5rem 0.75rem; background:#1e1b4b; border:1px solid #4338ca;
+             border-radius:0.5rem; display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem;">
             <button class="btn" id="btn-sniffer" onclick="kjorSniffer(15)"
                     style="background:#4338ca;color:#e0e7ff;font-weight:600;white-space:nowrap;">
                 Fang DewesoftX-trafikk (15s)
             </button>
             <span style="color:#a5b4fc; font-size:0.8rem;">
-                Passiv fangst - forstyrrer IKKE USB/IP eller DewesoftX.
-                Bruk mens DewesoftX er tilkoblet for aa kartlegge protokollen.
+                Passiv fangst via usbmon &mdash; forstyrrer IKKE USB/IP eller DewesoftX.
             </span>
         </div>
+
+        <details style="margin-bottom:0.75rem;">
+            <summary style="cursor:pointer; color:#94a3b8; font-size:0.85rem;">
+                Direkte USB-tester (stopper USB/IP-deling!)
+            </summary>
+            <p style="color:#fca5a5; font-size:0.8rem; margin:0.5rem 0;">
+                Disse verktoyene tar kontroll over SIRIUS USB og avbryter USB/IP.
+                DewesoftX mister tilkoblingen. Bruk kun naar USB/IP er stoppet.
+            </p>
+            <div class="usbip-knapper">
+                <button class="btn btn-blaa" id="btn-probe" onclick="kjorProbe()">
+                    USB Deskriptorer
+                </button>
+                <button class="btn btn-blaa" id="btn-proto-scan" onclick="kjorProtokoll('scan')">
+                    Skann kommandoer
+                </button>
+                <button class="btn btn-blaa" id="btn-dekod-info" onclick="kjorDekoder('info')">
+                    Dekod enhetsinfo
+                </button>
+                <button class="btn" id="btn-adc" onclick="kjorAdc(5)"
+                        style="background:#1e3a5f;color:#fbbf24;font-weight:600;">
+                    Les ADC (5s)
+                </button>
+                <button class="btn" id="btn-adc-lagre" onclick="kjorAdc(10, true)"
+                        style="background:#065f46;color:#fbbf24;font-weight:600;">
+                    Les + Lagre (10s)
+                </button>
+            </div>
+        </details>
+
         <div id="probe-status" class="melding" style="display:none;"></div>
         <pre id="probe-output" style="display:none; background:#0f172a; border:1px solid #334155;
              border-radius:0.5rem; padding:1rem; margin-top:0.75rem; font-size:0.75rem;
              color:#a5b4fc; max-height:400px; overflow-y:auto; white-space:pre-wrap;
              font-family:'Consolas','Monaco',monospace;"></pre>
+
+        <div id="rapporter-seksjon" style="margin-top:0.75rem;">
+            <button class="btn btn-blaa" onclick="hentRapporter()" style="font-size:0.8rem;">
+                Vis rapporter
+            </button>
+            <ul id="rapport-liste" class="usb-liste" style="margin-top:0.5rem;"></ul>
+        </div>
     </div>
 
     <div class="kort" id="usbip-kort">
@@ -1122,8 +1157,8 @@ async function kjorProbe() {
 async function kjorSniffer(varighet) {
     const statusEl = document.getElementById('probe-status');
     const outputEl = document.getElementById('probe-output');
-    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full',
-                      'btn-dekod-info', 'btn-dekod-stream', 'btn-adc', 'btn-adc-lagre', 'btn-sniffer'];
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-dekod-info',
+                      'btn-adc', 'btn-adc-lagre', 'btn-sniffer'];
     alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
     statusEl.textContent = 'Passiv USB-fangst (' + varighet + 's) - DewesoftX forstyrres IKKE...';
     statusEl.className = 'melding melding-ok';
@@ -1173,8 +1208,8 @@ async function kjorSniffer(varighet) {
 async function kjorAdc(varighet, lagre) {
     const statusEl = document.getElementById('probe-status');
     const outputEl = document.getElementById('probe-output');
-    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full',
-                      'btn-dekod-info', 'btn-dekod-stream', 'btn-adc', 'btn-adc-lagre'];
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-dekod-info',
+                      'btn-adc', 'btn-adc-lagre', 'btn-sniffer'];
     alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
     statusEl.textContent = 'Leser ADC-data (' + varighet + 's)...';
     statusEl.className = 'melding melding-ok';
@@ -1224,8 +1259,8 @@ async function kjorAdc(varighet, lagre) {
 async function kjorDekoder(modus) {
     const statusEl = document.getElementById('probe-status');
     const outputEl = document.getElementById('probe-output');
-    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full',
-                      'btn-dekod-info', 'btn-dekod-stream'];
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-dekod-info',
+                      'btn-adc', 'btn-adc-lagre', 'btn-sniffer'];
     alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
     statusEl.textContent = 'Starter dekoder (' + modus + ')...';
     statusEl.className = 'melding melding-ok';
@@ -1276,7 +1311,8 @@ async function kjorProtokoll(modus) {
     const btn = document.getElementById('btn-proto-' + modus);
     const statusEl = document.getElementById('probe-status');
     const outputEl = document.getElementById('probe-output');
-    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full'];
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-dekod-info',
+                      'btn-adc', 'btn-adc-lagre', 'btn-sniffer'];
     alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
     btn.textContent = 'Kjorer...';
     statusEl.textContent = 'Starter protokoll-skanning (' + modus + ')...';
@@ -1326,6 +1362,26 @@ async function kjorProtokoll(modus) {
             }
         } catch (e) {}
     }, 1500);
+}
+
+async function hentRapporter() {
+    const liste = document.getElementById('rapport-liste');
+    liste.innerHTML = '<li>Henter...</li>';
+    try {
+        const res = await fetch('/api/probe/rapporter');
+        const data = await res.json();
+        if (data.rapporter && data.rapporter.length > 0) {
+            liste.innerHTML = data.rapporter.map(r => {
+                const kb = (r.storrelse / 1024).toFixed(1);
+                return `<li><a href="/api/probe/last-ned/${r.filnavn}" style="color:#93c5fd;"
+                    download>${r.filnavn}</a> (${kb} KB)</li>`;
+            }).join('');
+        } else {
+            liste.innerHTML = '<li style="color:#64748b;">Ingen rapporter</li>';
+        }
+    } catch (e) {
+        liste.innerHTML = '<li style="color:#fca5a5;">Feil</li>';
+    }
 }
 
 hentData();
