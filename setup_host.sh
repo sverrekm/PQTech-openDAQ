@@ -77,41 +77,36 @@ echo ""
 echo "[4/5] Laster kernel-moduler..."
 modprobe usbip-core
 modprobe usbip-host
+modprobe usbmon
 echo "      usbip-core  OK"
 echo "      usbip-host  OK"
+echo "      usbmon      OK"
 
 # 5. Gjor modulene permanente (last ved oppstart)
 echo ""
 echo "[5/5] Konfigurerer automatisk modullasting..."
 MODULES_FILE="/etc/modules"
-if ! grep -q "^usbip-core" "$MODULES_FILE" 2>/dev/null; then
-    echo "usbip-core" >> "$MODULES_FILE"
-    echo "      Lagt til usbip-core i $MODULES_FILE"
-else
-    echo "      usbip-core allerede i $MODULES_FILE"
-fi
-if ! grep -q "^usbip-host" "$MODULES_FILE" 2>/dev/null; then
-    echo "usbip-host" >> "$MODULES_FILE"
-    echo "      Lagt til usbip-host i $MODULES_FILE"
-else
-    echo "      usbip-host allerede i $MODULES_FILE"
-fi
+for MODUL in usbip-core usbip-host usbmon; do
+    if ! grep -q "^${MODUL}" "$MODULES_FILE" 2>/dev/null; then
+        echo "$MODUL" >> "$MODULES_FILE"
+        echo "      Lagt til $MODUL i $MODULES_FILE"
+    else
+        echo "      $MODUL allerede i $MODULES_FILE"
+    fi
+done
 
 # Verifiser
 echo ""
 echo "Verifiserer..."
 
 # Kernel-moduler
-if lsmod | grep -q usbip_core; then
-    echo "  usbip_core:    lastet"
-else
-    echo "  [ADVARSEL] usbip_core ikke lastet"
-fi
-if lsmod | grep -q usbip_host; then
-    echo "  usbip_host:    lastet"
-else
-    echo "  [ADVARSEL] usbip_host ikke lastet"
-fi
+for MODUL in usbip_core usbip_host usbmon; do
+    if lsmod | grep -q "$MODUL"; then
+        echo "  ${MODUL}:$(printf '%*s' $((14 - ${#MODUL})) '')lastet"
+    else
+        echo "  [ADVARSEL] $MODUL ikke lastet"
+    fi
+done
 
 # udev-regler
 if [ -f /etc/udev/rules.d/99-dewesoft.rules ]; then

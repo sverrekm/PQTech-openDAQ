@@ -34,6 +34,17 @@ echo "  Maaling:    hvert ${MAALE_INTERVALL}s, varighet ${MAALE_VARIGHET}s"
 echo "  Utmappe:    /data/maalinger"
 echo ""
 
+# Last usbmon for passiv USB-trafikkfangst (krever privileged mode)
+if [ ! -e /sys/kernel/debug/usb/usbmon ]; then
+    echo "Laster usbmon kernel-modul..."
+    modprobe usbmon 2>/dev/null && echo "  usbmon lastet OK" || echo "  usbmon ikke tilgjengelig (kjor 'sudo modprobe usbmon' paa hosten)"
+    # Monter debugfs hvis noedvendig
+    if [ ! -e /sys/kernel/debug/usb ]; then
+        mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+    fi
+fi
+echo ""
+
 # Bygg openDAQ server-kommando
 # Bruker python3 -m fordi openDAQ ModuleManager trenger '' i sys.path
 # for aa finne .module.so-filer i CWD

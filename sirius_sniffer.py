@@ -92,23 +92,57 @@ def finn_sirius_businfo():
 
 
 def sjekk_usbmon():
-    """Sjekk om usbmon er tilgjengelig."""
-    # Proov aa laste modulen
-    if not os.path.exists("/sys/kernel/debug/usb/usbmon"):
-        try:
-            subprocess.run(["modprobe", "usbmon"], capture_output=True, timeout=5)
-        except Exception:
-            pass
-
-    # Monter debugfs hvis noedvendig
+    """Sjekk om usbmon er tilgjengelig, proov aa aktivere hvis ikke."""
+    # Steg 1: Monter debugfs hvis det mangler
     if not os.path.exists("/sys/kernel/debug/usb"):
+        log.info("Monterer debugfs...")
         try:
             subprocess.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"],
                           capture_output=True, timeout=5)
+            log.info("  debugfs montert")
+        except Exception as e:
+            log.debug(f"  debugfs-montering feilet: {e}")
+
+    # Steg 2: Last usbmon kernel-modul
+    if not os.path.exists("/sys/kernel/debug/usb/usbmon"):
+        log.info("Laster usbmon kernel-modul...")
+        try:
+            r = subprocess.run(["modprobe", "usbmon"],
+                              capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                log.info("  usbmon lastet")
+            else:
+                log.warning(f"  modprobe usbmon feilet: {r.stderr.strip()}")
+        except FileNotFoundError:
+            # modprobe finnes ikke, proov insmod
+            log.debug("modprobe ikke funnet, proover insmod...")
+            # Finn modulen
+            try:
+                r = subprocess.run(["find", "/lib/modules", "-name", "usbmon.ko*"],
+                                  capture_output=True, text=True, timeout=5)
+                if r.stdout.strip():
+                    mod_path = r.stdout.strip().split('\n')[0]
+                    subprocess.run(["insmod", mod_path],
+                                  capture_output=True, timeout=5)
+                    log.info(f"  usbmon lastet via insmod: {mod_path}")
+            except Exception:
+                pass
+        except Exception as e:
+            log.debug(f"  usbmon-lasting feilet: {e}")
+
+    # Steg 3: Verifiser
+    tilgjengelig = os.path.exists("/sys/kernel/debug/usb/usbmon")
+
+    if tilgjengelig:
+        # List tilgjengelige busser
+        try:
+            busser = [f for f in os.listdir("/sys/kernel/debug/usb/usbmon")
+                     if f.endswith('t') or f.endswith('u')]
+            log.info(f"  usbmon busser: {busser}")
         except Exception:
             pass
 
-    return os.path.exists("/sys/kernel/debug/usb/usbmon")
+    return tilgjengelig
 
 
 def fang_med_usbmon(bus_num, varighet_sek=30, dev_num=None):
