@@ -62,7 +62,10 @@ OPENDAQ_IP="${OPENDAQ_IP:-$(hostname -I | awk '{print $1}')}"
 if [ -n "$OPENDAQ_IP" ]; then
     CURRENT_HOST=$(hostname)
     if grep -q "127\.0.*${CURRENT_HOST}" /etc/hosts; then
-        sed -i "s/127\.0[.0-9]*[[:space:]]*${CURRENT_HOST}/${OPENDAQ_IP} ${CURRENT_HOST}/" /etc/hosts
+        # sed -i feiler paa Docker bind-mount, bruk cp+cat i staden
+        sed "s/127\.0[.0-9]*[[:space:]]*${CURRENT_HOST}/${OPENDAQ_IP} ${CURRENT_HOST}/" /etc/hosts > /tmp/hosts.fixed
+        cat /tmp/hosts.fixed > /etc/hosts
+        rm -f /tmp/hosts.fixed
         echo "  OPC-UA hostname: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
     fi
 fi
