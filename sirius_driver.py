@@ -4,7 +4,8 @@ SIRIUS Hoeynivaa-driver (Lag 2)
 =================================
 Brukervenlig driver med tilkobling, initialisering, konfigurasjon og streaming.
 
-Bygger paa sirius_protokoll_impl.py for all USB-kommunikasjon.
+Initialiserings-sekvensen er basert paa reverse-engineering av DewesoftX sin
+USB-trafikk, fanget med usbmon paa Raspberry Pi.
 
 Bruk:
     from sirius_driver import SiriusDriver
@@ -20,7 +21,6 @@ Bruk:
     driver.koble_fra()
 """
 
-import struct
 import time
 import threading
 import logging
@@ -39,9 +39,10 @@ from sirius_protokoll_impl import (
     SiriusProtokoll,
     DEWESOFT_VID, SIRIUS_PID,
     EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN,
-    ALLE_SLOTTER, SLOT_0,
-    REG_SLOT_INFO, REG_ADC_KONFIG, REG_KALIBRERING,
-    OP_LES, OP_SKRIV,
+    ALLE_SLOTTER,
+    REG_CMD, REG_COMMIT, REG_SAMPLE_CFG,
+    REG_TRIG_33, REG_TRIG_08, REG_TRIG_0B, REG_TRIG_0A,
+    ADC_KANALER,
     SiriusFeil, SiriusUSBFeil, SiriusPollTimeout, SiriusIkkeFunnet,
     TIMEOUT_DATA,
 )
@@ -53,40 +54,43 @@ log = logging.getLogger('sirius_driver')
 
 @dataclass
 class SlotInfo:
-    """Informasjon om en enkelt slot (analog inngangsmodul)."""
+    """Informasjon om ein enkelt slot (analog inngangsmodul)."""
     slot_id: int = 0
     kanal_nummer: int = 0
+    slot_type: int = 0        # 0x04=analog, 0x06=digital
     produsent: str = ""
     maskinvare_del: str = ""
     firmware_versjon: str = ""
     aktiv: bool = False
-    adc_konfig: bytes = field(default_factory=bytes)
-    kalibrering: bytes = field(default_factory=bytes)
+    kalibrering_raa: bytes = field(default_factory=bytes)
 
 
 @dataclass
 class EnhetsInfo:
-    """Samlet enhetsinformasjon."""
+    """Samla einingsinformasjon."""
     enhetsstreng: str = ""        # "DEWEUSB7"
     serienummer: str = ""
-    enhetstype: bytes = field(default_factory=bytes)
+    fw_versjon: bytes = field(default_factory=bytes)
+    slot_tilstedevaerelse: bytes = field(default_factory=bytes)
+    slot_typer: bytes = field(default_factory=bytes)
     antall_slotter: int = 4
     slotter: list = field(default_factory=list)
 
 
 @dataclass
 class MaaleKonfig:
-    """Konfigurasjon for en maaling."""
+    """Konfigurasjon for ei maaling."""
     sample_rate: int = 1000
-    aktive_kanaler: list = field(default_factory=lambda: [0, 1, 2, 3])
+    aktive_kanaler: list = field(default_factory=lambda: list(range(ADC_KANALER)))
     varighet_sek: float = 5.0
 
 
 class SiriusDriver:
     """
-    Hoeynivaa driver for Dewesoft SIRIUS.
+    Hoeynivaa-driver for Dewesoft SIRIUS.
 
     Haandterer tilkobling, initialisering, konfigurasjon og streaming.
+    Initialiserings-sekvensen repliserer DewesoftX sin protokoll.
     """
 
     def __init__(self):
@@ -139,31 +143,31 @@ class SiriusDriver:
         Finn og koble til SIRIUS via USB.
 
         Raises:
-            SiriusIkkeFunnet: Hvis SIRIUS ikke finnes paa USB
+            SiriusIkkeFunnet: Hvis SIRIUS ikkje finst paa USB
             SiriusUSBFeil: Ved USB-feil
         """
         if usb is None:
-            raise SiriusFeil("pyusb er ikke installert (pip install pyusb)")
+            raise SiriusFeil("pyusb er ikkje installert (pip install pyusb)")
 
         log.info(f"Soeker etter SIRIUS (VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})...")
 
         dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
         if dev is None:
             raise SiriusIkkeFunnet(
-                f"SIRIUS ikke funnet paa USB "
+                f"SIRIUS ikkje funnet paa USB "
                 f"(VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})"
             )
 
         log.info(f"SIRIUS funnet: Bus {dev.bus}, Adresse {dev.address}")
 
-        # Reset USB-enhet for aa rydde opp etter forrige sesjon
+        # Reset USB-enhet for aa rydde opp
         try:
             dev.reset()
             log.debug("USB reset OK")
         except usb.core.USBError as e:
-            log.debug(f"USB reset feilet (ikke kritisk): {e}")
+            log.debug(f"USB reset feilet (ikkje kritisk): {e}")
 
-        # Frigjor kernel-driver paa interface 0 (same moenster som fungerende skript)
+        # Frigjor kernel-driver paa interface 0
         try:
             if dev.is_kernel_driver_active(0):
                 dev.detach_kernel_driver(0)
@@ -178,7 +182,7 @@ class SiriusDriver:
         except usb.core.USBError as e:
             raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
-        # Klaim interface eksplisitt
+        # Klaim interface
         try:
             usb.util.claim_interface(dev, 0)
             log.debug("Interface 0 klaimet")
@@ -190,10 +194,10 @@ class SiriusDriver:
         self._tilkoblet = True
         self._rekoble_forsok = 0
 
-        # Kjoer initialisering
+        # Kjoer full initialisering (repliserer DewesoftX)
         self._initialiser()
 
-        log.info("SIRIUS tilkoblet og initialisert")
+        log.info("SIRIUS tilkobla og initialisert")
 
     def koble_fra(self):
         """Stopp streaming og frigjor USB-enhet."""
@@ -214,19 +218,14 @@ class SiriusDriver:
             self._dev = None
             self._proto = None
 
-        log.info("SIRIUS frakoblet")
+        log.info("SIRIUS frakobla")
 
     def er_tilkoblet(self) -> bool:
-        """Sjekk om enheten er tilkoblet (kun tilstandssjekk, ingen USB I/O)."""
+        """Sjekk om eininga er tilkobla (kun tilstandssjekk, ingen USB I/O)."""
         return self._tilkoblet and self._dev is not None
 
     def rekoble(self) -> bool:
-        """
-        Proev aa koble til paa nytt.
-
-        Returns:
-            True ved vellykket rekonnektering
-        """
+        """Proev aa koble til paa nytt."""
         log.info("Proever aa rekoble til SIRIUS...")
         try:
             self.koble_fra()
@@ -238,116 +237,236 @@ class SiriusDriver:
             log.error(f"Rekonnektering feilet ({self._rekoble_forsok}/{self._maks_rekoble}): {e}")
             return False
 
-    # ---- Initialisering ----
+    # ---- Initialisering (repliserer DewesoftX-sekvensen) ----
 
     def _initialiser(self):
         """
-        Kjoer full init-sekvens mot SIRIUS.
+        Kjoer full init-sekvens basert paa reverse-engineered DewesoftX-protokoll.
 
-        1. Les enhetsidentifikasjon (0xE3)
-        2. Les enhetstype (0xE4)
-        3. For hver slot: les info, ADC-konfig, kalibrering
-        4. Send telemetri (heartbeat-sjekk)
-        5. Flush dataendepunkter
+        Fase 1: Heartbeat-sjekk (AE telemetri x4)
+        Fase 2: Enhetsoppdaging (FW-versjon, modus, slotinfo, EEPROM, init)
+        Fase 3: Slot-enumerering (AD query, enum, batch)
+        Fase 4: Per-slot initialisering (A5 kommando-dispatch)
+        Fase 5: Flush dataendepunkt
         """
-        log.info("Initialiserer SIRIUS...")
+        log.info("Initialiserer SIRIUS (DewesoftX-sekvens)...")
+        proto = self._proto
 
-        # 1. Enhetsidentifikasjon
+        # ---- Fase 1: Heartbeat-sjekk ----
+        log.info("  Fase 1: Heartbeat-sjekk...")
+        for i in range(4):
+            try:
+                svar = proto.send_telemetri()
+                log.debug(f"    AE #{i+1}: {svar[:6].hex()}")
+            except SiriusUSBFeil as e:
+                log.warning(f"    AE #{i+1} feilet: {e}")
+
+        # ---- Fase 2: Enhetsoppdaging ----
+        log.info("  Fase 2: Enhetsoppdaging...")
+
+        # FW-versjon (0x00)
         try:
-            ident = self._proto.les_enhetsid()
-            self._enhetsinfo.enhetsstreng = ident.get('enhetsstreng', '')
-            self._enhetsinfo.serienummer = ident.get('serienummer', '')
-            log.info(f"  Enhetsstreng: {self._enhetsinfo.enhetsstreng}")
-            log.info(f"  Serienummer:  {self._enhetsinfo.serienummer}")
+            fw = proto.les_fw_versjon()
+            self._enhetsinfo.fw_versjon = fw
+            log.info(f"    FW-versjon: {fw[:4].hex()}")
         except SiriusUSBFeil as e:
-            log.warning(f"  Kunne ikke lese enhetsid: {e}")
+            log.warning(f"    FW-versjon feilet: {e}")
 
-        # 2. Enhetstype
+        # Aktiver eining (A0 01)
         try:
-            devtype = self._proto.les_enhetstype()
-            self._enhetsinfo.enhetstype = devtype
-            log.info(f"  Enhetstype:   {devtype[:4].hex() if len(devtype) >= 4 else devtype.hex()}")
+            proto.sett_aktiv_modus()
         except SiriusUSBFeil as e:
-            log.warning(f"  Kunne ikke lese enhetstype: {e}")
+            log.warning(f"    Sett aktiv modus feilet: {e}")
 
-        # 3. Slot-informasjon
+        # Slot-tilstedevaerelse (A1)
+        try:
+            slot_map = proto.hent_slot_tilstedevaerelse()
+            self._enhetsinfo.slot_tilstedevaerelse = slot_map
+            log.info(f"    Slot-kart: {slot_map[:16].hex()}")
+        except SiriusUSBFeil as e:
+            log.warning(f"    Slot-tilstedevaerelse feilet: {e}")
+
+        # Slot-typer (AC)
+        try:
+            slot_types = proto.hent_slot_typer()
+            self._enhetsinfo.slot_typer = slot_types
+            log.info(f"    Slot-typer: {slot_types[:16].hex()}")
+        except SiriusUSBFeil as e:
+            log.warning(f"    Slot-typer feilet: {e}")
+
+        # EEPROM-lesing (A8) - enhetsstreng og serienummer
+        try:
+            eeprom = proto.les_eeprom(0x00, 0x00)
+            tekst = eeprom.rstrip(b'\x00\xff').decode('ascii', errors='replace')
+            if tekst:
+                self._enhetsinfo.enhetsstreng = tekst[:8]
+                self._enhetsinfo.serienummer = tekst[8:].strip('\x00').strip()
+                log.info(f"    Eining: {self._enhetsinfo.enhetsstreng}")
+                log.info(f"    Serienr: {self._enhetsinfo.serienummer}")
+        except SiriusUSBFeil as e:
+            log.warning(f"    EEPROM feilet: {e}")
+            # Fallback: proev E3 (FX2-lag)
+            try:
+                ident = proto.les_enhetsid()
+                self._enhetsinfo.enhetsstreng = ident.get('enhetsstreng', '')
+                self._enhetsinfo.serienummer = ident.get('serienummer', '')
+                log.info(f"    Eining (E3): {self._enhetsinfo.enhetsstreng}")
+                log.info(f"    Serienr (E3): {self._enhetsinfo.serienummer}")
+            except SiriusUSBFeil:
+                pass
+
+        # Init-kommando (B0 3F 0C)
+        try:
+            proto.init_kommando()
+        except SiriusUSBFeil as e:
+            log.warning(f"    Init-kommando feilet: {e}")
+
+        # ---- Fase 3: Slot-enumerering ----
+        log.info("  Fase 3: Slot-enumerering...")
+
+        try:
+            svar = proto.slot_query()
+            log.info(f"    Slot-query: {svar[:12].hex()}")
+        except (SiriusPollTimeout, SiriusUSBFeil) as e:
+            log.warning(f"    Slot-query feilet: {e}")
+
+        for enum_slot in [0x00, 0x01, 0x02]:
+            try:
+                svar = proto.slot_enum(enum_slot)
+                log.debug(f"    Enum slot {enum_slot}: {svar[:12].hex()}")
+            except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                log.debug(f"    Enum slot {enum_slot} feilet: {e}")
+
+        try:
+            svar = proto.batch_op()
+            log.info(f"    Batch-op: {svar[:12].hex()}")
+        except (SiriusPollTimeout, SiriusUSBFeil) as e:
+            log.warning(f"    Batch-op feilet: {e}")
+
+        # ---- Fase 4: Per-slot initialisering ----
+        log.info("  Fase 4: Per-slot initialisering...")
         self._enhetsinfo.slotter = []
+
         for i, slot_addr in enumerate(ALLE_SLOTTER):
             slot = SlotInfo(slot_id=slot_addr, kanal_nummer=i)
+
+            # Sjekk slot-type fraa kartet
+            if (self._enhetsinfo.slot_typer
+                    and len(self._enhetsinfo.slot_typer) > i
+                    and self._enhetsinfo.slot_typer[i] > 0):
+                slot.slot_type = self._enhetsinfo.slot_typer[i]
+
             try:
-                self._les_slot_info(slot)
+                self._init_slot(slot)
                 slot.aktiv = True
+                log.info(f"    Slot {i} (0x{slot_addr:02X}): OK - {slot.produsent}")
             except (SiriusPollTimeout, SiriusUSBFeil) as e:
-                log.debug(f"  Slot {i} (0x{slot_addr:02X}): ikke aktiv ({e})")
+                log.warning(f"    Slot {i} (0x{slot_addr:02X}): feilet ({e})")
                 slot.aktiv = False
+
             self._enhetsinfo.slotter.append(slot)
 
         aktive = sum(1 for s in self._enhetsinfo.slotter if s.aktiv)
-        log.info(f"  Aktive slotter: {aktive}/{len(ALLE_SLOTTER)}")
+        log.info(f"    Aktive slotter: {aktive}/{len(ALLE_SLOTTER)}")
 
-        # 4. Telemetri (heartbeat-sjekk)
-        try:
-            tele = self._proto.send_telemetri()
-            log.info(f"  Telemetri OK ({len(tele)}B)")
-        except SiriusUSBFeil as e:
-            log.warning(f"  Telemetri feilet: {e}")
-
-        # 5. Flush dataendepunkter
+        # ---- Fase 5: Flush dataendepunkt ----
+        log.info("  Fase 5: Flush endepunkt...")
         for ep in [EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN]:
             self._proto.flush_endepunkt(ep)
 
         log.info("Initialisering fullfoert")
 
-    def _les_slot_info(self, slot: SlotInfo):
-        """Les detaljert informasjon om en slot."""
-        # Sub-register 0x01-0x06 under REG_SLOT_INFO
-        for sub_reg in range(0x01, 0x07):
-            try:
-                data = self._proto.les_register(slot.slot_id, REG_SLOT_INFO)
-                if sub_reg == 0x01:
-                    slot.produsent = data[:16].rstrip(b'\x00').decode('ascii', errors='replace')
-                elif sub_reg == 0x02:
-                    slot.maskinvare_del = data[:16].rstrip(b'\x00').decode('ascii', errors='replace')
-                elif sub_reg == 0x03:
-                    slot.firmware_versjon = data[:8].rstrip(b'\x00').decode('ascii', errors='replace')
-            except (SiriusPollTimeout, SiriusUSBFeil):
-                pass
+    def _init_slot(self, slot: SlotInfo):
+        """
+        Initialiser ein enkelt analog slot via A5 kommando-dispatch.
 
-        # ADC-konfigurasjon
+        Repliserer DewesoftX sin per-slot sekvens:
+        1. Aktiver slot (A5 SET_PARAM 0xF0)
+        2. Sett modus (A5 SET_MODE D1=01 + commit)
+        3. Les konfigurasjon (A5 READ_STRING D1,02 + trigger 0x33)
+        4. Les kalibrering (A5 READ_STRING D1,03 + trigger 0x08)
+        5. Sett modus paa nytt + utvidet konfig
+        6. Samplingsoppsett (CC register)
+        7. Les modulstrenger (trigger 0x0B)
+        8. Les binaerdata (trigger 0x0A)
+        """
+        proto = self._proto
+        s = slot.slot_id
+
+        # 1. Aktiver slot
+        proto.a5_set_param(s, 0xF0)
+        proto.les_register(s)
+
+        # 2. Sett modus D1=01 + commit
+        proto.a5_set_mode(s, 0xD1, 0x01)
+        proto.commit(s)
+        proto.les_register(s)
+
+        # 3. Les konfigurasjon (D1 offset 0x02 via trigger 0x33)
+        proto.a5_read_string(s, 0xD1, 0x02)
+        proto.trigger_read(s, REG_TRIG_33)
+        proto.les_register(s)
+        proto.les_register(s)  # Andre lesing for komplett data
+
+        # 4. Les kalibrering (D1 offset 0x03 via trigger 0x08)
+        proto.a5_read_string(s, 0xD1, 0x03)
+        proto.trigger_read(s, REG_TRIG_08)
+        kalibrering = proto.les_register(s)
+        slot.kalibrering_raa = kalibrering
+        proto.les_register(s)  # Andre lesing
+
+        # 5. Sett modus paa nytt + commit
+        proto.a5_set_mode(s, 0xD1, 0x01)
+        proto.commit(s)
+        proto.les_register(s)
+
+        # 6. Utvidet konfig + samplingsoppsett
+        proto.a5_set_config(s, 0xD1, 0x02)
+        proto.skriv_register(s, REG_SAMPLE_CFG, bytes([0xF0, 0x00, 0x00]))
+        proto.commit(s)
+        proto.les_register(s)
+
+        # 7. Les modulstrenger via trigger 0x0B (produsent, serienr)
+        for offset in [0x02, 0x03]:
+            proto.a5_read_string(s, 0xD1, 0x03)
+            proto.trigger_read(s, REG_TRIG_0B)
+            svar = proto.les_register(s)
+            # Parse streng fraa svar
+            if offset == 0x02:
+                self._parse_slot_streng(slot, svar, 'produsent')
+            elif offset == 0x03:
+                self._parse_slot_streng(slot, svar, 'maskinvare_del')
+
+        # 8. Les binaerdata via trigger 0x0A
+        proto.a5_read_string(s, 0xD1, 0x03)
+        proto.trigger_read(s, REG_TRIG_0A)
+        proto.les_register(s)
+
+    def _parse_slot_streng(self, slot, svar, felt):
+        """Parse ein tekststreng fraa slot-svar og sett paa SlotInfo."""
         try:
-            slot.adc_konfig = self._proto.les_register(slot.slot_id, REG_ADC_KONFIG)
-        except (SiriusPollTimeout, SiriusUSBFeil):
+            # Hopp over status-bytes og finn ASCII-tekst
+            tekst = ""
+            for b in svar:
+                if 0x20 <= b <= 0x7E:
+                    tekst += chr(b)
+                elif tekst:
+                    break
+            if tekst:
+                setattr(slot, felt, tekst.strip())
+        except Exception:
             pass
-
-        # Kalibrering
-        try:
-            slot.kalibrering = self._proto.les_register(slot.slot_id, REG_KALIBRERING)
-        except (SiriusPollTimeout, SiriusUSBFeil):
-            pass
-
-        log.info(
-            f"  Slot {slot.kanal_nummer} (0x{slot.slot_id:02X}): "
-            f"produsent='{slot.produsent}', "
-            f"HW='{slot.maskinvare_del}', "
-            f"FW='{slot.firmware_versjon}'"
-        )
 
     # ---- Streaming ----
 
     def start_streaming(self, callback=None, buffer_storrelse=1000):
-        """
-        Start ADC-datastreaming i bakgrunnstraader.
-
-        Args:
-            callback: Funksjon som kalles med (kanal_data: dict) for hvert datablokk
-            buffer_storrelse: Maks antall rammer i buffer
-        """
+        """Start ADC-datastreaming i bakgrunnstraader."""
         if self._streamer:
-            log.warning("Streaming kjorer allerede")
+            log.warning("Streaming kjoerer allereie")
             return
 
         if not self._tilkoblet:
-            raise SiriusFeil("Ikke tilkoblet - kall koble_til() foerst")
+            raise SiriusFeil("Ikkje tilkobla - kall koble_til() foerst")
 
         self._data_callback = callback
         self._buffer_storrelse = buffer_storrelse
@@ -372,14 +491,14 @@ class SiriusDriver:
         )
         self._heartbeat_traad.start()
 
-        log.info("Streaming startet")
+        log.info("Streaming starta")
 
     def stopp_streaming(self):
         """Stopp streaming og vent paa at traader avslutter."""
         if not self._streamer:
             return
 
-        log.info("Stopper streaming...")
+        log.info("Stoppar streaming...")
         self._stopp_event.set()
         self._streamer = False
 
@@ -391,18 +510,10 @@ class SiriusDriver:
 
         self._adc_traad = None
         self._heartbeat_traad = None
-        log.info("Streaming stoppet")
+        log.info("Streaming stoppa")
 
     def hent_data(self, antall_rammer=None):
-        """
-        Hent buffret data.
-
-        Args:
-            antall_rammer: Maks antall rammer, None=alle
-
-        Returns:
-            list: Liste med kanal-data dicts
-        """
+        """Hent buffra data."""
         with self._buffer_lock:
             if antall_rammer is None:
                 data = list(self._data_buffer)
@@ -413,7 +524,7 @@ class SiriusDriver:
         return data
 
     def _adc_leser_loop(self):
-        """Bakgrunnstraad: les ADC-data fra EP2 og parser."""
+        """Bakgrunnstraad: les ADC-data fraa EP2 og parser."""
         io_feil_teller = 0
 
         while not self._stopp_event.is_set():
@@ -432,12 +543,8 @@ class SiriusDriver:
                         self._data_rate_bytes = 0
                         self._data_rate_ts = naa
 
-                    # Parser int16-data og deinterlev kanaler
-                    antall_kanaler = max(
-                        1,
-                        sum(1 for s in self._enhetsinfo.slotter if s.aktiv)
-                    )
-                    kanal_data = self._deinterlev_data(raa, antall_kanaler)
+                    # Parser 8-kanal int16-data
+                    kanal_data = self._deinterlev_data(raa, ADC_KANALER)
 
                     # Oppdater siste data
                     with self._siste_data_lock:
@@ -464,10 +571,8 @@ class SiriusDriver:
 
                 feil_str = str(e).lower()
                 if "timeout" in feil_str or "timed out" in feil_str:
-                    # Timeout er normalt - enheten sender ikke data foer
-                    # ADC-streaming er aktivert via register-skriving.
-                    # Bare vent og proev igjen.
-                    log.debug("ADC timeout (venter paa data)")
+                    # Timeout er normalt naar ADC ikkje er aktiv
+                    log.debug("ADC timeout (ventar paa data)")
                     self._stopp_event.wait(timeout=0.5)
                     continue
 
@@ -477,8 +582,8 @@ class SiriusDriver:
 
                 if io_feil_teller >= 10:
                     log.error(
-                        "For mange ADC I/O-feil - stopper streaming. "
-                        "Bruk Rekoble + Start streaming fra web UI."
+                        "For mange ADC I/O-feil - stoppar streaming. "
+                        "Bruk Rekoble + Start streaming fraa web UI."
                     )
                     self._streamer = False
                     break
@@ -489,7 +594,7 @@ class SiriusDriver:
             except Exception as e:
                 if self._stopp_event.is_set():
                     break
-                log.error(f"Uventet feil i ADC-loop: {e}")
+                log.error(f"Uventa feil i ADC-loop: {e}")
                 self._stopp_event.wait(timeout=1.0)
 
     def _heartbeat_loop(self):
@@ -509,16 +614,12 @@ class SiriusDriver:
             self._stopp_event.wait(timeout=2.0)
 
     @staticmethod
-    def _deinterlev_data(raa_bytes, antall_kanaler):
+    def _deinterlev_data(raa_bytes, antall_kanaler=ADC_KANALER):
         """
         Split interleaved int16-data til per-kanal arrays.
 
-        Args:
-            raa_bytes: Raa bytes fra EP2
-            antall_kanaler: Antall aktive kanaler
-
-        Returns:
-            dict: {'kanal_0': np.array, 'kanal_1': np.array, ...}
+        EP2 format: 2 rammer x 8 kanaler x int16 LE = 32 bytes per pakke.
+        Ved stoeerre buffer (16384 bytes): 512 pakker x 2 rammer = 1024 rammer.
         """
         if len(raa_bytes) < 2:
             return {}
@@ -537,7 +638,7 @@ class SiriusDriver:
 
         return resultat
 
-    # ---- Info-metoder ----
+    # ---- Info-metodar ----
 
     def hent_status(self) -> dict:
         """Returner driver-status som dict (for API/web)."""
@@ -546,13 +647,14 @@ class SiriusDriver:
             "streamer": self._streamer,
             "enhetsstreng": self._enhetsinfo.enhetsstreng,
             "serienummer": self._enhetsinfo.serienummer,
-            "enhetstype": self._enhetsinfo.enhetstype.hex() if self._enhetsinfo.enhetstype else "",
+            "enhetstype": self._enhetsinfo.fw_versjon.hex() if self._enhetsinfo.fw_versjon else "",
             "antall_slotter": self._enhetsinfo.antall_slotter,
             "aktive_slotter": sum(1 for s in self._enhetsinfo.slotter if s.aktiv),
             "slotter": [
                 {
                     "slot_id": f"0x{s.slot_id:02X}",
                     "kanal": s.kanal_nummer,
+                    "slot_type": f"0x{s.slot_type:02X}" if s.slot_type else "",
                     "produsent": s.produsent,
                     "maskinvare": s.maskinvare_del,
                     "firmware": s.firmware_versjon,
@@ -569,6 +671,6 @@ class SiriusDriver:
             f"SiriusDriver("
             f"tilkoblet={self._tilkoblet}, "
             f"streamer={self._streamer}, "
-            f"enhet='{self._enhetsinfo.enhetsstreng}', "
+            f"eining='{self._enhetsinfo.enhetsstreng}', "
             f"sn='{self._enhetsinfo.serienummer}')"
         )

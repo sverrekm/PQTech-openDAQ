@@ -2,21 +2,37 @@
 """
 SIRIUS USB-protokoll implementasjon (Lag 1)
 =============================================
-Lavnivaa protokoll-lag som bygger kommandoer, sender via pyusb, og parser svar.
+Lavnivaa protokoll-lag basert paa reverse-engineering av DewesoftX USB-trafikk
+fanget med usbmon paa Raspberry Pi.
 
-Basert paa reverse-engineering av DewesoftX USB-trafikk via usbmon.
+Protokollen bruker fleire kommandotyper:
 
-Protokollen bruker 3 kommandotyper:
-  0xAD: Register les/skriv (15 bytes)
-  0xB1: Poll (1 byte)
-  0xAE: Telemetri/heartbeat (3 bytes)
+  Enkle kommandoer (send + les svar, ingen B1-poll):
+    0x00: Firmware-versjon
+    0xA0: Sett modus (aktiv/inaktiv)
+    0xA1: Hent slot-tilstedevaerelse
+    0xAC: Hent slot-typer
+    0xA8: Les EEPROM (enhetsinfo, serienummer, kalibrering)
+    0xAE: Telemetri/heartbeat
+    0xB0: Initialiser/reset
 
-Kjerneoperasjonen (AD + poll):
-  1. Send 0xAD paa EP1 OUT
-  2. Les EP1 IN -> forvent all-0xFF (ACK)
-  3. Send 0xB1 paa EP1 OUT
-  4. Les EP1 IN -> sjekk word[0]: 1=klar, 0=proev igjen
-  5. Returner data fra word[1..] naar klar
+  AD-kommandoer (send AD + les ACK + send B1 poll + les resultat):
+    0xAD med op=0x08: Slot-query (global)
+    0xAD med op=0x0C: Slot-enumerering
+    0xAD med op=0x13: Register-skriving
+    0xAD med op=0x14: Register-lesing
+    0xAD med op=0x1C: Batch-operasjon
+
+  Register 0xA5 er eit kommando-dispatch-register med sub-kommandoer:
+    [01 param 5A] = SET_PARAM (5A er skrivelaasnoekkelen)
+    [02 reg val]  = SET_MODE
+    [03 reg off]  = READ_STRING
+    [06 reg val]  = SET_CONFIG
+
+Datastroemming:
+    EP2 IN: ADC-data (32 bytes = 2 rammer x 8 kanaler x int16 LE)
+    EP4 IN: Kontrollstatus (20 bytes, normalt nuller)
+    EP6 IN: Synkronisering (32 bytes = 4 x 8 bytes med 0xE0-markering)
 """
 
 import struct
@@ -37,16 +53,25 @@ EP_CTRL_IN = 0x84   # Kontrolldata (bulk)
 EP_SYNC_IN = 0x86   # Synk/tidsstempel (bulk)
 EP_DATA_OUT = 0x08  # Data til enhet (bulk)
 
-# --- Opkoder ---
+# --- Enkle kommando-opkoder ---
+OPCODE_FW_VERSJON = 0x00    # Firmware-versjon
+OPCODE_SETMODE = 0xA0       # Sett modus
+OPCODE_GETCONFIG = 0xA1     # Hent slot-tilstedevaerelse
+OPCODE_EEPROM = 0xA8        # Les EEPROM
+OPCODE_GETSLOTTYPES = 0xAC  # Hent slot-typer
+OPCODE_TELEMETRI = 0xAE     # Telemetri/heartbeat
+OPCODE_INIT = 0xB0          # Initialiser/reset
+
+# --- AD-kommando ---
 OPCODE_AD = 0xAD       # Register les/skriv
 OPCODE_POLL = 0xB1     # Poll for svar
-OPCODE_TELEMETRI = 0xAE  # Telemetri/heartbeat
-OPCODE_IDENT = 0xE3    # Enhetsidentifikasjon
-OPCODE_DEVTYPE = 0xE4  # Enhetstype
 
 # --- Operasjonstyper for 0xAD ---
-OP_SKRIV = 0x13   # Skriv til register
-OP_LES = 0x14     # Les fra register
+OP_SLOT_QUERY = 0x08  # Global slot-query
+OP_SLOT_ENUM = 0x0C   # Slot-enumerering
+OP_SKRIV = 0x13       # Skriv til register
+OP_LES = 0x14         # Les fra register
+OP_BATCH = 0x1C       # Batch-operasjon
 
 # --- Slotter (analoge inngangsmoduler) ---
 SLOT_0 = 0x04
@@ -55,10 +80,34 @@ SLOT_2 = 0x06
 SLOT_3 = 0x07
 ALLE_SLOTTER = [SLOT_0, SLOT_1, SLOT_2, SLOT_3]
 
-# --- Kjente registre ---
-REG_SLOT_INFO = 0xA5   # Slot-informasjon (sub-registre 0x01-0x06)
-REG_ADC_KONFIG = 0x08  # ADC-konfigurasjon
-REG_KALIBRERING = 0xCC  # Kalibreringsdata
+# --- Register i A5 kommando-dispatch ---
+REG_CMD = 0xA5        # Kommando-dispatch-register
+REG_COMMIT = 0x5A     # Commit/trigger-register
+REG_TRIG_33 = 0x33    # Lese-trigger A
+REG_TRIG_08 = 0x08    # Lese-trigger B
+REG_TRIG_0B = 0x0B    # Lese-trigger C (modulstrenger)
+REG_TRIG_0A = 0x0A    # Lese-trigger D (binaerdata)
+REG_SAMPLE_CFG = 0xCC # Samplingsoppsett
+
+# --- A5 sub-kommandoer ---
+A5_SET_PARAM = 0x01     # Sett parameter
+A5_SET_MODE = 0x02      # Sett modus
+A5_READ_STRING = 0x03   # Les streng/data
+A5_SET_CONFIG = 0x06    # Utvidet konfigurasjon
+
+# --- Magiske verdiar ---
+WRITE_KEY = 0x5A                        # Skrivelaasnoekkelen
+TRIGGER_DATA = bytes([0x5A, 0x00, 0x00])  # Trigger-verdi for lese-registre
+COMMIT_DATA = bytes([0x00, 0x00, 0x00])   # Commit-verdi
+
+# --- Eldre opkoder (FX2-lag, beholdt for kompatibilitet) ---
+OPCODE_IDENT = 0xE3    # Enhetsidentifikasjon (FX2)
+OPCODE_DEVTYPE = 0xE4  # Enhetstype (FX2)
+
+# Gamle namn (alias for bakoverkompatibilitet)
+REG_SLOT_INFO = REG_CMD
+REG_ADC_KONFIG = REG_TRIG_08
+REG_KALIBRERING = REG_SAMPLE_CFG
 
 # --- Timeouts (ms) ---
 TIMEOUT_CMD = 1000    # Kommando send/motta
@@ -68,11 +117,16 @@ TIMEOUT_SHORT = 300   # Korte operasjoner
 
 # --- Poll-konstanter ---
 MAKS_POLL_FORSOK = 10
-POLL_KLAR = 1
-POLL_VENT = 0
+POLL_KLAR = 1   # Nye data tilgjengelig (lesing)
+POLL_VENT = 0   # Venter / skrivebekreftelse
 
-# ACK-moenstre (alle 0xFF betyr "mottatt, venter")
+# ACK-moenstre
 ACK_BYTE = 0xFF
+
+# --- ADC-format (fraa snifferanalyse) ---
+ADC_KANALER = 8           # 8 kanaler per ramme
+ADC_SAMPLES_PER_PAKKE = 2 # 2 rammer per 32-byte pakke
+ADC_PAKKESTORRELSE = 32   # Bytes per EP2-pakke
 
 
 # --- Unntak ---
@@ -106,12 +160,6 @@ class SiriusProtokoll:
     """
 
     def __init__(self, dev):
-        """
-        Initialiser protokollen med en pyusb-enhet.
-
-        Args:
-            dev: usb.core.Device - aapen pyusb-enhet
-        """
         self._dev = dev
         self._cmd_lock = threading.Lock()
         self._lukket = False
@@ -121,71 +169,10 @@ class SiriusProtokoll:
     def enhet(self):
         return self._dev
 
-    # ---- Kommandobygging ----
-
-    @staticmethod
-    def _bygg_ad_kommando(op_type, slot, register, data=None):
-        """
-        Bygg en 15-byte 0xAD kommando.
-
-        Format:
-        AD 3F 0C 00 00 00 [op] 00 00 00 [slot] [reg] [d0] [d1] [d2]
-        byte: 0  1  2  3  4  5   6   7  8  9   10    11   12   13  14
-
-        Args:
-            op_type: Operasjonstype (OP_SKRIV=0x13 eller OP_LES=0x14)
-            slot: Slot-adresse (0x04-0x07)
-            register: Registeradresse
-            data: 3 bytes data (for skriv), eller None/bytes(3) for les
-        """
-        if data is None:
-            data = bytes(3)
-        elif isinstance(data, int):
-            data = struct.pack('<I', data)[:3]
-        elif len(data) < 3:
-            data = data + bytes(3 - len(data))
-
-        cmd = bytes([
-            OPCODE_AD,   # 0: opkode
-            0x3F,        # 1: fast
-            0x0C,        # 2: fast
-            0x00,        # 3: fast
-            0x00,        # 4: fast
-            0x00,        # 5: fast
-            op_type,     # 6: operasjonstype
-            0x00,        # 7: fast
-            0x00,        # 8: fast
-            0x00,        # 9: fast
-            slot,        # 10: slot
-            register,    # 11: register
-            data[0],     # 12: data byte 0
-            data[1],     # 13: data byte 1
-            data[2],     # 14: data byte 2
-        ])
-        return cmd
-
-    @staticmethod
-    def _bygg_b1_kommando():
-        """Bygg en 1-byte 0xB1 poll-kommando."""
-        return bytes([OPCODE_POLL])
-
-    @staticmethod
-    def _bygg_ae_kommando():
-        """Bygg en 3-byte 0xAE telemetri-kommando."""
-        return bytes([OPCODE_TELEMETRI, 0x1F, 0x0C])
-
     # ---- Raa USB I/O ----
 
     def _send_cmd(self, data):
-        """
-        Send data paa EP1 OUT (kommandokanal).
-
-        Args:
-            data: bytes aa sende
-
-        Raises:
-            SiriusUSBFeil: Ved USB-feil
-        """
+        """Send data paa EP1 OUT."""
         try:
             skrevet = self._dev.write(EP_CMD_OUT, data, timeout=TIMEOUT_CMD)
             log.debug(f"EP1 OUT [{len(data)}B]: {data.hex()}")
@@ -194,18 +181,7 @@ class SiriusProtokoll:
             raise SiriusUSBFeil(f"Feil ved sending paa EP1 OUT: {e}") from e
 
     def _les_svar(self, timeout=TIMEOUT_CMD):
-        """
-        Les svar fra EP1 IN (kommandokanal).
-
-        Args:
-            timeout: Timeout i millisekunder
-
-        Returns:
-            bytes: Mottatte data
-
-        Raises:
-            SiriusUSBFeil: Ved USB-feil
-        """
+        """Les svar fraa EP1 IN."""
         try:
             svar = self._dev.read(EP_CMD_IN, 512, timeout=timeout)
             data = bytes(svar)
@@ -214,32 +190,146 @@ class SiriusProtokoll:
         except Exception as e:
             raise SiriusUSBFeil(f"Feil ved lesing fra EP1 IN: {e}") from e
 
-    # ---- Kjerneoperasjoner ----
+    # ---- Enkle kommandoer (send + les svar, ingen B1-poll) ----
+
+    def send_raa_kommando(self, data, timeout=TIMEOUT_CMD):
+        """Send vilkaarleg kommando og les svar (uten B1-poll)."""
+        with self._cmd_lock:
+            self._send_cmd(data)
+            return self._les_svar(timeout=timeout)
+
+    def les_fw_versjon(self):
+        """Send 0x00, les firmware-versjon."""
+        svar = self.send_raa_kommando(bytes([OPCODE_FW_VERSJON]))
+        log.info(f"FW-versjon raa: {svar[:8].hex()}")
+        return svar
+
+    def sett_aktiv_modus(self):
+        """Send A0 01, aktiver enheten."""
+        svar = self.send_raa_kommando(bytes([OPCODE_SETMODE, 0x01]))
+        log.info("Aktiv modus satt")
+        return svar
+
+    def hent_slot_tilstedevaerelse(self):
+        """Send A1, hent slot-tilstedevaerelses-kart."""
+        svar = self.send_raa_kommando(bytes([OPCODE_GETCONFIG]))
+        log.info(f"Slot-tilstedevaerelse: {svar[:16].hex()}")
+        return svar
+
+    def hent_slot_typer(self):
+        """Send AC, hent slot-type-kart.
+
+        Returns:
+            bytes: Type per slot (0x04=analog, 0x06=digital, 0x00=tom)
+        """
+        svar = self.send_raa_kommando(bytes([OPCODE_GETSLOTTYPES]))
+        log.info(f"Slot-typer: {svar[:16].hex()}")
+        return svar
+
+    def les_eeprom(self, addr_hi=0x00, addr_lo=0x00):
+        """Les EEPROM-data (enhetsinfo, serienummer, kalibrering)."""
+        return self.send_raa_kommando(bytes([OPCODE_EEPROM, 0x1E, addr_hi, addr_lo]))
+
+    def init_kommando(self):
+        """Send B0 3F 0C, initialiser/reset enheten."""
+        svar = self.send_raa_kommando(bytes([OPCODE_INIT, 0x3F, 0x0C]))
+        log.info("Init-kommando sendt")
+        return svar
+
+    def send_telemetri(self):
+        """Send AE telemetri-kommando (heartbeat) og les svar."""
+        return self.send_raa_kommando(bytes([OPCODE_TELEMETRI, 0x1F, 0x0C]))
+
+    # ---- Eldre FX2-kommandoer (beholdt for kompatibilitet) ----
+
+    def les_enhetsid(self):
+        """Send 0xE3 og les enhetsidentifikasjon (FX2-lag)."""
+        svar = self.send_raa_kommando(bytes([OPCODE_IDENT]))
+        resultat = {'raa': svar}
+        try:
+            tekst = svar.rstrip(b'\x00').decode('ascii', errors='replace')
+            resultat['enhetsstreng'] = tekst[:8]
+            resultat['serienummer'] = tekst[8:].strip('\x00').strip()
+        except Exception:
+            resultat['enhetsstreng'] = ""
+            resultat['serienummer'] = ""
+        return resultat
+
+    def les_enhetstype(self):
+        """Send 0xE4 og les enhetstype (FX2-lag)."""
+        return self.send_raa_kommando(bytes([OPCODE_DEVTYPE]))
+
+    # ---- AD-kommandoer med B1-poll ----
+
+    @staticmethod
+    def _bygg_ad_kommando(op_type, slot, register, data=None):
+        """
+        Bygg ein 15-byte 0xAD kommando.
+
+        Format:
+        AD 3F 0C 00 00 00 [op] [p0 p1 p2] [slot] [reg] [d0] [d1] [d2]
+
+        For skriving (op=0x13): padding=000000, reg og data er eksplisitte
+        For lesing (op=0x14): padding=000000, reg=0xFF, data=0xFFFFFF
+        For query/batch (op=0x08/0x1C): padding=FFFFFF, slot=0xFF, reg=0xFF, data=0xFFFFFF
+        For enum (op=0x0C): padding=000000, reg=0xFF, data=0xFFFFFF
+        """
+        if data is None:
+            if op_type in (OP_LES, OP_SLOT_QUERY, OP_BATCH, OP_SLOT_ENUM):
+                data = bytes([0xFF, 0xFF, 0xFF])
+            else:
+                data = bytes(3)
+        elif isinstance(data, int):
+            data = struct.pack('<I', data)[:3]
+        elif len(data) < 3:
+            data = data + bytes(3 - len(data))
+
+        # Padding bytes 7-9: 0xFF for global ops, 0x00 ellers
+        padding = bytes([0xFF, 0xFF, 0xFF]) if op_type in (OP_SLOT_QUERY, OP_BATCH) else bytes(3)
+
+        cmd = bytes([
+            OPCODE_AD,   # 0
+            0x3F,        # 1
+            0x0C,        # 2
+            0x00,        # 3
+            0x00,        # 4
+            0x00,        # 5
+            op_type,     # 6
+            padding[0],  # 7
+            padding[1],  # 8
+            padding[2],  # 9
+            slot,        # 10
+            register,    # 11
+            data[0],     # 12
+            data[1],     # 13
+            data[2],     # 14
+        ])
+        return cmd
+
+    @staticmethod
+    def _bygg_b1_kommando():
+        """Bygg ein 1-byte 0xB1 poll-kommando."""
+        return bytes([OPCODE_POLL])
+
+    @staticmethod
+    def _bygg_ae_kommando():
+        """Bygg ein 3-byte 0xAE telemetri-kommando."""
+        return bytes([OPCODE_TELEMETRI, 0x1F, 0x0C])
 
     def send_ad_og_poll(self, op_type, slot, register, data=None, maks_forsok=MAKS_POLL_FORSOK):
         """
         Kjerneoperasjonen: Send AD-kommando og poll for svar.
 
-        Sekvendiagram:
+        Sekvens:
           1. Send 0xAD paa EP1 OUT
           2. Les EP1 IN -> forvent all-0xFF (ACK)
           3. Send 0xB1 paa EP1 OUT
-          4. Les EP1 IN -> sjekk word[0]: 1=klar, 0=proev igjen
-          5. Returner data fra word[1..] naar klar
-
-        Args:
-            op_type: OP_SKRIV eller OP_LES
-            slot: Slot-adresse
-            register: Registeradresse
-            data: Data for skriv (3 bytes), None for les
-            maks_forsok: Maks antall poll-runder
+          4. Les EP1 IN -> for skriving: aksepter med ein gong;
+             for lesing: sjekk byte[0]=1 (klar), 0=proev igjen
+          5. Returner heile svar-bufferet
 
         Returns:
-            bytes: Svardata (uten status-word)
-
-        Raises:
-            SiriusPollTimeout: Hvis enheten ikke svarer i tide
-            SiriusUSBFeil: Ved USB-feil
+            bytes: Heile poll-svaret (inkludert status-byte)
         """
         with self._cmd_lock:
             # 1. Send AD-kommando
@@ -249,128 +339,99 @@ class SiriusProtokoll:
             # 2. Les ACK (forvent all-0xFF)
             ack = self._les_svar(timeout=TIMEOUT_CMD)
             if not all(b == ACK_BYTE for b in ack[:4]):
-                log.warning(f"Uventet ACK: {ack[:8].hex()} (forventet FFFFFFFF)")
+                log.debug(f"ACK: {ack[:8].hex()}")
 
-            # 3-4. Poll til klar
+            # 3-4. Poll
+            er_skriving = (op_type == OP_SKRIV)
+
             for forsok in range(maks_forsok):
-                poll_cmd = self._bygg_b1_kommando()
-                self._send_cmd(poll_cmd)
-
+                self._send_cmd(self._bygg_b1_kommando())
                 svar = self._les_svar(timeout=TIMEOUT_POLL)
 
                 if len(svar) < 2:
                     log.debug(f"Poll #{forsok + 1}: kort svar ({len(svar)}B)")
                     continue
 
-                # Sjekk status-word (foerste 2 bytes som little-endian uint16)
-                status = struct.unpack_from('<H', svar, 0)[0]
+                status_byte = svar[0]
 
-                if status == POLL_KLAR:
-                    # 5. Returner data etter status-word
-                    return bytes(svar[2:])
-                elif status == POLL_VENT:
+                if status_byte == POLL_KLAR:
+                    # Leseresultat klar
+                    return bytes(svar)
+                elif er_skriving:
+                    # Skriving: byte[0]=0 er normal bekreftelse
+                    return bytes(svar)
+                elif status_byte == POLL_VENT:
                     log.debug(f"Poll #{forsok + 1}: venter...")
                     continue
                 else:
-                    log.debug(f"Poll #{forsok + 1}: ukjent status 0x{status:04X}")
+                    # Ukjent status - aksepter som svar
+                    log.debug(f"Poll #{forsok + 1}: status=0x{status_byte:02X}")
+                    return bytes(svar)
 
             raise SiriusPollTimeout(
                 f"Poll timeout etter {maks_forsok} forsok "
                 f"(op=0x{op_type:02X}, slot=0x{slot:02X}, reg=0x{register:02X})"
             )
 
-    # ---- Hoeynivaa wrappers ----
+    # ---- AD hoeynivaa-wrappers ----
 
     def skriv_register(self, slot, reg, verdi):
-        """
-        Skriv en verdi til et register via AD-kommando.
-
-        Args:
-            slot: Slot-adresse (0x04-0x07)
-            reg: Registeradresse
-            verdi: int eller 3-byte verdi
-
-        Returns:
-            bytes: Svardata
-        """
+        """Skriv ein verdi til eit register via AD op=0x13."""
         return self.send_ad_og_poll(OP_SKRIV, slot, reg, verdi)
 
-    def les_register(self, slot, reg):
-        """
-        Les en verdi fra et register via AD-kommando.
+    def les_register(self, slot, reg=0xFF):
+        """Les fraa eit register via AD op=0x14.
 
-        Args:
-            slot: Slot-adresse (0x04-0x07)
-            reg: Registeradresse
-
-        Returns:
-            bytes: Registerdata
+        Registeret er som regel 0xFF (les resultat av siste operasjon).
         """
         return self.send_ad_og_poll(OP_LES, slot, reg)
 
-    def send_telemetri(self):
-        """
-        Send AE telemetri-kommando (heartbeat) og les svar.
+    def slot_query(self):
+        """AD op=0x08 slot=0xFF: Global slot-query."""
+        return self.send_ad_og_poll(OP_SLOT_QUERY, 0xFF, 0xFF)
 
-        Returns:
-            bytes: Telemetri-svar
-        """
-        with self._cmd_lock:
-            ae_cmd = self._bygg_ae_kommando()
-            self._send_cmd(ae_cmd)
-            svar = self._les_svar(timeout=TIMEOUT_CMD)
-            return svar
+    def slot_enum(self, slot):
+        """AD op=0x0C: Enumerer ein spesifikk slot."""
+        return self.send_ad_og_poll(OP_SLOT_ENUM, slot, 0xFF)
 
-    def les_enhetsid(self):
-        """
-        Send 0xE3 og les enhetsidentifikasjon.
+    def batch_op(self):
+        """AD op=0x1C slot=0xFF: Batch/global operasjon."""
+        return self.send_ad_og_poll(OP_BATCH, 0xFF, 0xFF)
 
-        Returns:
-            dict: {'raa': bytes, 'enhetsstreng': str, 'serienummer': str}
-        """
-        with self._cmd_lock:
-            self._send_cmd(bytes([OPCODE_IDENT]))
-            svar = self._les_svar(timeout=TIMEOUT_CMD)
+    # ---- A5 kommando-dispatch hjelparar ----
 
-        resultat = {'raa': svar}
+    def a5_set_param(self, slot, param, enable=True):
+        """Skriv A5 [01 param 5A] - sett parameter med skrivenoekkelen."""
+        data = bytes([A5_SET_PARAM, param, WRITE_KEY if enable else 0x00])
+        return self.skriv_register(slot, REG_CMD, data)
 
-        # Parse "DEWEUSB7" + serienummer
-        try:
-            tekst = svar.rstrip(b'\x00').decode('ascii', errors='replace')
-            resultat['enhetsstreng'] = tekst[:8]  # "DEWEUSB7"
-            resultat['serienummer'] = tekst[8:].strip('\x00').strip()
-        except Exception:
-            resultat['enhetsstreng'] = ""
-            resultat['serienummer'] = ""
+    def a5_set_mode(self, slot, mode_reg, value):
+        """Skriv A5 [02 mode_reg value] - sett modus."""
+        data = bytes([A5_SET_MODE, mode_reg, value])
+        return self.skriv_register(slot, REG_CMD, data)
 
-        return resultat
+    def a5_read_string(self, slot, string_reg, offset):
+        """Skriv A5 [03 string_reg offset] - forbered strenglesing."""
+        data = bytes([A5_READ_STRING, string_reg, offset])
+        return self.skriv_register(slot, REG_CMD, data)
 
-    def les_enhetstype(self):
-        """
-        Send 0xE4 og les enhetstype.
+    def a5_set_config(self, slot, config_reg, value):
+        """Skriv A5 [06 config_reg value] - utvidet konfigurasjon."""
+        data = bytes([A5_SET_CONFIG, config_reg, value])
+        return self.skriv_register(slot, REG_CMD, data)
 
-        Returns:
-            bytes: Enhetstype-data (4 bytes)
-        """
-        with self._cmd_lock:
-            self._send_cmd(bytes([OPCODE_DEVTYPE]))
-            svar = self._les_svar(timeout=TIMEOUT_CMD)
-            return svar
+    def commit(self, slot):
+        """Skriv 5A [00 00 00] - commit/trigger."""
+        return self.skriv_register(slot, REG_COMMIT, COMMIT_DATA)
 
-    def les_adc_data(self, storrelse=512, timeout=TIMEOUT_DATA):
-        """
-        Les raa ADC-data fra EP2.
+    def trigger_read(self, slot, trigger_reg):
+        """Skriv [trigger_reg] [5A 00 00] - trigger ei lesing."""
+        return self.skriv_register(slot, trigger_reg, TRIGGER_DATA)
 
-        Args:
-            storrelse: Antall bytes aa lese (standard 512)
-            timeout: Timeout i ms
+    # ---- Dataendepunkt ----
 
-        Returns:
-            bytes: Raa ADC-data
-
-        Raises:
-            SiriusUSBFeil: Ved USB-feil eller timeout
-        """
+    def les_adc_data(self, storrelse=16384, timeout=TIMEOUT_DATA):
+        """Les raa ADC-data fraa EP2."""
         try:
             data = self._dev.read(EP_ADC_IN, storrelse, timeout=timeout)
             return bytes(data)
@@ -378,19 +439,7 @@ class SiriusProtokoll:
             raise SiriusUSBFeil(f"Feil ved lesing av ADC-data (EP2): {e}") from e
 
     def les_sync_data(self, storrelse=512, timeout=TIMEOUT_DATA):
-        """
-        Les sync/tidsstempel-data fra EP6.
-
-        Args:
-            storrelse: Antall bytes aa lese (standard 512)
-            timeout: Timeout i ms
-
-        Returns:
-            bytes: Sync-data
-
-        Raises:
-            SiriusUSBFeil: Ved USB-feil eller timeout
-        """
+        """Les sync/tidsstempel-data fraa EP6."""
         try:
             data = self._dev.read(EP_SYNC_IN, storrelse, timeout=timeout)
             return bytes(data)
@@ -398,16 +447,7 @@ class SiriusProtokoll:
             raise SiriusUSBFeil(f"Feil ved lesing av sync-data (EP6): {e}") from e
 
     def les_ctrl_data(self, storrelse=512, timeout=TIMEOUT_CMD):
-        """
-        Les kontrolldata fra EP4.
-
-        Args:
-            storrelse: Antall bytes aa lese
-            timeout: Timeout i ms
-
-        Returns:
-            bytes: Kontrolldata
-        """
+        """Les kontrolldata fraa EP4."""
         try:
             data = self._dev.read(EP_CTRL_IN, storrelse, timeout=timeout)
             return bytes(data)
@@ -415,13 +455,7 @@ class SiriusProtokoll:
             raise SiriusUSBFeil(f"Feil ved lesing av ctrl-data (EP4): {e}") from e
 
     def flush_endepunkt(self, ep, forsok=5):
-        """
-        Toem et endepunkt ved aa lese til timeout.
-
-        Args:
-            ep: Endepunkt-adresse
-            forsok: Maks antall leseforsoek
-        """
+        """Toem eit endepunkt ved aa lese til timeout."""
         for _ in range(forsok):
             try:
                 self._dev.read(ep, 512, timeout=100)
