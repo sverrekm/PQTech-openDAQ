@@ -65,6 +65,13 @@ server_status = {
 
 KONFIG_STI = Path("/data/konfig/enhet_konfig.json")
 
+# Globale referanser for enhetsstyring fra web UI
+_instance = None
+_device = None
+_maaler = None
+_args = None
+_lock = threading.Lock()
+
 
 def hent_ip():
     """Finn maskinens IP-adresse."""
@@ -107,6 +114,93 @@ def list_kanaler(device):
     except Exception as e:
         log.debug(f"Feil ved kanallisting: {e}")
     return kanaler
+
+
+def hent_tilgjengelige_enheter():
+    """Returnerer liste over oppdagede openDAQ-enheter."""
+    with _lock:
+        if _instance is None:
+            return []
+        try:
+            enheter = []
+            for info in _instance.available_devices:
+                navn = info.name if hasattr(info, 'name') else str(info)
+                conn = info.connection_string if hasattr(info, 'connection_string') else ""
+                enheter.append({"navn": navn, "tilkobling": conn})
+            # Legg til kjente enhetstyper som kan kobles til direkte
+            for key in _instance.available_device_types:
+                if key not in [e.get("tilkobling", "").split("://")[0] for e in enheter]:
+                    enheter.append({"navn": f"[{key}]", "tilkobling": f"{key}://device0"})
+            return enheter
+        except Exception as e:
+            log.warning(f"Feil ved enhetssok: {e}")
+            return []
+
+
+def koble_til_enhet(tilkobling_str):
+    """Bytt til en ny enhet. Returnerer (suksess, melding)."""
+    global _device, _maaler
+
+    with _lock:
+        if _instance is None:
+            return False, "Server ikke startet"
+
+        log.info(f"Bytter enhet til: {tilkobling_str}")
+
+        # Stopp autonom maaling
+        if _maaler:
+            _maaler.stopp()
+            _maaler = None
+
+        # Fjern gammel enhet
+        if _device:
+            try:
+                _instance.remove_device(_device)
+            except Exception as e:
+                log.warning(f"Kunne ikke fjerne gammel enhet: {e}")
+            _device = None
+
+        # Koble til ny enhet
+        try:
+            _device = _instance.add_device(tilkobling_str)
+        except Exception as e:
+            server_status.update({
+                "enhet_navn": "",
+                "tilkobling": "",
+                "kanaler": [],
+                "feil": str(e),
+            })
+            log.error(f"Kunne ikke koble til {tilkobling_str}: {e}")
+            return False, f"Tilkobling feilet: {e}"
+
+        enhet_navn = _device.name if hasattr(_device, 'name') else str(_device)
+        kanaler = list_kanaler(_device)
+
+        # Oppdater status
+        server_status.update({
+            "enhet_navn": enhet_navn,
+            "tilkobling": tilkobling_str,
+            "kanaler": kanaler,
+            "feil": None,
+        })
+
+        log.info(f"Tilkoblet: {enhet_navn} ({len(kanaler)} kanaler)")
+
+        # Start ny autonom maaling
+        if _args and _args.maale_intervall > 0:
+            _maaler = AutonomMaaler(
+                instance=_instance,
+                device=_device,
+                utmappe=_args.utmappe,
+                intervall=_args.maale_intervall,
+                varighet=_args.maale_varighet,
+                sample_rate=_args.sample_rate,
+                prefiks=_args.prefiks,
+            )
+            _maaler.start()
+
+        lagre_konfig(_instance)
+        return True, f"Tilkoblet {enhet_navn}"
 
 
 def lagre_konfig(instance):
@@ -313,7 +407,7 @@ class AutonomMaaler:
 
 def start_server(args):
     """Start openDAQ server med autonom maaling."""
-    global server_status
+    global server_status, _instance, _device, _maaler, _args
 
     log.info("=" * 60)
     log.info("  openDAQ Server - Dewesoft SIRIUS")
@@ -326,47 +420,44 @@ def start_server(args):
         log.info(f"Modulsok: {module_path}")
 
     # Opprett openDAQ-instans
-    log.info(f"CWD foer Instance: {os.getcwd()}")
-    instance = daq.Instance()
-    log.info(f"CWD etter Instance: {os.getcwd()}")
-    log.info(f"Tilgjengelige enhetstyper: {list(instance.available_device_types)}")
+    _instance = daq.Instance()
+    _args = args
 
     # Finn og koble til enhet
-    device = None
     tilkobling = ""
 
     if args.tilkobling:
         tilkobling = args.tilkobling
         log.info(f"Kobler til: {tilkobling}")
-        device = instance.add_device(tilkobling)
+        _device = _instance.add_device(tilkobling)
     elif args.simulator:
         tilkobling = "daqref://device0"
         log.info(f"Starter simulator: {tilkobling}")
-        device = instance.add_device(tilkobling)
+        _device = _instance.add_device(tilkobling)
     else:
-        sirius_info = finn_sirius(instance)
+        sirius_info = finn_sirius(_instance)
         if sirius_info:
             tilkobling = sirius_info.connection_string
             log.info(f"Kobler til SIRIUS: {tilkobling}")
-            device = instance.add_device(tilkobling)
+            _device = _instance.add_device(tilkobling)
         else:
             log.warning("SIRIUS ikke funnet - bruker simulator")
             tilkobling = "daqref://device0"
-            device = instance.add_device(tilkobling)
+            _device = _instance.add_device(tilkobling)
 
-    if not device:
+    if not _device:
         server_status["feil"] = "Kunne ikke koble til enhet"
         log.error("Kunne ikke koble til enhet")
         return
 
-    enhet_navn = device.name if hasattr(device, 'name') else str(device)
+    enhet_navn = _device.name if hasattr(_device, 'name') else str(_device)
     log.info(f"Tilkoblet: {enhet_navn}")
 
     # Last lagret konfigurasjon (fra forrige DewesoftX-sesjon)
-    last_konfig(instance)
+    last_konfig(_instance)
 
     # List kanaler
-    kanaler = list_kanaler(device)
+    kanaler = list_kanaler(_device)
     for k in kanaler:
         log.info(f"  Kanal: {k}")
 
@@ -376,7 +467,7 @@ def start_server(args):
 
     servere = []
     try:
-        srv_list = instance.add_standard_servers()
+        srv_list = _instance.add_standard_servers()
         for s in srv_list:
             srv_navn = s.id if hasattr(s, 'id') else str(s)
             servere.append(srv_navn)
@@ -385,7 +476,7 @@ def start_server(args):
         log.warning(f"add_standard_servers feilet: {e}")
         for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming']:
             try:
-                s = instance.add_server(srv_type, None)
+                s = _instance.add_server(srv_type, None)
                 servere.append(srv_type)
                 log.info(f"  Server startet: {srv_type}")
             except Exception as e2:
@@ -424,16 +515,16 @@ def start_server(args):
     log.info("=" * 60)
 
     # Start autonom maaling i bakgrunnen
-    maaler = AutonomMaaler(
-        instance=instance,
-        device=device,
+    _maaler = AutonomMaaler(
+        instance=_instance,
+        device=_device,
         utmappe=args.utmappe,
         intervall=args.maale_intervall,
         varighet=args.maale_varighet,
         sample_rate=args.sample_rate,
         prefiks=args.prefiks,
     )
-    maaler.start()
+    _maaler.start()
 
     # Hold serveren kjorende
     stopp = False
@@ -441,7 +532,7 @@ def start_server(args):
     def signal_handler(sig, frame):
         nonlocal stopp
         log.info("Mottok stoppsignal - lagrer konfigurasjon...")
-        lagre_konfig(instance)
+        lagre_konfig(_instance)
         stopp = True
 
     signal.signal(signal.SIGTERM, signal_handler)
@@ -454,8 +545,9 @@ def start_server(args):
         pass
 
     log.info("Stopper...")
-    maaler.stopp()
-    lagre_konfig(instance)
+    if _maaler:
+        _maaler.stopp()
+    lagre_konfig(_instance)
     server_status["kjorer"] = False
 
 

@@ -13,7 +13,7 @@ import os
 import subprocess
 import socket
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
@@ -95,6 +95,31 @@ def hent_status():
 @app.route("/api/status")
 def api_status():
     return jsonify(hent_status())
+
+
+@app.route("/api/enheter")
+def api_enheter():
+    """Returnerer liste over oppdagede openDAQ-enheter."""
+    try:
+        from opendaq_server import hent_tilgjengelige_enheter
+        return jsonify({"enheter": hent_tilgjengelige_enheter()})
+    except Exception as e:
+        return jsonify({"enheter": [], "feil": str(e)})
+
+
+@app.route("/api/koble-til", methods=["POST"])
+def api_koble_til():
+    """Koble til en enhet med gitt tilkoblingsstreng."""
+    data = request.get_json(silent=True) or {}
+    tilkobling = data.get("tilkobling", "").strip()
+    if not tilkobling:
+        return jsonify({"suksess": False, "melding": "Mangler tilkoblingsstreng"}), 400
+    try:
+        from opendaq_server import koble_til_enhet
+        suksess, melding = koble_til_enhet(tilkobling)
+        return jsonify({"suksess": suksess, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
 # --- HTML ---
@@ -262,6 +287,67 @@ body {
     vertical-align: middle;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.koble-rad {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+.koble-input {
+    flex: 1;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    padding: 0.6rem 1rem;
+    font-family: 'Consolas', monospace;
+    font-size: 0.85rem;
+    color: #a5b4fc;
+    outline: none;
+}
+.koble-input:focus { border-color: #3b82f6; }
+.koble-input::placeholder { color: #475569; }
+.btn {
+    border: none;
+    padding: 0.6rem 1rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.btn-gronn { background: #065f46; color: #6ee7b7; }
+.btn-gronn:hover { background: #047857; }
+.btn-blaa { background: #1e3a5f; color: #93c5fd; }
+.btn-blaa:hover { background: #1e40af; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.enhet-liste {
+    list-style: none;
+    padding: 0;
+    margin-top: 0.75rem;
+}
+.enhet-liste li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #0f172a;
+    font-size: 0.85rem;
+}
+.enhet-liste .enhet-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.enhet-liste .enhet-navn { color: #e2e8f0; font-weight: 500; }
+.enhet-liste .enhet-conn { color: #64748b; font-family: 'Consolas', monospace; font-size: 0.75rem; }
+.melding {
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    display: none;
+}
+.melding-ok { background: #064e3b; color: #6ee7b7; display: block; }
+.melding-feil { background: #7f1d1d; color: #fca5a5; display: block; }
 </style>
 </head>
 <body>
@@ -318,6 +404,24 @@ body {
         <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
             Pi maaler og lagrer data lokalt, uavhengig av DewesoftX-tilkobling.
             Filer lagres i <code style="color:#a5b4fc;">/data/maalinger/</code>
+        </p>
+    </div>
+
+    <div class="kort">
+        <h2>Koble til enhet</h2>
+        <div class="koble-rad">
+            <input type="text" id="tilkobling-input" class="koble-input"
+                   placeholder="daq.opcua://192.168.1.X">
+            <button class="btn btn-gronn" id="btn-koble" onclick="kobleTil()">Koble til</button>
+            <button class="btn btn-blaa" id="btn-sok" onclick="sokEnheter()">Sok</button>
+        </div>
+        <div id="koble-melding" class="melding"></div>
+        <ul class="enhet-liste" id="enhet-liste"></ul>
+        <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
+            Skriv inn tilkoblingsstreng eller klikk Sok for aa finne enheter paa nettverket.
+            Eksempler: <code style="color:#a5b4fc;">daq.opcua://IP</code>,
+            <code style="color:#a5b4fc;">daq.ns://IP</code>,
+            <code style="color:#a5b4fc;">daqref://device0</code>
         </p>
     </div>
 
@@ -422,6 +526,81 @@ function esc(s) {
     const d = document.createElement('div');
     d.textContent = s || '';
     return d.innerHTML;
+}
+
+async function sokEnheter() {
+    const btn = document.getElementById('btn-sok');
+    const liste = document.getElementById('enhet-liste');
+    btn.disabled = true;
+    btn.textContent = 'Soker...';
+    liste.innerHTML = '<li><span class="spinner"></span> Soker etter enheter...</li>';
+    visMelding('');
+    try {
+        const res = await fetch('/api/enheter');
+        const data = await res.json();
+        if (data.enheter && data.enheter.length > 0) {
+            liste.innerHTML = data.enheter.map(e =>
+                `<li>
+                    <div class="enhet-info">
+                        <span class="enhet-navn">${esc(e.navn)}</span>
+                        <span class="enhet-conn">${esc(e.tilkobling)}</span>
+                    </div>
+                    <button class="btn btn-gronn" onclick="kobleTilEnhet('${esc(e.tilkobling).replace(/'/g, "\\'")}')">Koble til</button>
+                </li>`
+            ).join('');
+        } else {
+            liste.innerHTML = '<li style="color:#64748b;">Ingen enheter funnet</li>';
+        }
+    } catch (e) {
+        liste.innerHTML = '<li style="color:#fca5a5;">Feil ved sok</li>';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Sok';
+}
+
+function kobleTilEnhet(conn) {
+    document.getElementById('tilkobling-input').value = conn;
+    kobleTil();
+}
+
+async function kobleTil() {
+    const input = document.getElementById('tilkobling-input');
+    const btn = document.getElementById('btn-koble');
+    const tilkobling = input.value.trim();
+    if (!tilkobling) {
+        visMelding('Skriv inn en tilkoblingsstreng', true);
+        return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Kobler til...';
+    visMelding('');
+    try {
+        const res = await fetch('/api/koble-til', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tilkobling: tilkobling})
+        });
+        const data = await res.json();
+        visMelding(data.melding, !data.suksess);
+        if (data.suksess) {
+            hentData();
+        }
+    } catch (e) {
+        visMelding('Nettverksfeil: ' + e.message, true);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Koble til';
+}
+
+function visMelding(tekst, erFeil) {
+    const el = document.getElementById('koble-melding');
+    if (!tekst) {
+        el.className = 'melding';
+        el.textContent = '';
+        return;
+    }
+    el.textContent = tekst;
+    el.className = 'melding ' + (erFeil ? 'melding-feil' : 'melding-ok');
 }
 
 hentData();
