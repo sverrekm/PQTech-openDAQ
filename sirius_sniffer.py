@@ -283,13 +283,16 @@ def parse_usbmon_linje(linje):
     Format (tekst-API /sys/kernel/debug/usb/usbmon/Xt):
       URB_TAG TIMESTAMP EVENT_TYPE PIPE_INFO REST...
 
-    PIPE_INFO format: TYPE:BUS:DEV:EP
+    PIPE_INFO format: TYPE:DEV:EP  (3 deler - bus-nr er implisitt fra filnavnet)
+      eller:          TYPE:BUS:DEV:EP  (4 deler - noen kjerner)
       TYPE = Ci/Co (Control), Bi/Bo (Bulk), Ii/Io (Interrupt), Zi/Zo (Isoch)
-      BUS  = bus-nummer
       DEV  = device-nummer (kan vaere 1-3 siffer)
       EP   = endepunkt-nummer
 
-    Eksempler:
+    Eksempler (3-del, vanligst paa Linux 5.x+/6.x):
+      ffff800003d933c0 3387981846 S Bi:003:02 -115 16384 <
+      ffff800003c4a880 3387989334 C Bi:003:04 -2 0
+    Eksempler (4-del):
       ffff8880 3060475 S Ci:3:003:0 s 80 06 0100 0000 0012 18 <
       ffff8880 3060480 C Ci:3:003:0 0 18 = 12010002 00000040 ed1c0210
       d5ea89c0 3895920� S Bo:3:003:1 -115 512 = 01000000 00000000...
@@ -306,7 +309,7 @@ def parse_usbmon_linje(linje):
         urb_tag = deler[0]
         timestamp = deler[1]
         event_type = deler[2]  # S=Submit, C=Complete, E=Error
-        pipe_info = deler[3]   # Type:Bus:Dev:EP
+        pipe_info = deler[3]   # Type:Dev:EP eller Type:Bus:Dev:EP
 
         pakke = {
             "tid": timestamp,
@@ -315,19 +318,26 @@ def parse_usbmon_linje(linje):
             "raa": linje,
         }
 
-        # Parse pipe_info (Type:Bus:Dev:EP)
+        # Parse pipe_info - stoetter baade 3-del (Type:Dev:EP) og 4-del (Type:Bus:Dev:EP)
         if ':' in pipe_info:
             addr_deler = pipe_info.split(':')
-            if len(addr_deler) >= 4:
-                pakke["transfer_type"] = addr_deler[0]  # Bi, Bo, Ci, Co, etc.
+            if len(addr_deler) == 3:
+                # 3-del format: Type:DEV:EP (vanligst paa Linux 5.x+/6.x)
+                pakke["transfer_type"] = addr_deler[0]
+                pakke["dev"] = int(addr_deler[1])
+                pakke["ep"] = int(addr_deler[2])
+            elif len(addr_deler) >= 4:
+                # 4-del format: Type:BUS:DEV:EP
+                pakke["transfer_type"] = addr_deler[0]
                 pakke["bus"] = int(addr_deler[1])
-                pakke["dev"] = int(addr_deler[2])       # Konverter til int (003 -> 3)
+                pakke["dev"] = int(addr_deler[2])
                 pakke["ep"] = int(addr_deler[3])
 
-                # Retning fra transfer_type
-                if len(addr_deler[0]) >= 2:
-                    pakke["retning"] = "IN" if addr_deler[0][-1] == 'i' else "OUT"
-                    pakke["type_kort"] = addr_deler[0][0]  # B=Bulk, C=Control, etc.
+            # Retning og type fra transfer_type (Bi/Bo/Ci/Co/Ii/Io/Zi/Zo)
+            tt = pakke.get("transfer_type", "")
+            if len(tt) >= 2:
+                pakke["retning"] = "IN" if tt[-1] == 'i' else "OUT"
+                pakke["type_kort"] = tt[0]  # B=Bulk, C=Control, I=Interrupt, Z=Isoch
 
         # Parse resten avhengig av hendelsestype
         rest = deler[4:]
@@ -546,6 +556,8 @@ def main():
                         help='Fangstmetode (standard: auto)')
     parser.add_argument('--analyser', type=str, default=None,
                         help='Analyser en lagret fangstfil (JSON)')
+    parser.add_argument('--dev', type=int, default=None,
+                        help='Filtrer paa device-nummer (overstyrer auto-deteksjon)')
     parser.add_argument('--debug', action='store_true')
 
     args = parser.parse_args()
@@ -562,10 +574,22 @@ def main():
     if args.analyser:
         with open(args.analyser) as f:
             data = json.load(f)
+        # Bruk --dev hvis oppgitt, ellers hent fra filen
+        dev_filter = args.dev or data.get("devnum")
         if "pakker" in data:
-            analyser_fangst(data["pakker"])
+            # Re-parse fra raa-linjer for aa faa oppdatert parsing
+            re_parsed = []
+            for p in data["pakker"]:
+                raa = p.get("raa", "")
+                if raa:
+                    ny = parse_usbmon_linje(raa)
+                    if ny:
+                        re_parsed.append(ny)
+                else:
+                    re_parsed.append(p)
+            analyser_fangst(re_parsed, dev_filter)
         elif "linjer" in data:
-            analyser_raa_linjer(data["linjer"])
+            analyser_raa_linjer(data["linjer"], str(dev_filter) if dev_filter else None)
         return
 
     # Finn SIRIUS
