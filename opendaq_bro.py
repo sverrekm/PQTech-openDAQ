@@ -143,25 +143,37 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanallisting feilet: {e}")
 
-            # Start standard servere (OPC-UA + Native Streaming + WebSocket)
+            # List servere som allereie køyrer (InstanceBuilder auto-startar dei
+            # når servermodulane vert lasta frå /usr/local/lib/).
             servere = []
             try:
-                srv_list = self._instance.add_standard_servers()
+                srv_list = self._instance.servers
                 for s in srv_list:
                     srv_id = s.id if hasattr(s, 'id') else str(s)
                     servere.append(srv_id)
-                    log.info(f"  Server: {srv_id}")
+                    log.info(f"  Server (auto): {srv_id}")
             except Exception as e:
-                log.warning(f"  add_standard_servers feilet: {e}")
-                # Fallback: proev individuelt
-                for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
-                                 'OpenDAQNativeStreaming']:
-                    try:
-                        self._instance.add_server(srv_type, None)
-                        servere.append(srv_type)
-                        log.info(f"  Server (fallback): {srv_type}")
-                    except Exception as e2:
-                        log.warning(f"  {srv_type} feilet: {e2}")
+                log.debug(f"  Kunne ikkje liste servere: {e}")
+
+            # Viss ingen servere auto-starta, proev manuelt
+            if not servere:
+                log.info("  Ingen auto-starta servere, proever manuelt...")
+                try:
+                    srv_list = self._instance.add_standard_servers()
+                    for s in srv_list:
+                        srv_id = s.id if hasattr(s, 'id') else str(s)
+                        servere.append(srv_id)
+                        log.info(f"  Server: {srv_id}")
+                except Exception as e:
+                    log.warning(f"  add_standard_servers feilet: {e}")
+                    for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
+                                     'OpenDAQNativeStreaming']:
+                        try:
+                            self._instance.add_server(srv_type, None)
+                            servere.append(srv_type)
+                            log.info(f"  Server (fallback): {srv_type}")
+                        except Exception as e2:
+                            log.warning(f"  {srv_type} feilet: {e2}")
 
             ip = self._hent_ip()
 
