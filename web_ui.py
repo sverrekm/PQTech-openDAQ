@@ -286,6 +286,42 @@ def api_probe_adc():
     return jsonify({"suksess": True, "melding": f"ADC-lesing startet ({varighet}s)"})
 
 
+@app.route("/api/probe/sniffer", methods=["POST"])
+def api_probe_sniffer():
+    """Start passiv USB-trafikkfangst (forstyrrer IKKE USB/IP)."""
+    data = request.get_json(silent=True) or {}
+    varighet = min(data.get("varighet", 15), 60)
+
+    with _probe_lock:
+        if _probe_resultat["status"] == "running":
+            return jsonify({"suksess": False, "melding": "Probe kjorer allerede"})
+        _probe_resultat.update({"status": "running", "output": "", "rapport": None})
+
+    def _kjor():
+        try:
+            r = subprocess.run(
+                ["python3", "/app/sirius_sniffer.py",
+                 "--varighet", str(varighet), "--debug"],
+                capture_output=True, text=True, timeout=int(varighet) + 30,
+                cwd="/app"
+            )
+            with _probe_lock:
+                _probe_resultat.update({
+                    "status": "done",
+                    "output": r.stdout + ("\n--- STDERR ---\n" + r.stderr if r.stderr else ""),
+                    "returncode": r.returncode,
+                })
+        except subprocess.TimeoutExpired:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": "Timeout"})
+        except Exception as e:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": str(e)})
+
+    threading.Thread(target=_kjor, daemon=True).start()
+    return jsonify({"suksess": True, "melding": f"Sniffer startet ({varighet}s)"})
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -708,6 +744,17 @@ body {
                 Les + Lagre (10s)
             </button>
         </div>
+        <div style="margin-top:0.75rem; padding:0.5rem 0.75rem; background:#1e1b4b; border:1px solid #4338ca;
+             border-radius:0.5rem; display:flex; align-items:center; gap:0.75rem;">
+            <button class="btn" id="btn-sniffer" onclick="kjorSniffer(15)"
+                    style="background:#4338ca;color:#e0e7ff;font-weight:600;white-space:nowrap;">
+                Fang DewesoftX-trafikk (15s)
+            </button>
+            <span style="color:#a5b4fc; font-size:0.8rem;">
+                Passiv fangst - forstyrrer IKKE USB/IP eller DewesoftX.
+                Bruk mens DewesoftX er tilkoblet for aa kartlegge protokollen.
+            </span>
+        </div>
         <div id="probe-status" class="melding" style="display:none;"></div>
         <pre id="probe-output" style="display:none; background:#0f172a; border:1px solid #334155;
              border-radius:0.5rem; padding:1rem; margin-top:0.75rem; font-size:0.75rem;
@@ -1070,6 +1117,57 @@ async function kjorProbe() {
             // Ignorer midlertidige feil
         }
     }, 1000);
+}
+
+async function kjorSniffer(varighet) {
+    const statusEl = document.getElementById('probe-status');
+    const outputEl = document.getElementById('probe-output');
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full',
+                      'btn-dekod-info', 'btn-dekod-stream', 'btn-adc', 'btn-adc-lagre', 'btn-sniffer'];
+    alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
+    statusEl.textContent = 'Passiv USB-fangst (' + varighet + 's) - DewesoftX forstyrres IKKE...';
+    statusEl.className = 'melding melding-ok';
+    statusEl.style.display = 'block';
+    outputEl.style.display = 'block';
+    outputEl.textContent = 'Fanger USB-trafikk mellom DewesoftX og SIRIUS...\\n';
+
+    try {
+        const res = await fetch('/api/probe/sniffer', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({varighet: varighet})
+        });
+        const data = await res.json();
+        if (!data.suksess) {
+            statusEl.textContent = data.melding;
+            statusEl.className = 'melding melding-feil';
+            alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+            return;
+        }
+    } catch (e) {
+        statusEl.textContent = 'Nettverksfeil: ' + e.message;
+        statusEl.className = 'melding melding-feil';
+        alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+        return;
+    }
+
+    if (probePolling) clearInterval(probePolling);
+    probePolling = setInterval(async () => {
+        try {
+            const res = await fetch('/api/probe/status');
+            const data = await res.json();
+            if (data.status === 'done' || data.status === 'error') {
+                clearInterval(probePolling);
+                probePolling = null;
+                outputEl.textContent = data.output || '(tomt resultat)';
+                statusEl.textContent = data.status === 'done' ? 'Fangst fullfort' : 'Fangst feilet';
+                statusEl.className = 'melding ' + (data.status === 'done' ? 'melding-ok' : 'melding-feil');
+                alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+            } else if (data.status === 'running') {
+                outputEl.textContent = 'Fanger trafikk...\\n' + (data.output || '');
+            }
+        } catch (e) {}
+    }, 2000);
 }
 
 async function kjorAdc(varighet, lagre) {
