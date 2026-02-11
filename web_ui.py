@@ -476,24 +476,25 @@ HTML_SIDE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>openDAQ Server - Dewesoft SIRIUS</title>
+<title>PQTech - Dewesoft SIRIUS</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #0f172a;
-    color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f5f5;
+    color: #1a1a1a;
     min-height: 100vh;
 }
 .header {
-    background: #1e293b;
-    border-bottom: 2px solid #3b82f6;
+    background: #1a1a1a;
+    border-bottom: 3px solid #D76428;
     padding: 1rem 1.5rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
-.header h1 { font-size: 1.25rem; font-weight: 600; color: #f8fafc; }
+.header h1 { font-size: 1.25rem; font-weight: 600; color: #ffffff; }
+.header h1 span { color: #D76428; }
 .status-badge {
     display: inline-flex;
     align-items: center;
@@ -503,27 +504,28 @@ body {
     font-size: 0.8rem;
     font-weight: 500;
 }
-.status-ok { background: #064e3b; color: #6ee7b7; }
-.status-feil { background: #7f1d1d; color: #fca5a5; }
+.status-ok { background: #d1fae5; color: #065f46; }
+.status-feil { background: #fee2e2; color: #991b1b; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot-gronn { background: #22c55e; animation: puls 2s infinite; }
+.dot-gronn { background: #10b981; animation: puls 2s infinite; }
 .dot-rod { background: #ef4444; }
 @keyframes puls { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 .main { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
 .kort {
-    background: #1e293b;
-    border: 1px solid #334155;
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
     border-radius: 0.75rem;
     padding: 1.25rem;
     margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 .kort h2 {
-    font-size: 1rem;
-    color: #94a3b8;
+    font-size: 0.85rem;
+    color: #6b6b6b;
     margin-bottom: 1rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    font-weight: 500;
+    font-weight: 600;
 }
 .info-grid {
     display: grid;
@@ -531,20 +533,20 @@ body {
     gap: 0.75rem;
 }
 .info-boks {
-    background: #0f172a;
+    background: #f5f5f5;
     border-radius: 0.5rem;
     padding: 0.75rem 1rem;
 }
-.info-boks .label { font-size: 0.75rem; color: #64748b; }
-.info-boks .verdi { font-size: 1.1rem; font-weight: 600; margin-top: 0.25rem; }
+.info-boks .label { font-size: 0.75rem; color: #6b6b6b; }
+.info-boks .verdi { font-size: 1.1rem; font-weight: 600; margin-top: 0.25rem; color: #1a1a1a; }
 .cmd-boks {
-    background: #0f172a;
-    border: 1px solid #334155;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
     border-radius: 0.5rem;
     padding: 1rem;
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 0.85rem;
-    color: #a5b4fc;
+    color: #B85420;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -553,8 +555,8 @@ body {
 }
 .cmd-boks code { flex: 1; word-break: break-all; }
 .btn-kopier {
-    background: #334155;
-    color: #e2e8f0;
+    background: #e0e0e0;
+    color: #1a1a1a;
     border: none;
     padding: 0.35rem 0.7rem;
     border-radius: 0.25rem;
@@ -562,7 +564,7 @@ body {
     font-size: 0.75rem;
     white-space: nowrap;
 }
-.btn-kopier:hover { background: #475569; }
+.btn-kopier:hover { background: #d0d0d0; }
 .steg {
     counter-reset: steg;
     list-style: none;
@@ -572,9 +574,9 @@ body {
     counter-increment: steg;
     padding: 0.75rem 0 0.75rem 3rem;
     position: relative;
-    border-bottom: 1px solid #1e293b;
+    border-bottom: 1px solid #f0f0f0;
     font-size: 0.9rem;
-    color: #cbd5e1;
+    color: #4a4a4a;
 }
 .steg li:last-child { border-bottom: none; }
 .steg li::before {
@@ -583,8 +585,8 @@ body {
     left: 0;
     width: 2rem;
     height: 2rem;
-    background: #1e1b4b;
-    color: #a5b4fc;
+    background: #FDF2EC;
+    color: #D76428;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -599,8 +601,8 @@ body {
     font-size: 0.75rem;
     font-weight: 500;
 }
-.tag-aktiv { background: #064e3b; color: #6ee7b7; }
-.tag-usb { background: #1e1b4b; color: #a5b4fc; }
+.tag-aktiv { background: #d1fae5; color: #065f46; }
+.tag-usb { background: #FDF2EC; color: #D76428; }
 .kanal-liste {
     display: flex;
     flex-wrap: wrap;
@@ -613,17 +615,17 @@ body {
 }
 .usb-liste li {
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid #0f172a;
+    border-bottom: 1px solid #f0f0f0;
     font-size: 0.85rem;
     font-family: 'Consolas', monospace;
-    color: #94a3b8;
+    color: #6b6b6b;
 }
-.usb-liste li.sirius { color: #6ee7b7; font-weight: 600; }
+.usb-liste li.sirius { color: #D76428; font-weight: 600; }
 .spinner {
     display: inline-block;
     width: 14px; height: 14px;
-    border: 2px solid #475569;
-    border-top-color: #3b82f6;
+    border: 2px solid #e0e0e0;
+    border-top-color: #D76428;
     border-radius: 50%;
     animation: spin 0.6s linear infinite;
     vertical-align: middle;
@@ -636,17 +638,17 @@ body {
 }
 .koble-input {
     flex: 1;
-    background: #0f172a;
-    border: 1px solid #334155;
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
     border-radius: 0.5rem;
     padding: 0.6rem 1rem;
     font-family: 'Consolas', monospace;
     font-size: 0.85rem;
-    color: #a5b4fc;
+    color: #1a1a1a;
     outline: none;
 }
-.koble-input:focus { border-color: #3b82f6; }
-.koble-input::placeholder { color: #475569; }
+.koble-input:focus { border-color: #D76428; box-shadow: 0 0 0 2px #FDF2EC; }
+.koble-input::placeholder { color: #aaa; }
 .btn {
     border: none;
     padding: 0.6rem 1rem;
@@ -655,11 +657,12 @@ body {
     font-size: 0.8rem;
     font-weight: 500;
     white-space: nowrap;
+    transition: background 150ms ease;
 }
-.btn-gronn { background: #065f46; color: #6ee7b7; }
-.btn-gronn:hover { background: #047857; }
-.btn-blaa { background: #1e3a5f; color: #93c5fd; }
-.btn-blaa:hover { background: #1e40af; }
+.btn-gronn { background: #D76428; color: #ffffff; }
+.btn-gronn:hover { background: #B85420; }
+.btn-blaa { background: #f5f5f5; color: #1a1a1a; border: 1px solid #e0e0e0; }
+.btn-blaa:hover { background: #e8e8e8; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .enhet-liste {
     list-style: none;
@@ -671,7 +674,7 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid #0f172a;
+    border-bottom: 1px solid #f0f0f0;
     font-size: 0.85rem;
 }
 .enhet-liste .enhet-info {
@@ -679,8 +682,8 @@ body {
     flex-direction: column;
     gap: 0.15rem;
 }
-.enhet-liste .enhet-navn { color: #e2e8f0; font-weight: 500; }
-.enhet-liste .enhet-conn { color: #64748b; font-family: 'Consolas', monospace; font-size: 0.75rem; }
+.enhet-liste .enhet-navn { color: #1a1a1a; font-weight: 500; }
+.enhet-liste .enhet-conn { color: #6b6b6b; font-family: 'Consolas', monospace; font-size: 0.75rem; }
 .melding {
     margin-top: 0.75rem;
     padding: 0.5rem 0.75rem;
@@ -688,10 +691,10 @@ body {
     font-size: 0.8rem;
     display: none;
 }
-.melding-ok { background: #064e3b; color: #6ee7b7; display: block; }
-.melding-feil { background: #7f1d1d; color: #fca5a5; display: block; }
-.btn-rod { background: #7f1d1d; color: #fca5a5; }
-.btn-rod:hover { background: #991b1b; }
+.melding-ok { background: #d1fae5; color: #065f46; display: block; }
+.melding-feil { background: #fee2e2; color: #991b1b; display: block; }
+.btn-rod { background: #fee2e2; color: #991b1b; }
+.btn-rod:hover { background: #fecaca; }
 .usbip-status-rad {
     display: flex;
     align-items: center;
@@ -701,23 +704,24 @@ body {
 }
 .usbip-knapper {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.75rem;
 }
 .usbip-instruksjoner {
-    background: #0f172a;
-    border: 1px solid #334155;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
     border-radius: 0.5rem;
     padding: 1rem;
     margin-top: 1rem;
 }
 .usbip-instruksjoner h3 {
     font-size: 0.85rem;
-    color: #94a3b8;
+    color: #6b6b6b;
     margin-bottom: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    font-weight: 500;
+    font-weight: 600;
 }
 .usbip-instruksjoner ol {
     list-style: decimal;
@@ -725,23 +729,23 @@ body {
 }
 .usbip-instruksjoner li {
     font-size: 0.85rem;
-    color: #cbd5e1;
+    color: #4a4a4a;
     padding: 0.25rem 0;
 }
 .usbip-instruksjoner code {
-    background: #1e293b;
+    background: #FDF2EC;
     padding: 0.15rem 0.4rem;
     border-radius: 0.25rem;
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 0.8rem;
-    color: #a5b4fc;
+    color: #B85420;
 }
 </style>
 </head>
 <body>
 
 <div class="header">
-    <h1>openDAQ Server &mdash; Dewesoft SIRIUS</h1>
+    <h1><span>PQTech</span> &mdash; Dewesoft SIRIUS</h1>
     <div id="status-badge" class="status-badge status-feil">
         <span class="dot dot-rod" id="status-dot"></span>
         <span id="status-tekst">Sjekker...</span>
@@ -789,9 +793,9 @@ body {
                 <div class="verdi" id="info-siste" style="font-size:0.85rem;">-</div>
             </div>
         </div>
-        <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
+        <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.75rem;">
             Pi maaler og lagrer data lokalt, uavhengig av DewesoftX-tilkobling.
-            Filer lagres i <code style="color:#a5b4fc;">/data/maalinger/</code>
+            Filer lagres i <code style="color:#B85420;">/data/maalinger/</code>
         </p>
     </div>
 
@@ -835,11 +839,11 @@ body {
         </div>
         <div id="koble-melding" class="melding"></div>
         <ul class="enhet-liste" id="enhet-liste"></ul>
-        <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
+        <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.75rem;">
             Skriv inn tilkoblingsstreng eller klikk Sok for aa finne enheter paa nettverket.
-            Eksempler: <code style="color:#a5b4fc;">daq.opcua://IP</code>,
-            <code style="color:#a5b4fc;">daq.ns://IP</code>,
-            <code style="color:#a5b4fc;">daqref://device0</code>
+            Eksempler: <code style="color:#B85420;">daq.opcua://IP</code>,
+            <code style="color:#B85420;">daq.ns://IP</code>,
+            <code style="color:#B85420;">daqref://device0</code>
         </p>
     </div>
 
@@ -855,7 +859,7 @@ body {
             <code id="pi-adresse">-</code>
             <button class="btn-kopier" onclick="kopier()">Kopier</button>
         </div>
-        <p style="color:#64748b; font-size:0.8rem; margin-top:0.75rem;">
+        <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.75rem;">
             Klikk OK &mdash; SIRIUS dukker opp under Detected devices.
         </p>
     </div>
@@ -863,22 +867,22 @@ body {
     <div class="kort" id="probe-kort">
         <h2>SIRIUS USB-analyse</h2>
 
-        <div style="padding:0.5rem 0.75rem; background:#1e1b4b; border:1px solid #4338ca;
+        <div style="padding:0.5rem 0.75rem; background:#FDF2EC; border:1px solid #E8753A;
              border-radius:0.5rem; display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem;">
             <button class="btn" id="btn-sniffer" onclick="kjorSniffer(15)"
-                    style="background:#4338ca;color:#e0e7ff;font-weight:600;white-space:nowrap;">
+                    style="background:#D76428;color:#ffffff;font-weight:600;white-space:nowrap;">
                 Fang DewesoftX-trafikk (15s)
             </button>
-            <span style="color:#a5b4fc; font-size:0.8rem;">
+            <span style="color:#B85420; font-size:0.8rem;">
                 Passiv fangst via usbmon &mdash; forstyrrer IKKE USB/IP eller DewesoftX.
             </span>
         </div>
 
         <details style="margin-bottom:0.75rem;">
-            <summary style="cursor:pointer; color:#94a3b8; font-size:0.85rem;">
+            <summary style="cursor:pointer; color:#6b6b6b; font-size:0.85rem;">
                 Direkte USB-tester (stopper USB/IP-deling!)
             </summary>
-            <p style="color:#fca5a5; font-size:0.8rem; margin:0.5rem 0;">
+            <p style="color:#991b1b; font-size:0.8rem; margin:0.5rem 0;">
                 Disse verktoyene tar kontroll over SIRIUS USB og avbryter USB/IP.
                 DewesoftX mister tilkoblingen. Bruk kun naar USB/IP er stoppet.
             </p>
@@ -893,20 +897,20 @@ body {
                     Dekod enhetsinfo
                 </button>
                 <button class="btn" id="btn-adc" onclick="kjorAdc(5)"
-                        style="background:#1e3a5f;color:#fbbf24;font-weight:600;">
+                        style="background:#E8753A;color:#ffffff;font-weight:600;">
                     Les ADC (5s)
                 </button>
                 <button class="btn" id="btn-adc-lagre" onclick="kjorAdc(10, true)"
-                        style="background:#065f46;color:#fbbf24;font-weight:600;">
+                        style="background:#D76428;color:#ffffff;font-weight:600;">
                     Les + Lagre (10s)
                 </button>
             </div>
         </details>
 
         <div id="probe-status" class="melding" style="display:none;"></div>
-        <pre id="probe-output" style="display:none; background:#0f172a; border:1px solid #334155;
+        <pre id="probe-output" style="display:none; background:#1a1a1a; border:1px solid #e0e0e0;
              border-radius:0.5rem; padding:1rem; margin-top:0.75rem; font-size:0.75rem;
-             color:#a5b4fc; max-height:400px; overflow-y:auto; white-space:pre-wrap;
+             color:#E8753A; max-height:400px; overflow-y:auto; white-space:pre-wrap;
              font-family:'Consolas','Monaco',monospace;"></pre>
 
         <div id="rapporter-seksjon" style="margin-top:0.75rem;">
@@ -949,7 +953,7 @@ body {
         <div class="usbip-instruksjoner" id="usbip-instruksjoner" style="display:none;">
             <h3>Paa Windows-PC</h3>
             <ol>
-                <li>Installer <a href="https://github.com/cezanne/usbip-win2/releases" target="_blank" style="color:#93c5fd;">usbip-win2</a></li>
+                <li>Installer <a href="https://github.com/cezanne/usbip-win2/releases" target="_blank" style="color:#D76428;">usbip-win2</a></li>
                 <li>Apne PowerShell som Administrator</li>
                 <li>List enheter:
                     <div class="cmd-boks" style="margin-top:0.35rem;">
@@ -1048,7 +1052,7 @@ function oppdaterUsbipUI(u) {
     // SIRIUS funnet paa USB
     const siriusFunnet = document.getElementById('usbip-sirius-funnet');
     siriusFunnet.textContent = u.sirius_paa_usb ? (u.sirius_enhet_funnet || 'Ja') : 'Nei';
-    siriusFunnet.style.color = u.sirius_paa_usb ? '#6ee7b7' : '#fca5a5';
+    siriusFunnet.style.color = u.sirius_paa_usb ? '#10b981' : '#ef4444';
 
     // Bus-ID
     document.getElementById('usbip-busid').textContent = u.busid || u.sirius_busid_funnet || '-';
@@ -1059,7 +1063,7 @@ function oppdaterUsbipUI(u) {
         dot.className = 'dot dot-gronn';
         tekst.textContent = 'Deling aktiv paa port 3240';
         delingEl.textContent = 'Aktiv';
-        delingEl.style.color = '#6ee7b7';
+        delingEl.style.color = '#10b981';
         btnDel.style.display = 'none';
         btnStopp.style.display = 'inline-block';
         instruksjoner.style.display = 'block';
@@ -1072,7 +1076,7 @@ function oppdaterUsbipUI(u) {
         dot.className = 'dot dot-rod';
         tekst.textContent = u.tilgjengelig ? 'Klar' : 'USB/IP utilgjengelig';
         delingEl.textContent = 'Inaktiv';
-        delingEl.style.color = '#94a3b8';
+        delingEl.style.color = '#6b6b6b';
         btnDel.style.display = 'inline-block';
         btnDel.disabled = !u.sirius_paa_usb || !u.tilgjengelig;
         btnStopp.style.display = 'none';
@@ -1163,10 +1167,10 @@ async function sokEnheter() {
                 </li>`
             ).join('');
         } else {
-            liste.innerHTML = '<li style="color:#64748b;">Ingen enheter funnet</li>';
+            liste.innerHTML = '<li style="color:#6b6b6b;">Ingen enheter funnet</li>';
         }
     } catch (e) {
-        liste.innerHTML = '<li style="color:#fca5a5;">Feil ved sok</li>';
+        liste.innerHTML = '<li style="color:#ef4444;">Feil ved sok</li>';
     }
     btn.disabled = false;
     btn.textContent = 'Sok';
@@ -1493,14 +1497,14 @@ async function hentRapporter() {
         if (data.rapporter && data.rapporter.length > 0) {
             liste.innerHTML = data.rapporter.map(r => {
                 const kb = (r.storrelse / 1024).toFixed(1);
-                return `<li><a href="/api/probe/last-ned/${r.filnavn}" style="color:#93c5fd;"
+                return `<li><a href="/api/probe/last-ned/${r.filnavn}" style="color:#D76428;"
                     download>${r.filnavn}</a> (${kb} KB)</li>`;
             }).join('');
         } else {
-            liste.innerHTML = '<li style="color:#64748b;">Ingen rapporter</li>';
+            liste.innerHTML = '<li style="color:#6b6b6b;">Ingen rapporter</li>';
         }
     } catch (e) {
-        liste.innerHTML = '<li style="color:#fca5a5;">Feil</li>';
+        liste.innerHTML = '<li style="color:#ef4444;">Feil</li>';
     }
 }
 
@@ -1523,13 +1527,13 @@ function oppdaterSiriusUI(s) {
 
     const tilk = document.getElementById('sirius-tilkobling');
     tilk.textContent = s.tilkoblet ? 'Tilkoblet (USB)' : 'Frakoblet';
-    tilk.style.color = s.tilkoblet ? '#6ee7b7' : '#fca5a5';
+    tilk.style.color = s.tilkoblet ? '#10b981' : '#ef4444';
 
     document.getElementById('sirius-serienr').textContent = s.serienummer || '-';
 
     const stream = document.getElementById('sirius-streaming');
     stream.textContent = s.streamer ? 'Aktiv' : 'Inaktiv';
-    stream.style.color = s.streamer ? '#6ee7b7' : '#94a3b8';
+    stream.style.color = s.streamer ? '#10b981' : '#6b6b6b';
 
     const rate = document.getElementById('sirius-daterate');
     rate.textContent = s.data_rate_kbs > 0 ? s.data_rate_kbs.toFixed(1) + ' KB/s' : '-';
@@ -1562,7 +1566,7 @@ async function hentSiriusData() {
             return;
         }
         el.innerHTML = Object.entries(data).map(([k, v]) =>
-            `<div style="color:#a5b4fc;">${esc(k)}: <span style="color:#6ee7b7;">${v.siste !== null ? v.siste : '-'}</span> (${v.antall} samples)</div>`
+            `<div style="color:#B85420;">${esc(k)}: <span style="color:#10b981;">${v.siste !== null ? v.siste : '-'}</span> (${v.antall} samples)</div>`
         ).join('');
     } catch (e) {}
 }
