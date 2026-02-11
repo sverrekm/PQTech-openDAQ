@@ -192,6 +192,18 @@ class OpenDAQBro:
 
             self._tilgjengelig = True
 
+            # Logg hostname-oppslag (viktig for OPC-UA endpoint URL)
+            try:
+                import socket as _sock
+                hostname = _sock.gethostname()
+                resolved = _sock.gethostbyname(hostname)
+                log.info(f"  Hostname: {hostname} -> {resolved}")
+                if resolved.startswith("127."):
+                    log.warning(f"  ADVARSEL: hostname resolver til {resolved}!")
+                    log.warning("  OPC-UA vil annonsere localhost. Fiks /etc/hosts.")
+            except Exception:
+                pass
+
             log.info("")
             log.info("  openDAQ nettverksbro aktiv:")
             log.info(f"    OPC-UA:           {ip}:4840")

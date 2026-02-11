@@ -45,6 +45,9 @@ services:
       # Sett til "true" for aa bruke direkte SIRIUS USB-driver
       # (uten openDAQ SDK - bruker reverse-engineered protokoll)
       - NATIVE_SIRIUS=true
+      # OPC-UA annonsert IP (tom = auto-detect foerste interface)
+      # Sett til spesifikk IP viss Pi har fleire nettverk
+      #- OPENDAQ_IP=192.168.1.160
 
     deploy:
       resources:

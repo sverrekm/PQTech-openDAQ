@@ -54,6 +54,20 @@ FELLES_ARGS=(
     --utmappe /data/maalinger
 )
 
+# Fix hostname-oppslag for OPC-UA server
+# open62541 bruker gethostname() for endpoint-URL. Docker mapper hostname
+# til 127.0.x.x i /etc/hosts, saa OPC-UA annonserer localhost.
+# Fiks: erstatt med faktisk IP slik at DewesoftX kan koble til.
+OPENDAQ_IP="${OPENDAQ_IP:-$(hostname -I | awk '{print $1}')}"
+if [ -n "$OPENDAQ_IP" ]; then
+    CURRENT_HOST=$(hostname)
+    if grep -q "127\.0.*${CURRENT_HOST}" /etc/hosts; then
+        sed -i "s/127\.0[.0-9]*[[:space:]]*${CURRENT_HOST}/${OPENDAQ_IP} ${CURRENT_HOST}/" /etc/hosts
+        echo "  OPC-UA hostname: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
+    fi
+fi
+echo ""
+
 export PYTHONPATH=/app
 
 if [ "${NATIVE_SIRIUS}" = "true" ]; then
