@@ -45,11 +45,8 @@ if [ ! -e /sys/kernel/debug/usb/usbmon ]; then
 fi
 echo ""
 
-# Bygg openDAQ server-kommando
-# Bruker python3 -m fordi openDAQ ModuleManager trenger '' i sys.path
-# for aa finne .module.so-filer i CWD
-export PYTHONPATH=/app
-SERVER_CMD=(python3 -m opendaq_server
+# Felles maaling-argumenter
+FELLES_ARGS=(
     --maale-intervall "${MAALE_INTERVALL}"
     --maale-varighet "${MAALE_VARIGHET}"
     --sample-rate "${SAMPLE_RATE}"
@@ -57,18 +54,45 @@ SERVER_CMD=(python3 -m opendaq_server
     --utmappe /data/maalinger
 )
 
-if [ -n "${TILKOBLING}" ]; then
-    SERVER_CMD+=(--tilkobling "${TILKOBLING}")
+export PYTHONPATH=/app
+
+if [ "${NATIVE_SIRIUS}" = "true" ]; then
+    # ========================================
+    # SIRIUS Direkte-modus (uten openDAQ SDK)
+    # Bruker reverse-engineered USB-protokoll
+    # ========================================
+    echo "Modus: SIRIUS Direkte (native USB-driver)"
+    echo ""
+
+    SERVER_CMD=(python3 -m sirius_server "${FELLES_ARGS[@]}")
+
+    cd /app
+    echo "Starter SIRIUS server + web UI..."
+    echo ""
+    exec "${SERVER_CMD[@]}"
+else
+    # ========================================
+    # openDAQ-modus (standard)
+    # ========================================
+    echo "Modus: openDAQ SDK"
+    echo ""
+
+    # Bruker python3 -m fordi openDAQ ModuleManager trenger '' i sys.path
+    # for aa finne .module.so-filer i CWD
+    SERVER_CMD=(python3 -m opendaq_server "${FELLES_ARGS[@]}")
+
+    if [ -n "${TILKOBLING}" ]; then
+        SERVER_CMD+=(--tilkobling "${TILKOBLING}")
+    fi
+
+    if [ "${BRUK_SIMULATOR}" = "true" ]; then
+        SERVER_CMD+=(--simulator)
+    fi
+
+    # openDAQ laster moduler fra CWD via '' i sys.path
+    cd /usr/local/lib
+
+    echo "Starter openDAQ server + web UI..."
+    echo ""
+    exec "${SERVER_CMD[@]}"
 fi
-
-if [ "${BRUK_SIMULATOR}" = "true" ]; then
-    SERVER_CMD+=(--simulator)
-fi
-
-# openDAQ laster moduler fra CWD via '' i sys.path
-cd /usr/local/lib
-
-# Start openDAQ server + web UI (same prosess for delt tilstand)
-echo "Starter openDAQ server + web UI..."
-echo ""
-exec "${SERVER_CMD[@]}"

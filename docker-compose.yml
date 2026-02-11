@@ -42,6 +42,9 @@ services:
       - MAALE_VARIGHET=5
       - SAMPLE_RATE=1000
       - MAALE_PREFIKS=maaling
+      # Sett til "true" for aa bruke direkte SIRIUS USB-driver
+      # (uten openDAQ SDK - bruker reverse-engineered protokoll)
+      - NATIVE_SIRIUS=true
 
     deploy:
       resources:

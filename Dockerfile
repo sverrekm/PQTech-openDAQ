@@ -131,6 +131,9 @@ COPY sirius_protokoll.py .
 COPY sirius_dekoder.py .
 COPY sirius_adc_leser.py .
 COPY sirius_sniffer.py .
+COPY sirius_protokoll_impl.py .
+COPY sirius_driver.py .
+COPY sirius_server.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
@@ -144,6 +147,6 @@ ENV WEB_PORT=8080
 ENV TILKOBLING=""
 
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
-    CMD pgrep -f opendaq_server.py > /dev/null || exit 1
+    CMD pgrep -f "opendaq_server.py\|sirius_server.py" > /dev/null || exit 1
 
 ENTRYPOINT ["./docker-entrypoint.sh"]

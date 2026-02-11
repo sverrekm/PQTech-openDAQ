@@ -19,6 +19,20 @@ from flask import Flask, jsonify, request, send_file
 
 import usbip_manager
 
+# Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
+try:
+    from sirius_server import (
+        hent_driver_status as _sirius_hent_status,
+        hent_enhetsinfo as _sirius_hent_info,
+        start_driver_streaming as _sirius_start,
+        stopp_driver_streaming as _sirius_stopp,
+        hent_siste_data as _sirius_hent_data,
+        rekoble_driver as _sirius_rekoble,
+    )
+    SIRIUS_DIREKTE = True
+except ImportError:
+    SIRIUS_DIREKTE = False
+
 app = Flask(__name__)
 
 
@@ -348,6 +362,82 @@ def api_probe_last_ned(filnavn):
     if not os.path.isfile(fil_path):
         return jsonify({"feil": "Fil ikke funnet"}), 404
     return send_file(fil_path, as_attachment=True)
+
+
+# --- SIRIUS Direkte API ---
+
+@app.route("/api/sirius/status")
+def api_sirius_status():
+    """Driver-status, streaming, daterate."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"tilgjengelig": False, "melding": "SIRIUS direkte-driver ikke lastet"})
+    try:
+        status = _sirius_hent_status()
+        status["tilgjengelig"] = True
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({"tilgjengelig": True, "feil": str(e)})
+
+
+@app.route("/api/sirius/info")
+def api_sirius_info():
+    """Enhetsidentifikasjon (serienr, firmware, slotter)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"feil": "SIRIUS direkte-driver ikke lastet"}), 503
+    try:
+        return jsonify(_sirius_hent_info())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/sirius/start", methods=["POST"])
+def api_sirius_start():
+    """Start streaming."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "Driver ikke lastet"}), 503
+    data = request.get_json(silent=True) or {}
+    sample_rate = data.get("sample_rate")
+    kanaler = data.get("kanaler")
+    try:
+        suksess, melding = _sirius_start(sample_rate, kanaler)
+        return jsonify({"suksess": suksess, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/sirius/stopp", methods=["POST"])
+def api_sirius_stopp():
+    """Stopp streaming."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "Driver ikke lastet"}), 503
+    try:
+        suksess, melding = _sirius_stopp()
+        return jsonify({"suksess": suksess, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/sirius/data")
+def api_sirius_data():
+    """Siste data-snapshot (per-kanal verdier)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"feil": "Driver ikke lastet"}), 503
+    try:
+        return jsonify(_sirius_hent_data())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/sirius/rekoble", methods=["POST"])
+def api_sirius_rekoble():
+    """Proev aa koble til paa nytt."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "Driver ikke lastet"}), 503
+    try:
+        suksess, melding = _sirius_rekoble()
+        return jsonify({"suksess": suksess, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
 # --- USB/IP API ---
@@ -703,6 +793,36 @@ body {
             Pi maaler og lagrer data lokalt, uavhengig av DewesoftX-tilkobling.
             Filer lagres i <code style="color:#a5b4fc;">/data/maalinger/</code>
         </p>
+    </div>
+
+    <div class="kort" id="sirius-direkte-kort" style="display:none;">
+        <h2>SIRIUS Direkte</h2>
+        <div class="info-grid">
+            <div class="info-boks">
+                <div class="label">Tilkobling</div>
+                <div class="verdi" id="sirius-tilkobling">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Serienummer</div>
+                <div class="verdi" id="sirius-serienr">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Streaming</div>
+                <div class="verdi" id="sirius-streaming">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Daterate</div>
+                <div class="verdi" id="sirius-daterate">-</div>
+            </div>
+        </div>
+        <div id="sirius-slot-info" style="margin-top:0.75rem;"></div>
+        <div id="sirius-kanal-verdier" style="margin-top:0.75rem; font-family:'Consolas',monospace; font-size:0.85rem;"></div>
+        <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
+            <button class="btn btn-gronn" id="btn-sirius-start" onclick="siriusStart()">Start streaming</button>
+            <button class="btn btn-rod" id="btn-sirius-stopp" onclick="siriusStopp()" style="display:none;">Stopp streaming</button>
+            <button class="btn btn-blaa" id="btn-sirius-rekoble" onclick="siriusRekoble()">Rekoble</button>
+        </div>
+        <div id="sirius-melding" class="melding"></div>
     </div>
 
     <div class="kort">
@@ -1384,10 +1504,124 @@ async function hentRapporter() {
     }
 }
 
+// --- SIRIUS Direkte ---
+async function hentSiriusStatus() {
+    try {
+        const res = await fetch('/api/sirius/status');
+        const data = await res.json();
+        oppdaterSiriusUI(data);
+    } catch (e) {}
+}
+
+function oppdaterSiriusUI(s) {
+    const kort = document.getElementById('sirius-direkte-kort');
+    if (!s.tilgjengelig) {
+        kort.style.display = 'none';
+        return;
+    }
+    kort.style.display = 'block';
+
+    const tilk = document.getElementById('sirius-tilkobling');
+    tilk.textContent = s.tilkoblet ? 'Tilkoblet (USB)' : 'Frakoblet';
+    tilk.style.color = s.tilkoblet ? '#6ee7b7' : '#fca5a5';
+
+    document.getElementById('sirius-serienr').textContent = s.serienummer || '-';
+
+    const stream = document.getElementById('sirius-streaming');
+    stream.textContent = s.streamer ? 'Aktiv' : 'Inaktiv';
+    stream.style.color = s.streamer ? '#6ee7b7' : '#94a3b8';
+
+    const rate = document.getElementById('sirius-daterate');
+    rate.textContent = s.data_rate_kbs > 0 ? s.data_rate_kbs.toFixed(1) + ' KB/s' : '-';
+
+    // Vis/skjul knapper
+    document.getElementById('btn-sirius-start').style.display = s.streamer ? 'none' : 'inline-block';
+    document.getElementById('btn-sirius-stopp').style.display = s.streamer ? 'inline-block' : 'none';
+
+    // Slot-info
+    const slotEl = document.getElementById('sirius-slot-info');
+    if (s.slot_info && s.slot_info.length > 0) {
+        slotEl.innerHTML = '<div class="kanal-liste">' +
+            s.slot_info.map(slot =>
+                `<span class="tag ${slot.aktiv ? 'tag-aktiv' : 'tag-usb'}">` +
+                `Slot ${slot.kanal}${slot.aktiv ? '' : ' (inaktiv)'}</span>`
+            ).join('') + '</div>';
+    }
+
+    // Hent live data hvis streaming
+    if (s.streamer) hentSiriusData();
+}
+
+async function hentSiriusData() {
+    try {
+        const res = await fetch('/api/sirius/data');
+        const data = await res.json();
+        const el = document.getElementById('sirius-kanal-verdier');
+        if (Object.keys(data).length === 0) {
+            el.textContent = '';
+            return;
+        }
+        el.innerHTML = Object.entries(data).map(([k, v]) =>
+            `<div style="color:#a5b4fc;">${esc(k)}: <span style="color:#6ee7b7;">${v.siste !== null ? v.siste : '-'}</span> (${v.antall} samples)</div>`
+        ).join('');
+    } catch (e) {}
+}
+
+async function siriusStart() {
+    const btn = document.getElementById('btn-sirius-start');
+    btn.disabled = true;
+    btn.textContent = 'Starter...';
+    try {
+        const res = await fetch('/api/sirius/start', {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: '{}'});
+        const data = await res.json();
+        const mel = document.getElementById('sirius-melding');
+        mel.textContent = data.melding;
+        mel.className = 'melding ' + (data.suksess ? 'melding-ok' : 'melding-feil');
+    } catch (e) {
+        const mel = document.getElementById('sirius-melding');
+        mel.textContent = 'Feil: ' + e.message;
+        mel.className = 'melding melding-feil';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Start streaming';
+    hentSiriusStatus();
+}
+
+async function siriusStopp() {
+    const btn = document.getElementById('btn-sirius-stopp');
+    btn.disabled = true;
+    btn.textContent = 'Stopper...';
+    try {
+        await fetch('/api/sirius/stopp', {method: 'POST'});
+    } catch (e) {}
+    btn.disabled = false;
+    btn.textContent = 'Stopp streaming';
+    hentSiriusStatus();
+}
+
+async function siriusRekoble() {
+    const btn = document.getElementById('btn-sirius-rekoble');
+    btn.disabled = true;
+    btn.textContent = 'Rekobler...';
+    try {
+        const res = await fetch('/api/sirius/rekoble', {method: 'POST'});
+        const data = await res.json();
+        const mel = document.getElementById('sirius-melding');
+        mel.textContent = data.melding;
+        mel.className = 'melding ' + (data.suksess ? 'melding-ok' : 'melding-feil');
+    } catch (e) {}
+    btn.disabled = false;
+    btn.textContent = 'Rekoble';
+    hentSiriusStatus();
+}
+
 hentData();
 hentUsbipStatus();
+hentSiriusStatus();
 setInterval(hentData, 5000);
 setInterval(hentUsbipStatus, 5000);
+setInterval(hentSiriusStatus, 3000);
 </script>
 
 </body>
