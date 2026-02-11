@@ -129,6 +129,9 @@ COPY usbip_manager.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
+# udev-regler for Dewesoft USB-enheter (tilgang uten root)
+COPY 99-dewesoft.rules /etc/udev/rules.d/
+
 ENV OPENDAQ_MODULE_PATH=/usr/local/lib
 ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV PYTHONUNBUFFERED=1

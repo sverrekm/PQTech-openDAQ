@@ -22,23 +22,67 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Finn script-mappen (der 99-dewesoft.rules ligger)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # 1. Installer usbip-verktoy
-echo "[1/3] Installerer usbip-verktoy..."
+echo "[1/5] Installerer usbip-verktoy..."
 apt-get update -qq
 apt-get install -y --no-install-recommends linux-tools-common linux-tools-generic usbip hwdata usbutils
 echo "      OK"
 
-# 2. Last kernel-moduler
+# 2. Installer udev-regler for Dewesoft USB-enheter
 echo ""
-echo "[2/3] Laster kernel-moduler..."
+echo "[2/5] Installerer udev-regler for Dewesoft..."
+RULES_SRC="${SCRIPT_DIR}/99-dewesoft.rules"
+RULES_DST="/etc/udev/rules.d/99-dewesoft.rules"
+if [ -f "$RULES_SRC" ]; then
+    cp "$RULES_SRC" "$RULES_DST"
+    chmod 644 "$RULES_DST"
+    udevadm control --reload-rules
+    udevadm trigger
+    echo "      Installert: $RULES_DST"
+    echo "      udev-regler lastet paa nytt"
+else
+    echo "      [ADVARSEL] $RULES_SRC ikke funnet, oppretter manuelt..."
+    cat > "$RULES_DST" << 'RULES'
+# Dewesoft USB-enheter - tilgang uten root
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ced", MODE="0666", GROUP="plugdev", TAG+="uaccess"
+RULES
+    chmod 644 "$RULES_DST"
+    udevadm control --reload-rules
+    udevadm trigger
+    echo "      Minimal udev-regel installert: $RULES_DST"
+fi
+
+# 3. Legg bruker til plugdev-gruppen
+echo ""
+echo "[3/5] Konfigurerer brukertilgang..."
+SUDO_BRUKER="${SUDO_USER:-$(logname 2>/dev/null || echo '')}"
+if [ -n "$SUDO_BRUKER" ] && [ "$SUDO_BRUKER" != "root" ]; then
+    if ! groups "$SUDO_BRUKER" | grep -q plugdev; then
+        usermod -aG plugdev "$SUDO_BRUKER"
+        echo "      $SUDO_BRUKER lagt til i plugdev-gruppen"
+        echo "      (Logg ut og inn igjen for at endringen trer i kraft)"
+    else
+        echo "      $SUDO_BRUKER er allerede i plugdev-gruppen"
+    fi
+else
+    echo "      [INFO] Kunne ikke finne bruker, legg til manuelt:"
+    echo "      sudo usermod -aG plugdev <brukernavn>"
+fi
+
+# 4. Last kernel-moduler
+echo ""
+echo "[4/5] Laster kernel-moduler..."
 modprobe usbip-core
 modprobe usbip-host
 echo "      usbip-core  OK"
 echo "      usbip-host  OK"
 
-# 3. Gjor modulene permanente (last ved oppstart)
+# 5. Gjor modulene permanente (last ved oppstart)
 echo ""
-echo "[3/3] Konfigurerer automatisk modullasting..."
+echo "[5/5] Konfigurerer automatisk modullasting..."
 MODULES_FILE="/etc/modules"
 if ! grep -q "^usbip-core" "$MODULES_FILE" 2>/dev/null; then
     echo "usbip-core" >> "$MODULES_FILE"
@@ -56,15 +100,33 @@ fi
 # Verifiser
 echo ""
 echo "Verifiserer..."
+
+# Kernel-moduler
 if lsmod | grep -q usbip_core; then
-    echo "  usbip_core: lastet"
+    echo "  usbip_core:    lastet"
 else
     echo "  [ADVARSEL] usbip_core ikke lastet"
 fi
 if lsmod | grep -q usbip_host; then
-    echo "  usbip_host: lastet"
+    echo "  usbip_host:    lastet"
 else
     echo "  [ADVARSEL] usbip_host ikke lastet"
+fi
+
+# udev-regler
+if [ -f /etc/udev/rules.d/99-dewesoft.rules ]; then
+    echo "  udev-regler:   installert"
+else
+    echo "  [ADVARSEL] udev-regler mangler"
+fi
+
+# Sjekk om SIRIUS er tilkoblet
+if lsusb 2>/dev/null | grep -qi "1ced"; then
+    SIRIUS_INFO=$(lsusb | grep -i "1ced")
+    echo "  Dewesoft USB:  FUNNET"
+    echo "    $SIRIUS_INFO"
+else
+    echo "  Dewesoft USB:  Ikke tilkoblet (koble til SIRIUS og sjekk med lsusb)"
 fi
 
 echo ""
@@ -74,7 +136,13 @@ echo "=============================================="
 echo ""
 echo "Neste steg:"
 echo "  1. Koble SIRIUS til Pi via USB"
-echo "  2. Bygg og start container: docker compose up -d --build"
-echo "  3. Apne http://$(hostname -I | awk '{print $1}'):8080"
-echo "  4. Klikk 'Del SIRIUS via USB/IP' i web UI"
+echo "  2. Verifiser tilgang: lsusb | grep 1ced"
+echo "  3. Bygg og start container: docker compose up -d --build"
+echo "  4. Apne http://$(hostname -I | awk '{print $1}'):8080"
+echo "  5. Klikk 'Del SIRIUS via USB/IP' i web UI"
+echo ""
+echo "Feilsoking:"
+echo "  - Hvis SIRIUS ikke vises i lsusb: proov annen USB-port/kabel"
+echo "  - Hvis tilgangsfeil: logg ut og inn (plugdev-gruppe)"
+echo "  - Sjekk udev-regler: udevadm test /sys/bus/usb/devices/<busid>"
 echo ""

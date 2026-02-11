@@ -1,0 +1,23 @@
+# Dewesoft USB-enheter - udev-regler for Linux
+# ==============================================
+# Gir tilgang til Dewesoft-enheter uten root.
+# Brukes av openDAQ, libusb og USB/IP.
+#
+# Installer:
+#   sudo cp 99-dewesoft.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+# Etter installasjon: koble fra og til SIRIUS igjen.
+
+# Dewesoft SIRIUS (VID 1ced, PID 1002)
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ced", ATTR{idProduct}=="1002", MODE="0666", GROUP="plugdev", TAG+="uaccess", SYMLINK+="dewesoft_sirius"
+
+# Dewesoft BOX Power (VID 1ced, PID 2000)
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ced", ATTR{idProduct}=="2000", MODE="0666", GROUP="plugdev", TAG+="uaccess", SYMLINK+="dewesoft_box"
+
+# Dewesoft Battery Pack (VID 1ced, PID 3001)
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ced", ATTR{idProduct}=="3001", MODE="0666", GROUP="plugdev", TAG+="uaccess", SYMLINK+="dewesoft_battery"
+
+# Catch-all for alle Dewesoft-enheter (VID 1ced)
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ced", MODE="0666", GROUP="plugdev", TAG+="uaccess"
