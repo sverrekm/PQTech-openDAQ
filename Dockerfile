@@ -129,6 +129,7 @@ COPY usbip_manager.py .
 COPY sirius_usb_probe.py .
 COPY sirius_protokoll.py .
 COPY sirius_dekoder.py .
+COPY sirius_adc_leser.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 

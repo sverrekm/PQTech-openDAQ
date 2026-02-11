@@ -247,6 +247,45 @@ def api_probe_dekoder():
     return jsonify({"suksess": True, "melding": f"Dekoder startet ({modus})"})
 
 
+@app.route("/api/probe/adc", methods=["POST"])
+def api_probe_adc():
+    """Les ADC-data fra SIRIUS og analyser kanalstruktur."""
+    data = request.get_json(silent=True) or {}
+    varighet = min(data.get("varighet", 5), 30)
+    lagre = data.get("lagre", False)
+
+    with _probe_lock:
+        if _probe_resultat["status"] == "running":
+            return jsonify({"suksess": False, "melding": "Probe kjorer allerede"})
+        _probe_resultat.update({"status": "running", "output": "", "rapport": None})
+
+    cmd_args = ["python3", "/app/sirius_adc_leser.py",
+                "--varighet", str(varighet), "--kanaler", "--raa"]
+    if lagre:
+        cmd_args.append("--lagre")
+
+    def _kjor():
+        try:
+            r = subprocess.run(
+                cmd_args, capture_output=True, text=True, timeout=60, cwd="/app"
+            )
+            with _probe_lock:
+                _probe_resultat.update({
+                    "status": "done",
+                    "output": r.stdout + ("\n--- STDERR ---\n" + r.stderr if r.stderr else ""),
+                    "returncode": r.returncode,
+                })
+        except subprocess.TimeoutExpired:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": "Timeout (60s)"})
+        except Exception as e:
+            with _probe_lock:
+                _probe_resultat.update({"status": "error", "output": str(e)})
+
+    threading.Thread(target=_kjor, daemon=True).start()
+    return jsonify({"suksess": True, "melding": f"ADC-lesing startet ({varighet}s)"})
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -662,6 +701,12 @@ body {
             <button class="btn btn-blaa" id="btn-dekod-stream" onclick="kjorDekoder('stream')">
                 Start stroemming
             </button>
+            <button class="btn btn-gronn" id="btn-adc" onclick="kjorAdc(5)" style="background:#1e3a5f;color:#fbbf24;font-weight:600;">
+                Les ADC (5s)
+            </button>
+            <button class="btn btn-gronn" id="btn-adc-lagre" onclick="kjorAdc(10, true)" style="background:#065f46;color:#fbbf24;font-weight:600;">
+                Les + Lagre (10s)
+            </button>
         </div>
         <div id="probe-status" class="melding" style="display:none;"></div>
         <pre id="probe-output" style="display:none; background:#0f172a; border:1px solid #334155;
@@ -1025,6 +1070,57 @@ async function kjorProbe() {
             // Ignorer midlertidige feil
         }
     }, 1000);
+}
+
+async function kjorAdc(varighet, lagre) {
+    const statusEl = document.getElementById('probe-status');
+    const outputEl = document.getElementById('probe-output');
+    const alleBtns = ['btn-probe', 'btn-proto-scan', 'btn-proto-stream', 'btn-proto-full',
+                      'btn-dekod-info', 'btn-dekod-stream', 'btn-adc', 'btn-adc-lagre'];
+    alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
+    statusEl.textContent = 'Leser ADC-data (' + varighet + 's)...';
+    statusEl.className = 'melding melding-ok';
+    statusEl.style.display = 'block';
+    outputEl.style.display = 'block';
+    outputEl.textContent = 'Leser fra SIRIUS...\\n';
+
+    try {
+        const res = await fetch('/api/probe/adc', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({varighet: varighet, lagre: !!lagre})
+        });
+        const data = await res.json();
+        if (!data.suksess) {
+            statusEl.textContent = data.melding;
+            statusEl.className = 'melding melding-feil';
+            alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+            return;
+        }
+    } catch (e) {
+        statusEl.textContent = 'Nettverksfeil: ' + e.message;
+        statusEl.className = 'melding melding-feil';
+        alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+        return;
+    }
+
+    if (probePolling) clearInterval(probePolling);
+    probePolling = setInterval(async () => {
+        try {
+            const res = await fetch('/api/probe/status');
+            const data = await res.json();
+            if (data.status === 'done' || data.status === 'error') {
+                clearInterval(probePolling);
+                probePolling = null;
+                outputEl.textContent = data.output || '(tomt resultat)';
+                statusEl.textContent = data.status === 'done' ? 'ADC-lesing fullfort' : 'ADC-lesing feilet';
+                statusEl.className = 'melding ' + (data.status === 'done' ? 'melding-ok' : 'melding-feil');
+                alleBtns.forEach(id => { const b = document.getElementById(id); if(b) b.disabled = false; });
+            } else if (data.status === 'running') {
+                outputEl.textContent = 'Leser ADC-data...\\n' + (data.output || '');
+            }
+        } catch (e) {}
+    }, 1500);
 }
 
 async function kjorDekoder(modus) {
