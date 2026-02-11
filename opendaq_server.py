@@ -319,6 +319,12 @@ def start_server(args):
     log.info("  openDAQ Server - Dewesoft SIRIUS")
     log.info("=" * 60)
 
+    # openDAQ laster moduler (.module.so) fra CWD
+    module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
+    if os.path.isdir(module_path):
+        os.chdir(module_path)
+        log.info(f"Modulsok: {module_path}")
+
     # Opprett openDAQ-instans
     instance = daq.Instance()
 
