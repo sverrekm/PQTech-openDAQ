@@ -326,7 +326,10 @@ def start_server(args):
         log.info(f"Modulsok: {module_path}")
 
     # Opprett openDAQ-instans
+    log.info(f"CWD foer Instance: {os.getcwd()}")
     instance = daq.Instance()
+    log.info(f"CWD etter Instance: {os.getcwd()}")
+    log.info(f"Tilgjengelige enhetstyper: {list(instance.available_device_types)}")
 
     # Finn og koble til enhet
     device = None
