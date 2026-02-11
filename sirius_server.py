@@ -61,7 +61,7 @@ class LoggRingBuffer(logging.Handler):
             return list(self._linjer[-antall:])
 
 
-_logg_buffer = LoggRingBuffer(kapasitet=500)
+_logg_buffer = LoggRingBuffer(kapasitet=2000)
 _logg_buffer.setFormatter(logging.Formatter(
     '%(asctime)s [%(name)s/%(levelname)s] %(message)s', datefmt='%H:%M:%S'
 ))
@@ -413,11 +413,41 @@ def hent_enhetsinfo():
         return {}
 
 
+_opendaq_feil = None
+
+
 def hent_opendaq_status():
     """Hent openDAQ bridge status for web API."""
     if _opendaq_bro is not None:
         return _opendaq_bro.hent_status()
-    return {"tilgjengelig": False, "aktiv": False, "feil": "Ikkje starta"}
+    return {"tilgjengelig": False, "aktiv": False, "feil": _opendaq_feil or "Ikkje starta"}
+
+
+def restart_opendaq_bro():
+    """Manuell restart av openDAQ bridge (for debugging/retry)."""
+    global _opendaq_bro, _opendaq_feil
+    if _opendaq_bro is not None:
+        try:
+            _opendaq_bro.stopp()
+        except Exception:
+            pass
+
+    try:
+        _opendaq_bro = OpenDAQBro()
+        ok = _opendaq_bro.start()
+        if ok:
+            _opendaq_feil = None
+            log.info("openDAQ bridge restarta OK")
+            return True, "openDAQ bridge starta"
+        else:
+            _opendaq_feil = _opendaq_bro.hent_status().get("feil", "start() returnerte False")
+            log.warning(f"openDAQ bridge restart feila: {_opendaq_feil}")
+            return False, _opendaq_feil
+    except Exception as e:
+        _opendaq_feil = str(e)
+        log.error(f"openDAQ bridge restart exception: {e}")
+        _opendaq_bro = None
+        return False, _opendaq_feil
 
 
 def start_driver_streaming(sample_rate=None, kanaler=None):
@@ -582,14 +612,21 @@ def start_server(args):
     web_traad.start()
 
     # Start openDAQ nettverksservere (referanse-enhet for DewesoftX-tilkobling)
-    global _opendaq_bro
+    global _opendaq_bro, _opendaq_feil
     try:
+        log.info("Startar openDAQ nettverksbro...")
         _opendaq_bro = OpenDAQBro()
         ok = _opendaq_bro.start()
-        if not ok:
-            log.info("  openDAQ bridge ikkje tilgjengeleg - kun native SIRIUS-modus")
+        if ok:
+            log.info("openDAQ bridge starta OK")
+        else:
+            _opendaq_feil = _opendaq_bro.hent_status().get("feil", "start() returnerte False")
+            log.warning(f"openDAQ bridge ikkje tilgjengeleg: {_opendaq_feil}")
     except Exception as e:
-        log.warning(f"openDAQ bridge feilet: {e} - fortset utan nettverksservere")
+        _opendaq_feil = str(e)
+        log.error(f"openDAQ bridge exception: {_opendaq_feil}")
+        import traceback
+        log.error(traceback.format_exc())
         _opendaq_bro = None
 
     # Start autonom maaling (kun hvis tilkoblet)

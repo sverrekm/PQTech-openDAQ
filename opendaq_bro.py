@@ -29,10 +29,12 @@ log = logging.getLogger('opendaq_bro')
 
 # Grasioes openDAQ-import
 _daq = None
+_daq_import_feil = None
 try:
     import opendaq as _daq
-except ImportError:
-    log.warning("opendaq Python-bindingar ikkje tilgjengelege - bridge deaktivert")
+except Exception as e:
+    _daq_import_feil = str(e)
+    log.warning(f"opendaq Python-bindingar ikkje tilgjengelege: {e}")
 
 
 class OpenDAQBro:
@@ -81,9 +83,10 @@ class OpenDAQBro:
     def start(self) -> bool:
         """Start openDAQ instance, legg til referanse-enhet, start servere."""
         if _daq is None:
+            feil = f"opendaq ikkje tilgjengeleg: {_daq_import_feil or 'import feila'}"
             with self._lock:
-                self._status["feil"] = "opendaq ikkje tilgjengeleg"
-            log.warning("openDAQ bridge: bindingar ikkje tilgjengelege")
+                self._status["feil"] = feil
+            log.warning(f"openDAQ bridge: {feil}")
             return False
 
         try:

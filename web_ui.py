@@ -32,6 +32,7 @@ try:
         send_debug_kommando as _sirius_debug_cmd,
         frigjor_usb as _sirius_frigjor_usb,
         hent_opendaq_status as _opendaq_hent_status,
+        restart_opendaq_bro as _opendaq_restart,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -483,6 +484,18 @@ def api_opendaq_status():
         return jsonify({"tilgjengelig": False, "feil": str(e)})
 
 
+@app.route("/api/opendaq/restart", methods=["POST"])
+def api_opendaq_restart():
+    """Restart openDAQ bridge manuelt."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "SIRIUS-driver ikkje lasta"}), 503
+    try:
+        ok, melding = _opendaq_restart()
+        return jsonify({"suksess": ok, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -900,12 +913,12 @@ body {
         <div id="sirius-melding" class="melding"></div>
     </div>
 
-    <div class="kort" id="opendaq-bro-kort" style="display:none;">
+    <div class="kort" id="opendaq-bro-kort">
         <h2>openDAQ Nettverksservere</h2>
         <div class="info-grid">
             <div class="info-boks">
                 <div class="label">Status</div>
-                <div class="verdi" id="odaq-status">-</div>
+                <div class="verdi" id="odaq-status">Sjekker...</div>
             </div>
             <div class="info-boks">
                 <div class="label">Enhet</div>
@@ -920,28 +933,35 @@ body {
                 <div class="verdi" id="odaq-servere">-</div>
             </div>
         </div>
-        <div class="info-grid" style="margin-top:0.5rem;">
-            <div class="info-boks">
-                <div class="label">OPC-UA</div>
-                <div class="verdi" style="font-size:0.75rem;" id="odaq-opcua">-</div>
+        <div id="odaq-feil-boks" class="melding" style="display:none;"></div>
+        <div id="odaq-detaljer" style="display:none;">
+            <div class="info-grid" style="margin-top:0.5rem;">
+                <div class="info-boks">
+                    <div class="label">OPC-UA</div>
+                    <div class="verdi" style="font-size:0.75rem;" id="odaq-opcua">-</div>
+                </div>
+                <div class="info-boks">
+                    <div class="label">Native Streaming</div>
+                    <div class="verdi" style="font-size:0.75rem;" id="odaq-ns">-</div>
+                </div>
+                <div class="info-boks">
+                    <div class="label">WebSocket</div>
+                    <div class="verdi" style="font-size:0.75rem;" id="odaq-ws">-</div>
+                </div>
             </div>
-            <div class="info-boks">
-                <div class="label">Native Streaming</div>
-                <div class="verdi" style="font-size:0.75rem;" id="odaq-ns">-</div>
+            <div class="cmd-boks" style="margin-top:0.75rem;">
+                <code id="odaq-dewesoftx-addr">-</code>
+                <button class="btn-kopier" onclick="kopierTekst('odaq-dewesoftx-addr')">Kopier</button>
             </div>
-            <div class="info-boks">
-                <div class="label">WebSocket</div>
-                <div class="verdi" style="font-size:0.75rem;" id="odaq-ws">-</div>
-            </div>
+            <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.5rem;">
+                DewesoftX: Settings &gt; Devices &gt; Dewesoft NET &gt; Manually add &gt; skriv inn adressa over.
+                <br>Fase 1: Referanse-enhet med simulerte kanalar.
+            </p>
         </div>
-        <div class="cmd-boks" style="margin-top:0.75rem;">
-            <code id="odaq-dewesoftx-addr">-</code>
-            <button class="btn-kopier" onclick="kopierTekst('odaq-dewesoftx-addr')">Kopier</button>
+        <div style="margin-top:0.75rem;">
+            <button class="btn btn-blaa" id="btn-odaq-restart" onclick="restartOpendaq()">Restart bridge</button>
+            <span id="odaq-restart-melding" style="font-size:0.8rem; margin-left:0.5rem;"></span>
         </div>
-        <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.5rem;">
-            DewesoftX: Settings &gt; Devices &gt; Dewesoft NET &gt; Manually add &gt; skriv inn adressa over.
-            <br>Fase 1: Referanse-enhet med simulerte kanalar.
-        </p>
     </div>
 
     <div class="kort">
@@ -1739,24 +1759,60 @@ async function hentOpendaqStatus() {
     try {
         const res = await fetch('/api/opendaq/status');
         const s = await res.json();
-        const kort = document.getElementById('opendaq-bro-kort');
-        if (!s.tilgjengelig && !s.aktiv) { kort.style.display='none'; return; }
-        kort.style.display='block';
         const st = document.getElementById('odaq-status');
-        st.textContent = s.aktiv ? 'Aktiv' : 'Inaktiv';
-        st.style.color = s.aktiv ? '#10b981' : '#ef4444';
-        document.getElementById('odaq-enhet').textContent = s.enhet_namn || '-';
-        document.getElementById('odaq-kanalar').textContent =
-            s.kanalar && s.kanalar.length > 0 ? s.kanalar.length : '-';
-        document.getElementById('odaq-servere').textContent =
-            s.servere && s.servere.length > 0 ? s.servere.length : '-';
-        const ip = s.ip || '-';
-        const p = s.porter || {};
-        document.getElementById('odaq-opcua').textContent = ip + ':' + (p.opcua || 4840);
-        document.getElementById('odaq-ns').textContent = ip + ':' + (p.native_streaming || 7420);
-        document.getElementById('odaq-ws').textContent = ip + ':' + (p.websocket || 7414);
-        document.getElementById('odaq-dewesoftx-addr').textContent = ip;
+        const feilBoks = document.getElementById('odaq-feil-boks');
+        const detaljer = document.getElementById('odaq-detaljer');
+
+        if (s.aktiv) {
+            st.textContent = 'Aktiv';
+            st.style.color = '#10b981';
+            feilBoks.style.display = 'none';
+            detaljer.style.display = 'block';
+            document.getElementById('odaq-enhet').textContent = s.enhet_namn || '-';
+            document.getElementById('odaq-kanalar').textContent =
+                s.kanalar && s.kanalar.length > 0 ? s.kanalar.length : '-';
+            document.getElementById('odaq-servere').textContent =
+                s.servere && s.servere.length > 0 ? s.servere.length : '-';
+            const ip = s.ip || '-';
+            const p = s.porter || {};
+            document.getElementById('odaq-opcua').textContent = ip + ':' + (p.opcua || 4840);
+            document.getElementById('odaq-ns').textContent = ip + ':' + (p.native_streaming || 7420);
+            document.getElementById('odaq-ws').textContent = ip + ':' + (p.websocket || 7414);
+            document.getElementById('odaq-dewesoftx-addr').textContent = ip;
+        } else {
+            st.textContent = 'Inaktiv';
+            st.style.color = '#ef4444';
+            detaljer.style.display = 'none';
+            document.getElementById('odaq-enhet').textContent = '-';
+            document.getElementById('odaq-kanalar').textContent = '-';
+            document.getElementById('odaq-servere').textContent = '-';
+            if (s.feil) {
+                feilBoks.textContent = s.feil;
+                feilBoks.className = 'melding melding-feil';
+                feilBoks.style.display = 'block';
+            }
+        }
     } catch(e) {}
+}
+
+async function restartOpendaq() {
+    const btn = document.getElementById('btn-odaq-restart');
+    const mel = document.getElementById('odaq-restart-melding');
+    btn.disabled = true;
+    btn.textContent = 'Starter...';
+    mel.textContent = '';
+    try {
+        const res = await fetch('/api/opendaq/restart', {method: 'POST'});
+        const data = await res.json();
+        mel.textContent = data.melding;
+        mel.style.color = data.suksess ? '#10b981' : '#ef4444';
+        hentOpendaqStatus();
+    } catch(e) {
+        mel.textContent = 'Feil: ' + e.message;
+        mel.style.color = '#ef4444';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Restart bridge';
 }
 
 hentData();
