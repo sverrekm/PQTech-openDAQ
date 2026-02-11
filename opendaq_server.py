@@ -514,6 +514,16 @@ def start_server(args):
         log.info(f"  Utmappe: {args.utmappe}")
     log.info("=" * 60)
 
+    # Start web-grensesnitt i bakgrunnstraad (same prosess = delt _instance)
+    def _start_web():
+        from web_ui import app as flask_app
+        web_port = int(os.environ.get("WEB_PORT", 8080))
+        log.info(f"Web UI startet paa port {web_port}")
+        flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False)
+
+    web_traad = threading.Thread(target=_start_web, daemon=True)
+    web_traad.start()
+
     # Start autonom maaling i bakgrunnen
     _maaler = AutonomMaaler(
         instance=_instance,

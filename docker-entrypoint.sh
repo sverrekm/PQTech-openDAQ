@@ -57,13 +57,7 @@ fi
 # openDAQ laster moduler fra CWD via '' i sys.path
 cd /usr/local/lib
 
-# Start web-grensesnitt i bakgrunnen
-echo "[1/2] Starter web-grensesnitt paa port ${WEB_PORT}..."
-PYTHONPATH=/app python3 -m web_ui &
-WEB_PID=$!
-echo "      OK (PID: ${WEB_PID})"
-
-# Start openDAQ server (forgrunnen - holder containeren kjorende)
-echo "[2/2] Starter openDAQ server..."
+# Start openDAQ server + web UI (same prosess for delt tilstand)
+echo "Starter openDAQ server + web UI..."
 echo ""
 exec "${SERVER_CMD[@]}"
