@@ -50,6 +50,7 @@ server_status = {
     "siste_maaling": None,
     "antall_maalinger": 0,
     "autonom": False,
+    "tilkoblet": False,
     "streamer": False,
     "sample_rate": 0,
     "data_rate_kbs": 0.0,
@@ -259,9 +260,15 @@ def hent_driver_status():
         if _driver is not None:
             drv_status = _driver.hent_status()
             server_status.update({
+                "tilkoblet": drv_status.get("tilkoblet", False),
                 "streamer": drv_status.get("streamer", False),
                 "data_rate_kbs": drv_status.get("data_rate_kbs", 0.0),
+                "slot_info": drv_status.get("slotter", []),
+                "serienummer": drv_status.get("serienummer", ""),
+                "enhet_navn": drv_status.get("enhetsstreng", "") or server_status.get("enhet_navn", ""),
             })
+        else:
+            server_status["tilkoblet"] = False
         return dict(server_status)
 
 
@@ -278,7 +285,9 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
     global _driver
     with _lock:
         if _driver is None:
-            return False, "Driver ikke initialisert"
+            return False, "Driver ikke initialisert - klikk Rekoble foerst"
+        if not _driver.er_tilkoblet():
+            return False, "Ikke tilkoblet - klikk Rekoble foerst"
         if _driver.streamer:
             return False, "Streaming kjorer allerede"
         try:
@@ -326,22 +335,34 @@ def hent_siste_data():
 
 
 def rekoble_driver():
-    """Proev rekobling fra web API."""
+    """Proev rekobling fra web API. Oppretter driver hvis den ikke finnes."""
     global _driver
     with _lock:
-        if _driver is None:
-            return False, "Driver ikke initialisert"
         try:
+            if _driver is None:
+                log.info("Oppretter ny SiriusDriver for rekobling...")
+                _driver = SiriusDriver()
+
             ok = _driver.rekoble()
             if ok:
                 info = _driver.hent_status()
                 server_status.update({
+                    "kjorer": True,
+                    "tilkoblet": True,
                     "enhet_navn": info.get("enhetsstreng", ""),
                     "serienummer": info.get("serienummer", ""),
+                    "slot_info": info.get("slotter", []),
+                    "kanaler": [
+                        f"Kanal {s['kanal']}" for s in info.get("slotter", []) if s.get("aktiv")
+                    ],
                     "feil": None,
                 })
-            return ok, "Rekoblet" if ok else "Rekobling feilet"
+                return True, "Rekoblet"
+            else:
+                server_status["feil"] = "Rekobling feilet"
+                return False, "Rekobling feilet"
         except SiriusFeil as e:
+            server_status["feil"] = str(e)
             return False, str(e)
 
 
@@ -357,41 +378,52 @@ def start_server(args):
 
     # Opprett og koble til driver
     _driver = SiriusDriver()
+    enhet_tilkoblet = False
 
     try:
         _driver.koble_til()
+        enhet_tilkoblet = True
     except SiriusIkkeFunnet:
         server_status["feil"] = "SIRIUS ikke funnet paa USB"
         log.error("SIRIUS ikke funnet paa USB!")
         log.error("Sjekk at enheten er koblet til og at USB-tilgang er gitt")
-        return
+        log.error("Web UI starter likevel - bruk Rekoble-knappen naar enheten er klar")
     except SiriusFeil as e:
         server_status["feil"] = str(e)
         log.error(f"Tilkoblingsfeil: {e}")
-        return
+        log.error("Web UI starter likevel - bruk Rekoble-knappen naar enheten er klar")
 
     # Oppdater global status
-    info = _driver.hent_status()
-    kanaler = [
-        f"Kanal {s['kanal']}" for s in info.get('slotter', []) if s.get('aktiv')
-    ]
-
-    server_status.update({
-        "kjorer": True,
-        "enhet_navn": info.get("enhetsstreng", "SIRIUS"),
-        "serienummer": info.get("serienummer", ""),
-        "tilkobling": "USB direkte",
-        "kanaler": kanaler,
-        "slot_info": info.get("slotter", []),
-        "startet": datetime.now().isoformat(),
-        "feil": None,
-        "sample_rate": args.sample_rate,
-    })
+    if enhet_tilkoblet:
+        info = _driver.hent_status()
+        kanaler = [
+            f"Kanal {s['kanal']}" for s in info.get('slotter', []) if s.get('aktiv')
+        ]
+        server_status.update({
+            "kjorer": True,
+            "tilkoblet": True,
+            "enhet_navn": info.get("enhetsstreng", "SIRIUS"),
+            "serienummer": info.get("serienummer", ""),
+            "tilkobling": "USB direkte",
+            "kanaler": kanaler,
+            "slot_info": info.get("slotter", []),
+            "startet": datetime.now().isoformat(),
+            "feil": None,
+            "sample_rate": args.sample_rate,
+        })
+    else:
+        server_status.update({
+            "kjorer": True,
+            "tilkoblet": False,
+            "tilkobling": "USB direkte",
+            "startet": datetime.now().isoformat(),
+            "sample_rate": args.sample_rate,
+        })
 
     log.info("")
-    log.info(f"  Enhet:       {server_status['enhet_navn']}")
-    log.info(f"  Serienr:     {server_status['serienummer']}")
-    log.info(f"  Kanaler:     {len(kanaler)}")
+    log.info(f"  Enhet:       {server_status['enhet_navn'] or '(ikke tilkoblet)'}")
+    log.info(f"  Serienr:     {server_status['serienummer'] or '-'}")
+    log.info(f"  Kanaler:     {len(server_status['kanaler'])}")
     log.info(f"  Sample rate: {args.sample_rate} Hz")
     if args.maale_intervall > 0:
         log.info(f"  Maaling:     hvert {args.maale_intervall}s, varighet {args.maale_varighet}s")
@@ -399,7 +431,7 @@ def start_server(args):
     log.info("=" * 60)
     log.info("")
 
-    # Start web-grensesnitt i bakgrunnstraad
+    # Start web-grensesnitt i bakgrunnstraad (starter ALLTID, ogsaa uten enhet)
     def _start_web():
         from web_ui import app as flask_app
         web_port = int(os.environ.get("WEB_PORT", 8080))
@@ -409,16 +441,19 @@ def start_server(args):
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()
 
-    # Start autonom maaling
-    _maaler = SiriusAutonomMaaler(
-        driver=_driver,
-        utmappe=args.utmappe,
-        intervall=args.maale_intervall,
-        varighet=args.maale_varighet,
-        sample_rate=args.sample_rate,
-        prefiks=args.prefiks,
-    )
-    _maaler.start()
+    # Start autonom maaling (kun hvis tilkoblet)
+    if enhet_tilkoblet:
+        _maaler = SiriusAutonomMaaler(
+            driver=_driver,
+            utmappe=args.utmappe,
+            intervall=args.maale_intervall,
+            varighet=args.maale_varighet,
+            sample_rate=args.sample_rate,
+            prefiks=args.prefiks,
+        )
+        _maaler.start()
+    else:
+        log.info("Autonom maaling utsatt til enhet kobles til")
 
     # Hold serveren kjorende
     stopp = False
