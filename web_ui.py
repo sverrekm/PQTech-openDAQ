@@ -15,6 +15,8 @@ import socket
 
 from flask import Flask, jsonify, request
 
+import usbip_manager
+
 app = Flask(__name__)
 
 
@@ -120,6 +122,30 @@ def api_koble_til():
         return jsonify({"suksess": suksess, "melding": melding})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+# --- USB/IP API ---
+
+@app.route("/api/usbip/status")
+def api_usbip_status():
+    """Returnerer USB/IP-status."""
+    return jsonify(usbip_manager.hent_usbip_status())
+
+
+@app.route("/api/usbip/del", methods=["POST"])
+def api_usbip_del():
+    """Start USB-deling (bind + usbipd)."""
+    suksess, melding = usbip_manager.del_enhet()
+    status = usbip_manager.hent_usbip_status()
+    return jsonify({"suksess": suksess, "melding": melding, "status": status})
+
+
+@app.route("/api/usbip/stopp", methods=["POST"])
+def api_usbip_stopp():
+    """Stopp USB-deling (unbind)."""
+    suksess, melding = usbip_manager.stopp_deling()
+    status = usbip_manager.hent_usbip_status()
+    return jsonify({"suksess": suksess, "melding": melding, "status": status})
 
 
 # --- HTML ---
@@ -348,6 +374,52 @@ body {
 }
 .melding-ok { background: #064e3b; color: #6ee7b7; display: block; }
 .melding-feil { background: #7f1d1d; color: #fca5a5; display: block; }
+.btn-rod { background: #7f1d1d; color: #fca5a5; }
+.btn-rod:hover { background: #991b1b; }
+.usbip-status-rad {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+}
+.usbip-knapper {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+.usbip-instruksjoner {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+.usbip-instruksjoner h3 {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 500;
+}
+.usbip-instruksjoner ol {
+    list-style: decimal;
+    padding-left: 1.25rem;
+}
+.usbip-instruksjoner li {
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    padding: 0.25rem 0;
+}
+.usbip-instruksjoner code {
+    background: #1e293b;
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.25rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.8rem;
+    color: #a5b4fc;
+}
 </style>
 </head>
 <body>
@@ -442,11 +514,55 @@ body {
         </p>
     </div>
 
-    <div class="kort">
-        <h2>USB-enheter paa Pi</h2>
-        <ul class="usb-liste" id="usb-liste">
-            <li><span class="spinner"></span> Laster...</li>
-        </ul>
+    <div class="kort" id="usbip-kort">
+        <h2>USB/IP &mdash; DEL SIRIUS</h2>
+        <div class="usbip-status-rad">
+            <span class="dot" id="usbip-dot"></span>
+            <span id="usbip-status-tekst">Sjekker...</span>
+        </div>
+        <div class="info-grid">
+            <div class="info-boks">
+                <div class="label">SIRIUS paa USB</div>
+                <div class="verdi" id="usbip-sirius-funnet">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Bus-ID</div>
+                <div class="verdi" id="usbip-busid">-</div>
+            </div>
+            <div class="info-boks">
+                <div class="label">Deling</div>
+                <div class="verdi" id="usbip-deling">-</div>
+            </div>
+        </div>
+        <div id="usbip-feil" class="melding"></div>
+        <div class="usbip-knapper">
+            <button class="btn btn-gronn" id="btn-usbip-del" onclick="usbipDel()">
+                Del SIRIUS via USB/IP
+            </button>
+            <button class="btn btn-rod" id="btn-usbip-stopp" onclick="usbipStopp()" style="display:none;">
+                Stopp deling
+            </button>
+        </div>
+        <div class="usbip-instruksjoner" id="usbip-instruksjoner" style="display:none;">
+            <h3>Paa Windows-PC</h3>
+            <ol>
+                <li>Installer <a href="https://github.com/cezanne/usbip-win2/releases" target="_blank" style="color:#93c5fd;">usbip-win2</a></li>
+                <li>Apne PowerShell som Administrator</li>
+                <li>List enheter:
+                    <div class="cmd-boks" style="margin-top:0.35rem;">
+                        <code id="usbip-cmd-list">usbip list -r <span id="usbip-pi-ip">-</span></code>
+                        <button class="btn-kopier" onclick="kopierTekst('usbip-cmd-list')">Kopier</button>
+                    </div>
+                </li>
+                <li>Koble til SIRIUS:
+                    <div class="cmd-boks" style="margin-top:0.35rem;">
+                        <code id="usbip-cmd-attach">usbip attach -r <span id="usbip-pi-ip2">-</span> -b <span id="usbip-attach-busid">X-Y</span></code>
+                        <button class="btn-kopier" onclick="kopierTekst('usbip-cmd-attach')">Kopier</button>
+                    </div>
+                </li>
+                <li>Apne DewesoftX &mdash; SIRIUS vises som lokal USB-enhet</li>
+            </ol>
+        </div>
     </div>
 
 </div>
@@ -505,16 +621,111 @@ function oppdaterUI(s) {
     // DewesoftX adresse
     document.getElementById('pi-adresse').textContent = s.ip || '-';
 
-    // USB-enheter
-    const liste = document.getElementById('usb-liste');
-    if (s.usb_enheter.length > 0) {
-        liste.innerHTML = s.usb_enheter.map(u => {
-            const erSirius = /sirius|dewesoft|dewetron/i.test(u);
-            return `<li class="${erSirius ? 'sirius' : ''}">${esc(u)}</li>`;
-        }).join('');
-    } else {
-        liste.innerHTML = '<li>Ingen USB-enheter funnet</li>';
+}
+
+// --- USB/IP ---
+async function hentUsbipStatus() {
+    try {
+        const res = await fetch('/api/usbip/status');
+        const data = await res.json();
+        oppdaterUsbipUI(data);
+    } catch (e) {
+        console.error('USB/IP feil:', e);
     }
+}
+
+function oppdaterUsbipUI(u) {
+    const dot = document.getElementById('usbip-dot');
+    const tekst = document.getElementById('usbip-status-tekst');
+    const btnDel = document.getElementById('btn-usbip-del');
+    const btnStopp = document.getElementById('btn-usbip-stopp');
+    const instruksjoner = document.getElementById('usbip-instruksjoner');
+    const feilEl = document.getElementById('usbip-feil');
+
+    // SIRIUS funnet paa USB
+    const siriusFunnet = document.getElementById('usbip-sirius-funnet');
+    siriusFunnet.textContent = u.sirius_paa_usb ? (u.sirius_enhet_funnet || 'Ja') : 'Nei';
+    siriusFunnet.style.color = u.sirius_paa_usb ? '#6ee7b7' : '#fca5a5';
+
+    // Bus-ID
+    document.getElementById('usbip-busid').textContent = u.busid || u.sirius_busid_funnet || '-';
+
+    // Deling-status
+    const delingEl = document.getElementById('usbip-deling');
+    if (u.deling_aktiv) {
+        dot.className = 'dot dot-gronn';
+        tekst.textContent = 'Deling aktiv paa port 3240';
+        delingEl.textContent = 'Aktiv';
+        delingEl.style.color = '#6ee7b7';
+        btnDel.style.display = 'none';
+        btnStopp.style.display = 'inline-block';
+        instruksjoner.style.display = 'block';
+        // Oppdater kommandoer med riktig IP og busid
+        const ip = document.getElementById('info-ip').textContent || '-';
+        document.getElementById('usbip-pi-ip').textContent = ip;
+        document.getElementById('usbip-pi-ip2').textContent = ip;
+        document.getElementById('usbip-attach-busid').textContent = u.busid || 'X-Y';
+    } else {
+        dot.className = 'dot dot-rod';
+        tekst.textContent = u.tilgjengelig ? 'Klar' : 'USB/IP utilgjengelig';
+        delingEl.textContent = 'Inaktiv';
+        delingEl.style.color = '#94a3b8';
+        btnDel.style.display = 'inline-block';
+        btnDel.disabled = !u.sirius_paa_usb || !u.tilgjengelig;
+        btnStopp.style.display = 'none';
+        instruksjoner.style.display = 'none';
+    }
+
+    // Feilmelding
+    if (u.feil) {
+        feilEl.textContent = u.feil;
+        feilEl.className = 'melding melding-feil';
+    } else {
+        feilEl.className = 'melding';
+        feilEl.textContent = '';
+    }
+}
+
+async function usbipDel() {
+    const btn = document.getElementById('btn-usbip-del');
+    btn.disabled = true;
+    btn.textContent = 'Starter deling...';
+    try {
+        const res = await fetch('/api/usbip/del', {method: 'POST'});
+        const data = await res.json();
+        if (data.status) oppdaterUsbipUI(data.status);
+        if (!data.suksess) {
+            const feilEl = document.getElementById('usbip-feil');
+            feilEl.textContent = data.melding;
+            feilEl.className = 'melding melding-feil';
+        }
+    } catch (e) {
+        const feilEl = document.getElementById('usbip-feil');
+        feilEl.textContent = 'Nettverksfeil: ' + e.message;
+        feilEl.className = 'melding melding-feil';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Del SIRIUS via USB/IP';
+}
+
+async function usbipStopp() {
+    const btn = document.getElementById('btn-usbip-stopp');
+    btn.disabled = true;
+    btn.textContent = 'Stopper...';
+    try {
+        const res = await fetch('/api/usbip/stopp', {method: 'POST'});
+        const data = await res.json();
+        if (data.status) oppdaterUsbipUI(data.status);
+    } catch (e) {
+        console.error('Stopp feil:', e);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Stopp deling';
+}
+
+function kopierTekst(elementId) {
+    const el = document.getElementById(elementId);
+    navigator.clipboard.writeText(el.textContent);
 }
 
 function kopier() {
@@ -604,7 +815,9 @@ function visMelding(tekst, erFeil) {
 }
 
 hentData();
+hentUsbipStatus();
 setInterval(hentData, 5000);
+setInterval(hentUsbipStatus, 5000);
 </script>
 
 </body>

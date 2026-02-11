@@ -4,3 +4,4 @@ maalinger/
 *.png
 *.service
 setup_usbip.sh
+setup_host.sh

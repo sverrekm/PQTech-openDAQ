@@ -17,6 +17,8 @@ services:
     volumes:
       # USB-enheter
       - /dev/bus/usb:/dev/bus/usb
+      # sysfs - usbip trenger tilgang for aa finne enheter og binde
+      - /sys:/sys
       # Maalinger (persistente)
       - ./maalinger:/data/maalinger
       # Konfigurasjon (lagres mellom omstarter)

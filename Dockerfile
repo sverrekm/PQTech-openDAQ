@@ -108,6 +108,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxi6 \
     libfreetype6 \
     usbutils \
+    usbip \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
@@ -124,6 +125,7 @@ WORKDIR /app
 
 COPY opendaq_server.py .
 COPY web_ui.py .
+COPY usbip_manager.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
