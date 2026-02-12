@@ -14,6 +14,9 @@ services:
     # Host-nettverk for openDAQ-servere og web UI
     network_mode: host
 
+    # PID host-namespace: nsenter -t 1 treng tilgang til hostens PID 1
+    pid: host
+
     volumes:
       # USB-enheter
       - /dev/bus/usb:/dev/bus/usb
@@ -21,12 +24,6 @@ services:
       - /sys:/sys
       # debugfs - usbmon for passiv USB-trafikkfangst
       - /sys/kernel/debug:/sys/kernel/debug
-      # Host kernel-moduler - noedvendig for modprobe inne i container
-      - /lib/modules:/lib/modules:ro
-      # Host modules-load.d - gjor kernel-moduler permanente ved reboot
-      - /etc/modules-load.d:/host-modules-load
-      # Host udev-regler - installer Dewesoft USB-regler paa hosten
-      - /etc/udev/rules.d:/host-udev-rules
       # Maalinger (persistente)
       - ./maalinger:/data/maalinger
       # Konfigurasjon (lagres mellom omstarter)

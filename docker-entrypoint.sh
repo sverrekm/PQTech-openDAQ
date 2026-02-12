@@ -20,35 +20,42 @@ echo ""
 # Kjorer automatisk ved oppstart — erstatter setup_host.sh
 # Krever: privileged=true og /sys montert
 # =============================================================
-echo "[Host-oppsett] Laster kernel-moduler..."
+# nsenter kjorer kommandoer i hostens namespace (PID 1)
+# Noedvendig fordi containerens modprobe/kmod ikkje kan laste host-moduler direkte
+HOST="nsenter -t 1 -m -u -i -n -p --"
+
+echo "[Host-oppsett] Laster kernel-moduler via host namespace..."
 for MODUL in usbip-core usbip-host usbmon; do
     MODUL_UNDERSCORE=$(echo "$MODUL" | tr '-' '_')
     if lsmod 2>/dev/null | grep -q "$MODUL_UNDERSCORE"; then
         echo "  $MODUL: allerede lastet"
     else
-        if modprobe "$MODUL" 2>/dev/null; then
+        if $HOST modprobe "$MODUL" 2>&1; then
             echo "  $MODUL: lastet OK"
         else
-            echo "  $MODUL: FEILET (kernel-modul mangler paa hosten)"
+            echo "  $MODUL: FEILET"
         fi
     fi
 done
 
 # Gjor modulene permanente slik at de overlever reboot
-if [ -d /host-modules-load ]; then
-    if [ ! -f /host-modules-load/dewesoft-usbip.conf ]; then
-        printf 'usbip-core\nusbip-host\nusbmon\n' > /host-modules-load/dewesoft-usbip.conf
+$HOST sh -c '
+    if [ ! -f /etc/modules-load.d/dewesoft-usbip.conf ]; then
+        printf "usbip-core\nusbip-host\nusbmon\n" > /etc/modules-load.d/dewesoft-usbip.conf
         echo "  Moduler gjort permanente i /etc/modules-load.d/"
     fi
-fi
+' 2>/dev/null || echo "  [ADVARSEL] Kunne ikkje skrive modules-load.d"
 
 # Installer udev-regler paa hosten (for USB-tilgang uten root)
-if [ -d /host-udev-rules ] && [ ! -f /host-udev-rules/99-dewesoft.rules ]; then
-    cp /etc/udev/rules.d/99-dewesoft.rules /host-udev-rules/ 2>/dev/null && \
-        echo "  udev-regler installert paa hosten" || true
-    # Trigger udev reload via udevadm paa hosten (nsenter)
-    nsenter -t 1 -m -- udevadm control --reload-rules 2>/dev/null || true
-    nsenter -t 1 -m -- udevadm trigger 2>/dev/null || true
+if [ -f /etc/udev/rules.d/99-dewesoft.rules ]; then
+    $HOST sh -c '
+        if [ ! -f /etc/udev/rules.d/99-dewesoft.rules ]; then
+            cat > /etc/udev/rules.d/99-dewesoft.rules
+            udevadm control --reload-rules
+            udevadm trigger
+            echo "  udev-regler installert paa hosten"
+        fi
+    ' < /etc/udev/rules.d/99-dewesoft.rules 2>/dev/null || true
 fi
 
 # Monter debugfs for usbmon
