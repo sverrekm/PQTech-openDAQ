@@ -145,6 +145,12 @@ class OpenDAQBro:
 
             ip = self._hent_ip()
 
+            # Fiks tomme server capability-adresser.
+            # openDAQ sin mDNS-baserte interface-oppdaging fungerer ikkje
+            # paalidelig i Docker (fleire bridge-interface). Sett adresser
+            # manuelt slik at DewesoftX-klienten finn streaming-endepunkta.
+            self._fiks_server_capabilities(ip)
+
             with self._lock:
                 self._status.update({
                     "tilgjengelig": True,
@@ -207,6 +213,40 @@ class OpenDAQBro:
         self._instance = None
         self._device = None
         log.info("openDAQ nettverksbro stoppa")
+
+    def _fiks_server_capabilities(self, ip):
+        """Sett server capability-adresser manuelt for Docker-miljoe."""
+        try:
+            info = self._device.info
+            caps = info.server_capabilities
+            for cap in caps:
+                proto_id = cap.protocol_id
+                prefix = cap.prefix
+                port = cap.port
+                conn_str = cap.connection_string
+                if conn_str:
+                    continue  # Allereie satt, ikkje overskriv
+
+                # Bygg connection string: daq.ns://ip:port/
+                ny_conn = f"{prefix}://{ip}:{port}/"
+                try:
+                    cap.set_property_value("PrimaryConnectionString", ny_conn)
+                    log.info(f"  Cap {proto_id}: PrimaryConnectionString = {ny_conn}")
+                except Exception as e:
+                    log.warning(f"  Cap {proto_id}: set PrimaryConnectionString feilet: {e}")
+
+                try:
+                    cap.set_property_value("Addresses", [ip])
+                    log.info(f"  Cap {proto_id}: Addresses = [{ip}]")
+                except Exception as e:
+                    log.warning(f"  Cap {proto_id}: set Addresses feilet: {e}")
+
+                try:
+                    cap.set_property_value("ConnectionStrings", [ny_conn])
+                except Exception as e:
+                    log.warning(f"  Cap {proto_id}: set ConnectionStrings feilet: {e}")
+        except Exception as e:
+            log.warning(f"  Fiks server capabilities feilet: {e}")
 
     @staticmethod
     def _hent_ip():
