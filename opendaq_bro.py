@@ -2,9 +2,9 @@
 """
 openDAQ Nettverksbro - DewesoftX-tilkobling via openDAQ-servere
 ================================================================
-Startar openDAQ Instance med referanse-enhet og standard servere
-(OPC-UA, Native Streaming, WebSocket) slik at DewesoftX kan koble
-til via "Dewesoft NET" medan den native SIRIUS-driveren kjorer.
+Startar openDAQ Instance med referanse-enhet som ROOT og standard
+servere (OPC-UA, Native Streaming, WebSocket) slik at DewesoftX kan
+koble til via openDAQ-protokollen.
 
 Fase 1: Referanse-enhet (daqref://device0) med simulerte kanalar
 Fase 2: Reelle SIRIUS-data via MockSignal/OPC-UA (framtidig)
@@ -41,9 +41,9 @@ class OpenDAQBro:
     """
     openDAQ nettverksbro.
 
-    Opprettar openDAQ Instance med referanse-enhet og startar
-    OPC-UA + Native Streaming + WebSocket servere.
-    DewesoftX finn eininga via "Dewesoft NET".
+    Opprettar openDAQ Instance med referanse-enhet som ROOT DEVICE
+    og startar OPC-UA + Native Streaming + WebSocket servere.
+    DewesoftX finn eininga via openDAQ mDNS-oppdaging.
     """
 
     def __init__(self, module_path=None):
@@ -81,7 +81,7 @@ class OpenDAQBro:
             return dict(self._status)
 
     def start(self) -> bool:
-        """Start openDAQ instance, legg til referanse-enhet, start servere."""
+        """Start openDAQ instance med root device, deretter servere."""
         if _daq is None:
             feil = f"opendaq ikkje tilgjengeleg: {_daq_import_feil or 'import feila'}"
             with self._lock:
@@ -93,39 +93,19 @@ class OpenDAQBro:
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
 
-            # openDAQ sin Instance()-wrapper set module_path til Python-pakke-
-            # mappa (site-packages/opendaq/), men .module.so-filene ligg i
-            # /usr/local/lib/. Bruk InstanceBuilder for aa legge til rett sti.
+            # Bruk InstanceBuilder med set_root_device slik at servere
+            # startar med eininga som rot (ikkje add_device som sub-eining).
+            # Same moenster som openDAQ sine eigne testar.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
-            log.info(f"  Modulstiar: {list(builder.module_paths_list)}")
-
-            # List .module.so-filer i modulstiane
-            for mpath in list(builder.module_paths_list):
-                try:
-                    import glob as _glob
-                    modulfiler = _glob.glob(os.path.join(mpath, "*.module.so"))
-                    log.info(f"  {mpath}: {len(modulfiler)} .module.so-filer")
-                    for mf in sorted(modulfiler):
-                        log.info(f"    {os.path.basename(mf)}")
-                except Exception as e:
-                    log.warning(f"  Kunne ikkje liste {mpath}: {e}")
+            builder.set_root_device("daqref://device0")
+            log.info("  Root device: daqref://device0")
 
             self._instance = builder.build()
-            log.info("  Instance oppretta")
+            log.info("  Instance oppretta med root device")
 
-            # List lasta modular
-            try:
-                modular = self._instance.modules
-                log.info(f"  Lasta modular: {len(modular)}")
-                for mod in modular:
-                    mod_id = mod.id if hasattr(mod, 'id') else str(mod)
-                    log.info(f"    {mod_id}")
-            except Exception as e:
-                log.warning(f"  Kunne ikkje liste modular: {e}")
-
-            # Legg til referanse-enhet (simulerte kanalar)
-            self._device = self._instance.add_device("daqref://device0")
+            # Hent root device
+            self._device = self._instance.root_device
             enhet_namn = ""
             try:
                 enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
@@ -143,37 +123,25 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanallisting feilet: {e}")
 
-            # List servere som allereie køyrer (InstanceBuilder auto-startar dei
-            # når servermodulane vert lasta frå /usr/local/lib/).
+            # Start servere eksplisitt ETTER root device er satt.
+            # (same moenster som openDAQ quickstart-test)
             servere = []
             try:
-                srv_list = self._instance.servers
+                srv_list = self._instance.add_standard_servers()
                 for s in srv_list:
                     srv_id = s.id if hasattr(s, 'id') else str(s)
                     servere.append(srv_id)
-                    log.info(f"  Server (auto): {srv_id}")
+                    log.info(f"  Server: {srv_id}")
             except Exception as e:
-                log.debug(f"  Kunne ikkje liste servere: {e}")
-
-            # Viss ingen servere auto-starta, proev manuelt
-            if not servere:
-                log.info("  Ingen auto-starta servere, proever manuelt...")
-                try:
-                    srv_list = self._instance.add_standard_servers()
-                    for s in srv_list:
-                        srv_id = s.id if hasattr(s, 'id') else str(s)
-                        servere.append(srv_id)
-                        log.info(f"  Server: {srv_id}")
-                except Exception as e:
-                    log.warning(f"  add_standard_servers feilet: {e}")
-                    for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
-                                     'OpenDAQNativeStreaming']:
-                        try:
-                            self._instance.add_server(srv_type, None)
-                            servere.append(srv_type)
-                            log.info(f"  Server (fallback): {srv_type}")
-                        except Exception as e2:
-                            log.warning(f"  {srv_type} feilet: {e2}")
+                log.warning(f"  add_standard_servers feilet: {e}")
+                for srv_type in ['OpenDAQOPCUA', 'OpenDAQNativeStreaming',
+                                 'OpenDAQLTStreaming']:
+                    try:
+                        self._instance.add_server(srv_type, None)
+                        servere.append(srv_type)
+                        log.info(f"  Server (fallback): {srv_type}")
+                    except Exception as e2:
+                        log.warning(f"  {srv_type} feilet: {e2}")
 
             ip = self._hent_ip()
 
@@ -209,7 +177,7 @@ class OpenDAQBro:
             log.info(f"    OPC-UA:           {ip}:4840")
             log.info(f"    Native Streaming: {ip}:7420")
             log.info(f"    WebSocket:        {ip}:7414")
-            log.info(f"    DewesoftX: Settings > Devices > Dewesoft NET > {ip}")
+            log.info(f"    DewesoftX: HW Settings > + > openDAQ device")
             log.info("")
             return True
 
