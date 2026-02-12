@@ -560,7 +560,7 @@ HTML_SIDE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PQTech - Dewesoft SIRIUS</title>
+<title>PQTech - openDAQ</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -829,7 +829,7 @@ body {
 <body>
 
 <div class="header">
-    <h1><span>PQTech</span> &mdash; Dewesoft SIRIUS</h1>
+    <h1><span>PQTech</span>-openDAQ</h1>
     <div id="status-badge" class="status-badge status-feil">
         <span class="dot dot-rod" id="status-dot"></span>
         <span id="status-tekst">Sjekker...</span>

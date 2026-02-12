@@ -113,6 +113,9 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Referanse-enhet: {enhet_namn}")
 
+            # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
+            self._konfig_kanalar()
+
             # List kanalar
             kanalar = []
             try:
@@ -124,24 +127,18 @@ class OpenDAQBro:
                 log.warning(f"  Kanallisting feilet: {e}")
 
             # Start servere eksplisitt ETTER root device er satt.
-            # (same moenster som openDAQ quickstart-test)
+            # IKKJE bruk add_standard_servers() - Native Streaming handshake
+            # er broten (server lukkar tilkoblinga under handshake).
+            # Start berre OPC-UA + LT Streaming (WebSocket).
             servere = []
-            try:
-                srv_list = self._instance.add_standard_servers()
-                for s in srv_list:
-                    srv_id = s.id if hasattr(s, 'id') else str(s)
-                    servere.append(srv_id)
-                    log.info(f"  Server: {srv_id}")
-            except Exception as e:
-                log.warning(f"  add_standard_servers feilet: {e}")
-                for srv_type in ['OpenDAQOPCUA', 'OpenDAQNativeStreaming',
-                                 'OpenDAQLTStreaming']:
-                    try:
-                        self._instance.add_server(srv_type, None)
-                        servere.append(srv_type)
-                        log.info(f"  Server (fallback): {srv_type}")
-                    except Exception as e2:
-                        log.warning(f"  {srv_type} feilet: {e2}")
+            for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
+                             'OpenDAQNewLTStreaming']:
+                try:
+                    self._instance.add_server(srv_type, None)
+                    servere.append(srv_type)
+                    log.info(f"  Server: {srv_type}")
+                except Exception as e2:
+                    log.warning(f"  {srv_type} feilet: {e2}")
 
             ip = self._hent_ip()
 
@@ -213,6 +210,49 @@ class OpenDAQBro:
         self._instance = None
         self._device = None
         log.info("openDAQ nettverksbro stoppa")
+
+    # Kanalopsett fraa Sundet-prosjektet (SIRIUSi-HS, 8xAI)
+    # AI 1-3: Spenning (HV, 1600V range, ±500V brukarskala, 50 Hz sinus)
+    # AI 4:   Spenning (HV, inaktiv)
+    # AI 5-7: Straum via CT (LV, 5V range, skaleringsfaktor 2000, ±100A)
+    # AI 8:   Spenning (LV, inaktiv)
+    SUNDET_KANALAR = [
+        {"namn": "AI 1", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 2", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 3", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 4", "amplitude": 0.0,   "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 5", "amplitude": 70.0,  "freq": 50.0, "range": (-100, 100)},
+        {"namn": "AI 6", "amplitude": 70.0,  "freq": 50.0, "range": (-100, 100)},
+        {"namn": "AI 7", "amplitude": 70.0,  "freq": 50.0, "range": (-100, 100)},
+        {"namn": "AI 8", "amplitude": 0.0,   "freq": 50.0, "range": (-100, 100)},
+    ]
+
+    def _konfig_kanalar(self):
+        """Sett 8 kanalar med namn og eigenskapar fraa Sundet-oppsettet."""
+        try:
+            self._device.set_property_value("NumberOfChannels", 8)
+            log.info("  NumberOfChannels sett til 8")
+        except Exception as e:
+            log.warning(f"  Kunne ikkje sette NumberOfChannels: {e}")
+            return
+
+        channels = list(self._device.channels)
+        for i, ch in enumerate(channels):
+            if i >= len(self.SUNDET_KANALAR):
+                break
+            cfg = self.SUNDET_KANALAR[i]
+            try:
+                ch.name = cfg["namn"]
+                ch.set_property_value("Amplitude", cfg["amplitude"])
+                ch.set_property_value("Frequency", cfg["freq"])
+                lo, hi = cfg["range"]
+                ch.set_property_value("CustomRange", _daq.Range(lo, hi))
+                # Sinus-boelgje for simulering
+                ch.set_property_value("Waveform", 0)
+                log.info(f"  {cfg['namn']}: amp={cfg['amplitude']}, "
+                         f"freq={cfg['freq']}, range=[{lo}, {hi}]")
+            except Exception as e:
+                log.warning(f"  Kanal {i} konfig feilet: {e}")
 
     def _fiks_server_capabilities(self, ip):
         """Sett server capability-adresser manuelt for Docker-miljoe."""

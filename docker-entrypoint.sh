@@ -15,6 +15,48 @@ echo "  $(date)"
 echo "=============================================="
 echo ""
 
+# =============================================================
+# Host-oppsett (kernel-moduler + udev)
+# Kjorer automatisk ved oppstart — erstatter setup_host.sh
+# Krever: privileged=true og /sys montert
+# =============================================================
+echo "[Host-oppsett] Laster kernel-moduler..."
+for MODUL in usbip-core usbip-host usbmon; do
+    MODUL_UNDERSCORE=$(echo "$MODUL" | tr '-' '_')
+    if lsmod 2>/dev/null | grep -q "$MODUL_UNDERSCORE"; then
+        echo "  $MODUL: allerede lastet"
+    else
+        if modprobe "$MODUL" 2>/dev/null; then
+            echo "  $MODUL: lastet OK"
+        else
+            echo "  $MODUL: FEILET (kernel-modul mangler paa hosten)"
+        fi
+    fi
+done
+
+# Gjor modulene permanente slik at de overlever reboot
+if [ -d /host-modules-load ]; then
+    if [ ! -f /host-modules-load/dewesoft-usbip.conf ]; then
+        printf 'usbip-core\nusbip-host\nusbmon\n' > /host-modules-load/dewesoft-usbip.conf
+        echo "  Moduler gjort permanente i /etc/modules-load.d/"
+    fi
+fi
+
+# Installer udev-regler paa hosten (for USB-tilgang uten root)
+if [ -d /host-udev-rules ] && [ ! -f /host-udev-rules/99-dewesoft.rules ]; then
+    cp /etc/udev/rules.d/99-dewesoft.rules /host-udev-rules/ 2>/dev/null && \
+        echo "  udev-regler installert paa hosten" || true
+    # Trigger udev reload via udevadm paa hosten (nsenter)
+    nsenter -t 1 -m -- udevadm control --reload-rules 2>/dev/null || true
+    nsenter -t 1 -m -- udevadm trigger 2>/dev/null || true
+fi
+
+# Monter debugfs for usbmon
+if [ ! -e /sys/kernel/debug/usb ]; then
+    mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+fi
+echo ""
+
 # Vis tilkobling
 if [ -n "${TILKOBLING}" ]; then
     echo "  Tilkobling: ${TILKOBLING}"
@@ -32,17 +74,6 @@ MAALE_PREFIKS="${MAALE_PREFIKS:-maaling}"
 
 echo "  Maaling:    hvert ${MAALE_INTERVALL}s, varighet ${MAALE_VARIGHET}s"
 echo "  Utmappe:    /data/maalinger"
-echo ""
-
-# Last usbmon for passiv USB-trafikkfangst (krever privileged mode)
-if [ ! -e /sys/kernel/debug/usb/usbmon ]; then
-    echo "Laster usbmon kernel-modul..."
-    modprobe usbmon 2>/dev/null && echo "  usbmon lastet OK" || echo "  usbmon ikke tilgjengelig (kjor 'sudo modprobe usbmon' paa hosten)"
-    # Monter debugfs hvis noedvendig
-    if [ ! -e /sys/kernel/debug/usb ]; then
-        mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
-    fi
-fi
 echo ""
 
 # Felles maaling-argumenter
@@ -73,7 +104,7 @@ echo ""
 
 # Deaktiver modular som ikkje trengst for server-modus og kan foraarsake
 # feil i DewesoftX-klienten (t.d. 0x80000014 ved GetAvailableFunctionBlockTypes)
-for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libsimulator_device_module; do
+for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libnative_stream_srv_module libsimulator_device_module; do
     MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
     if [ -n "$MODULFIL" ]; then
         mv "$MODULFIL" "${MODULFIL}.disabled"

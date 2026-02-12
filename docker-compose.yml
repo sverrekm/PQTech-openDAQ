@@ -21,6 +21,10 @@ services:
       - /sys:/sys
       # debugfs - usbmon for passiv USB-trafikkfangst
       - /sys/kernel/debug:/sys/kernel/debug
+      # Host modules-load.d - gjor kernel-moduler permanente ved reboot
+      - /etc/modules-load.d:/host-modules-load
+      # Host udev-regler - installer Dewesoft USB-regler paa hosten
+      - /etc/udev/rules.d:/host-udev-rules
       # Maalinger (persistente)
       - ./maalinger:/data/maalinger
       # Konfigurasjon (lagres mellom omstarter)

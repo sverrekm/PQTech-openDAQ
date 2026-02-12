@@ -28,7 +28,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 1. Installer usbip-verktoy
 echo "[1/5] Installerer usbip-verktoy..."
 apt-get update -qq
-apt-get install -y --no-install-recommends linux-tools-common linux-tools-generic usbip hwdata usbutils
+
+# Raspberry Pi OS (Debian) og Ubuntu bruker forskjellige pakkenavn
+if apt-cache show linux-tools-common &>/dev/null; then
+    # Ubuntu
+    apt-get install -y --no-install-recommends linux-tools-common linux-tools-generic usbip hwdata usbutils
+else
+    # Raspberry Pi OS / Debian
+    apt-get install -y --no-install-recommends usbip usbutils hwdata
+fi
 echo "      OK"
 
 # 2. Installer udev-regler for Dewesoft USB-enheter
