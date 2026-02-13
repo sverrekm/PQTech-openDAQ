@@ -33,10 +33,13 @@ try:
         frigjor_usb as _sirius_frigjor_usb,
         hent_opendaq_status as _opendaq_hent_status,
         restart_opendaq_bro as _opendaq_restart,
+        hent_opendaq_verdiar as _opendaq_hent_verdiar,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
     SIRIUS_DIREKTE = False
+
+from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
 
 app = Flask(__name__)
 
@@ -496,6 +499,75 @@ def api_opendaq_restart():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/opendaq/verdiar")
+def api_opendaq_verdiar():
+    """Siste kanal-verdiar frå openDAQ bridge (live-visning)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({})
+    try:
+        return jsonify(_opendaq_hent_verdiar())
+    except Exception as e:
+        return jsonify({"feil": str(e)})
+
+
+# --- Kanal-konfigurasjon API ---
+
+@app.route("/api/kanalar")
+def api_kanalar_hent():
+    """Hent gjeldande kanal-konfigurasjon."""
+    konfig = les_konfig()
+    return jsonify([k.til_dict() for k in konfig])
+
+
+@app.route("/api/kanalar", methods=["PUT"])
+def api_kanalar_oppdater():
+    """Oppdater kanal-konfigurasjon."""
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"suksess": False, "melding": "Ugyldig JSON"}), 400
+
+    konfig, feil = valider_konfig(data)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+
+    ok = lagre_konfig(konfig)
+    if ok:
+        return jsonify({"suksess": True, "melding": "Konfigurasjon lagra"})
+    return jsonify({"suksess": False, "melding": "Kunne ikkje lagre konfigurasjon"}), 500
+
+
+@app.route("/api/kanalar/reset", methods=["POST"])
+def api_kanalar_reset():
+    """Tilbakestill til standard kanal-konfigurasjon."""
+    from dataclasses import asdict
+    standard = [KanalKonfig(**asdict(k)) for k in STANDARD_KONFIG]
+    ok = lagre_konfig(standard)
+    if ok:
+        return jsonify({"suksess": True, "melding": "Tilbakestilt til standard"})
+    return jsonify({"suksess": False, "melding": "Kunne ikkje tilbakestille"}), 500
+
+
+@app.route("/api/kanalar/live")
+def api_kanalar_live():
+    """Hent live kanal-verdiar (frå openDAQ + driver)."""
+    resultat = {}
+
+    # openDAQ verdiar (oppdatert via data-callback)
+    if SIRIUS_DIREKTE:
+        try:
+            resultat["opendaq"] = _opendaq_hent_verdiar()
+        except Exception:
+            resultat["opendaq"] = {}
+
+        # Driver siste data snapshot
+        try:
+            resultat["driver"] = _sirius_hent_data()
+        except Exception:
+            resultat["driver"] = {}
+
+    return jsonify(resultat)
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -824,6 +896,92 @@ body {
     font-size: 0.8rem;
     color: #B85420;
 }
+/* Kanal-konfig tabell */
+.kanal-tabell {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 0.75rem;
+}
+.kanal-tabell th {
+    text-align: left;
+    padding: 0.5rem 0.4rem;
+    border-bottom: 2px solid #e0e0e0;
+    color: #6b6b6b;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+}
+.kanal-tabell td {
+    padding: 0.4rem;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+}
+.kanal-tabell tr.inaktiv td { opacity: 0.5; }
+.kanal-tabell input[type="text"],
+.kanal-tabell input[type="number"] {
+    border: 1px solid #e0e0e0;
+    border-radius: 0.25rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+    width: 100%;
+    outline: none;
+    background: #fff;
+}
+.kanal-tabell input:focus { border-color: #D76428; }
+.kanal-tabell select {
+    border: 1px solid #e0e0e0;
+    border-radius: 0.25rem;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.85rem;
+    outline: none;
+    background: #fff;
+}
+.kanal-tabell select:focus { border-color: #D76428; }
+.toggle-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    display: inline-block;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #ccc;
+    border-radius: 20px;
+    transition: 0.2s;
+}
+.toggle-slider:before {
+    content: "";
+    position: absolute;
+    width: 16px; height: 16px;
+    left: 2px; bottom: 2px;
+    background: #fff;
+    border-radius: 50%;
+    transition: 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: #10b981; }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(16px); }
+.kanal-live {
+    font-family: 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: #10b981;
+    min-width: 60px;
+    text-align: right;
+}
+.sparkline-container {
+    width: 80px;
+    height: 24px;
+    display: inline-block;
+    vertical-align: middle;
+}
+.sparkline-container canvas {
+    width: 80px;
+    height: 24px;
+}
 </style>
 </head>
 <body>
@@ -955,12 +1113,38 @@ body {
             </div>
             <p style="color:#6b6b6b; font-size:0.8rem; margin-top:0.5rem;">
                 DewesoftX: Settings &gt; Devices &gt; Dewesoft NET &gt; Manually add &gt; skriv inn adressa over.
-                <br>Fase 1: Referanse-enhet med simulerte kanalar.
+                <br>Reelle SIRIUS-data vert injisert naar streaming er aktiv.
             </p>
         </div>
         <div style="margin-top:0.75rem;">
             <button class="btn btn-blaa" id="btn-odaq-restart" onclick="restartOpendaq()">Restart bridge</button>
             <span id="odaq-restart-melding" style="font-size:0.8rem; margin-left:0.5rem;"></span>
+        </div>
+    </div>
+
+    <div class="kort" id="kanal-konfig-kort">
+        <h2>Kanal-konfigurasjon</h2>
+        <table class="kanal-tabell" id="kanal-tabell">
+            <thead>
+                <tr>
+                    <th style="width:30px;">#</th>
+                    <th style="width:140px;">Namn</th>
+                    <th style="width:90px;">Type</th>
+                    <th style="width:70px;">Min</th>
+                    <th style="width:70px;">Maks</th>
+                    <th style="width:55px;">Eining</th>
+                    <th style="width:45px;">Aktiv</th>
+                    <th style="width:70px;">Verdi</th>
+                    <th style="width:80px;">Spark</th>
+                </tr>
+            </thead>
+            <tbody id="kanal-tabell-body">
+            </tbody>
+        </table>
+        <div style="display:flex; gap:0.5rem; margin-top:0.75rem; align-items:center;">
+            <button class="btn btn-gronn" onclick="lagreKanalar()">Lagre</button>
+            <button class="btn btn-blaa" onclick="tilbakestillKanalar()">Tilbakestill</button>
+            <span id="kanal-konfig-melding" style="font-size:0.8rem; margin-left:0.5rem;"></span>
         </div>
     </div>
 
@@ -1815,14 +1999,170 @@ async function restartOpendaq() {
     btn.textContent = 'Restart bridge';
 }
 
+// --- Kanal-konfigurasjon ---
+let kanalKonfig = [];
+const sparkData = {};  // kanal_idx -> array of recent values
+
+async function hentKanalKonfig() {
+    try {
+        const res = await fetch('/api/kanalar');
+        kanalKonfig = await res.json();
+        byggKanalTabell();
+    } catch(e) {
+        console.error('Kanal-konfig feil:', e);
+    }
+}
+
+function byggKanalTabell() {
+    const tbody = document.getElementById('kanal-tabell-body');
+    tbody.innerHTML = kanalKonfig.map((k, i) => {
+        const typeOpts = ['voltage','current','acceleration','temperature','generic']
+            .map(t => `<option value="${t}" ${k.type===t?'selected':''}>${t}</option>`).join('');
+        const einingOpts = ['V','A','m/s\\u00b2','\\u00b0C','mV','mA','']
+            .map(e => `<option value="${e}" ${k.enhet===e?'selected':''}>${e||'(ingen)'}</option>`).join('');
+        return `<tr class="${k.aktiv ? '' : 'inaktiv'}" id="kanal-rad-${i}">
+            <td style="color:#6b6b6b; font-weight:600;">${i+1}</td>
+            <td><input type="text" value="${esc(k.namn)}" data-idx="${i}" data-felt="namn" style="width:120px;"></td>
+            <td><select data-idx="${i}" data-felt="type">${typeOpts}</select></td>
+            <td><input type="number" value="${k.range_min}" data-idx="${i}" data-felt="range_min" style="width:60px;" step="any"></td>
+            <td><input type="number" value="${k.range_max}" data-idx="${i}" data-felt="range_max" style="width:60px;" step="any"></td>
+            <td><select data-idx="${i}" data-felt="enhet">${einingOpts}</select></td>
+            <td>
+                <label class="toggle-switch">
+                    <input type="checkbox" ${k.aktiv?'checked':''} data-idx="${i}" data-felt="aktiv"
+                           onchange="toggleKanal(${i}, this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+            </td>
+            <td class="kanal-live" id="kanal-verdi-${i}">-</td>
+            <td><span class="sparkline-container"><canvas id="spark-${i}" width="80" height="24"></canvas></span></td>
+        </tr>`;
+    }).join('');
+}
+
+function toggleKanal(idx, aktiv) {
+    const rad = document.getElementById('kanal-rad-' + idx);
+    if (rad) rad.className = aktiv ? '' : 'inaktiv';
+}
+
+function hentKanalVerdiar() {
+    return kanalKonfig.map((k, i) => {
+        const rad = document.getElementById('kanal-rad-' + i);
+        if (!rad) return k;
+        const hentFelt = (felt) => {
+            const el = rad.querySelector(`[data-felt="${felt}"]`);
+            return el ? el.value : k[felt];
+        };
+        return {
+            indeks: i,
+            namn: hentFelt('namn'),
+            type: hentFelt('type'),
+            range_min: parseFloat(hentFelt('range_min')) || k.range_min,
+            range_max: parseFloat(hentFelt('range_max')) || k.range_max,
+            enhet: hentFelt('enhet'),
+            sample_rate: k.sample_rate,
+            aktiv: rad.querySelector('[data-felt="aktiv"]').checked,
+        };
+    });
+}
+
+async function lagreKanalar() {
+    const mel = document.getElementById('kanal-konfig-melding');
+    mel.textContent = 'Lagrar...';
+    mel.style.color = '#6b6b6b';
+    const verdiar = hentKanalVerdiar();
+    try {
+        const res = await fetch('/api/kanalar', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(verdiar)
+        });
+        const data = await res.json();
+        mel.textContent = data.melding;
+        mel.style.color = data.suksess ? '#10b981' : '#ef4444';
+        if (data.suksess) hentKanalKonfig();
+    } catch(e) {
+        mel.textContent = 'Feil: ' + e.message;
+        mel.style.color = '#ef4444';
+    }
+}
+
+async function tilbakestillKanalar() {
+    const mel = document.getElementById('kanal-konfig-melding');
+    mel.textContent = 'Tilbakestiller...';
+    mel.style.color = '#6b6b6b';
+    try {
+        const res = await fetch('/api/kanalar/reset', {method: 'POST'});
+        const data = await res.json();
+        mel.textContent = data.melding;
+        mel.style.color = data.suksess ? '#10b981' : '#ef4444';
+        if (data.suksess) hentKanalKonfig();
+    } catch(e) {
+        mel.textContent = 'Feil: ' + e.message;
+        mel.style.color = '#ef4444';
+    }
+}
+
+async function oppdaterLiveVerdiar() {
+    try {
+        const res = await fetch('/api/kanalar/live');
+        const data = await res.json();
+        const odaq = data.opendaq || {};
+
+        for (let i = 0; i < 8; i++) {
+            const key = 'kanal_' + i;
+            const el = document.getElementById('kanal-verdi-' + i);
+            if (!el) continue;
+
+            const v = odaq[key];
+            if (v && v.siste !== undefined) {
+                el.textContent = v.siste;
+                el.style.color = '#10b981';
+                // Sparkline data
+                if (!sparkData[i]) sparkData[i] = [];
+                sparkData[i].push(v.siste);
+                if (sparkData[i].length > 30) sparkData[i].shift();
+                tegnSparkline(i);
+            } else {
+                el.textContent = '-';
+                el.style.color = '#6b6b6b';
+            }
+        }
+    } catch(e) {}
+}
+
+function tegnSparkline(idx) {
+    const canvas = document.getElementById('spark-' + idx);
+    if (!canvas || !sparkData[idx] || sparkData[idx].length < 2) return;
+    const ctx = canvas.getContext('2d');
+    const d = sparkData[idx];
+    const w = canvas.width, h = canvas.height;
+    const min = Math.min(...d), max = Math.max(...d);
+    const range = max - min || 1;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#D76428';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < d.length; i++) {
+        const x = (i / (d.length - 1)) * w;
+        const y = h - ((d[i] - min) / range) * (h - 4) - 2;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+}
+
 hentData();
 hentUsbipStatus();
 hentSiriusStatus();
 hentOpendaqStatus();
+hentKanalKonfig();
 setInterval(hentData, 5000);
 setInterval(hentUsbipStatus, 5000);
 setInterval(hentSiriusStatus, 3000);
 setInterval(hentOpendaqStatus, 5000);
+setInterval(oppdaterLiveVerdiar, 2000);
 </script>
 
 </body>

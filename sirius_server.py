@@ -101,7 +101,8 @@ class SiriusAutonomMaaler:
     Basert paa AutonomMaaler i opendaq_server.py, tilpasset for direkte SIRIUS USB.
     """
 
-    def __init__(self, driver, utmappe, intervall, varighet, sample_rate, prefiks):
+    def __init__(self, driver, utmappe, intervall, varighet, sample_rate, prefiks,
+                 opendaq_bro=None):
         self.driver = driver
         self.utmappe = Path(utmappe)
         self.utmappe.mkdir(parents=True, exist_ok=True)
@@ -109,6 +110,7 @@ class SiriusAutonomMaaler:
         self.varighet = varighet
         self.sample_rate = sample_rate
         self.prefiks = prefiks
+        self._opendaq_bro = opendaq_bro
         self._stopp = threading.Event()
         self._traad = None
 
@@ -164,6 +166,12 @@ class SiriusAutonomMaaler:
                     if k not in samlet_data:
                         samlet_data[k] = []
                     samlet_data[k].append(v)
+            # Send til openDAQ for DewesoftX
+            if self._opendaq_bro and self._opendaq_bro.tilgjengelig:
+                try:
+                    self._opendaq_bro.oppdater_data(kanal_data)
+                except Exception:
+                    pass
 
         # Start streaming, samle i X sekunder, stopp
         try:
@@ -423,6 +431,13 @@ def hent_opendaq_status():
     return {"tilgjengelig": False, "aktiv": False, "feil": _opendaq_feil or "Ikkje starta"}
 
 
+def hent_opendaq_verdiar():
+    """Hent siste kanal-verdiar frå openDAQ bridge for live-visning."""
+    if _opendaq_bro is not None:
+        return _opendaq_bro.hent_siste_verdiar()
+    return {}
+
+
 def restart_opendaq_bro():
     """Manuell restart av openDAQ bridge (for debugging/retry)."""
     global _opendaq_bro, _opendaq_feil
@@ -450,6 +465,15 @@ def restart_opendaq_bro():
         return False, _opendaq_feil
 
 
+def _opendaq_data_callback(kanal_data):
+    """Callback for manuell streaming som matar openDAQ-brua med data."""
+    if _opendaq_bro and _opendaq_bro.tilgjengelig:
+        try:
+            _opendaq_bro.oppdater_data(kanal_data)
+        except Exception:
+            pass
+
+
 def start_driver_streaming(sample_rate=None, kanaler=None):
     """Start streaming fra web API."""
     global _driver
@@ -461,7 +485,7 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
         if _driver.streamer:
             return False, "Streaming kjorer allerede"
         try:
-            _driver.start_streaming()
+            _driver.start_streaming(callback=_opendaq_data_callback)
             server_status["streamer"] = True
             return True, "Streaming startet"
         except SiriusFeil as e:
@@ -638,6 +662,7 @@ def start_server(args):
             varighet=args.maale_varighet,
             sample_rate=args.sample_rate,
             prefiks=args.prefiks,
+            opendaq_bro=_opendaq_bro,
         )
         _maaler.start()
     else:

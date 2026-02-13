@@ -7,7 +7,7 @@ servere (OPC-UA, Native Streaming, WebSocket) slik at DewesoftX kan
 koble til via openDAQ-protokollen.
 
 Fase 1: Referanse-enhet (daqref://device0) med simulerte kanalar
-Fase 2: Reelle SIRIUS-data via MockSignal/OPC-UA (framtidig)
+Fase 2: Reelle SIRIUS-data injisert via kanal-eigenskapar (Amplitude/Offset)
 
 Bruk:
     from opendaq_bro import OpenDAQBro
@@ -24,6 +24,10 @@ import socket
 import logging
 import threading
 from datetime import datetime
+
+import numpy as np
+
+from kanal_konfig import les_konfig
 
 log = logging.getLogger('opendaq_bro')
 
@@ -54,6 +58,9 @@ class OpenDAQBro:
             "OPENDAQ_MODULE_PATH", "/usr/local/lib"
         )
         self._lock = threading.Lock()
+        self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
+        self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
+        self._data_teller = 0       # Totalt antal datapunkt motteke
         self._status = {
             "tilgjengelig": False,
             "aktiv": False,
@@ -115,6 +122,20 @@ class OpenDAQBro:
 
             # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
+
+            # Hent signal-referansar frå kvar kanal for data-injeksjon
+            self._kanal_signal = []
+            try:
+                for ch in self._device.channels:
+                    sigs = list(ch.signals)
+                    if sigs:
+                        self._kanal_signal.append((ch, sigs[0]))
+                    else:
+                        self._kanal_signal.append((ch, None))
+                log.info(f"  Signal-referansar: {len(self._kanal_signal)} kanalar, "
+                         f"{sum(1 for _, s in self._kanal_signal if s is not None)} med signal")
+            except Exception as e:
+                log.warning(f"  Signal-henting feilet: {e}")
 
             # List kanalar
             kanalar = []
@@ -193,13 +214,61 @@ class OpenDAQBro:
 
     def oppdater_data(self, kanal_data):
         """
-        Placeholder for Fase 2: mat reelle SIRIUS-data inn i openDAQ-signalar.
+        Injiser ADC-data frå SIRIUS inn i openDAQ-signalar.
+
+        Oppdaterer kanal-eigenskapar (Amplitude, Offset) basert på reelle
+        ADC-verdiar slik at referanse-eininga reflekterer faktiske maaleverdiar.
+        Lagrar ogsaa siste verdiar for live-visning i web UI.
 
         Args:
             kanal_data: dict {"kanal_0": np.array(int16), ...} fraa SiriusDriver
         """
-        # Fase 2: MockSignal-injeksjon eller OPC-UA variabel-oppdatering
-        pass
+        if not self._tilgjengelig or not self._kanal_signal:
+            return
+
+        try:
+            for kanal_idx, (key, data) in enumerate(sorted(kanal_data.items())):
+                if kanal_idx >= len(self._kanal_signal):
+                    break
+
+                ch, sig = self._kanal_signal[kanal_idx]
+                if data is None or len(data) == 0:
+                    continue
+
+                # Konverter int16 ADC-verdiar til float
+                fdata = data.astype(np.float64)
+
+                # Berekn statistikk
+                snitt = float(np.mean(fdata))
+                rms = float(np.sqrt(np.mean(fdata ** 2)))
+                topp = float(np.max(np.abs(fdata)))
+
+                # Lagre siste verdiar for web UI
+                self._siste_verdiar[key] = {
+                    "snitt": round(snitt, 2),
+                    "rms": round(rms, 2),
+                    "topp": round(topp, 2),
+                    "siste": int(data[-1]),
+                    "antall": len(data),
+                }
+
+                # Oppdater referanse-eininga sine kanal-eigenskapar
+                # slik at genererte signal matchar reelle verdiar
+                try:
+                    ch.set_property_value("Amplitude", topp)
+                    ch.set_property_value("Offset", snitt)
+                except Exception:
+                    pass  # Eigenskapane finst kanskje ikkje
+
+            self._data_teller += 1
+
+        except Exception as e:
+            if self._data_teller % 100 == 0:
+                log.warning(f"oppdater_data feil: {e}")
+
+    def hent_siste_verdiar(self) -> dict:
+        """Returner siste kanal-verdiar for web UI live-visning."""
+        return dict(self._siste_verdiar)
 
     def stopp(self):
         """Stopp openDAQ instance og servere."""
@@ -228,7 +297,7 @@ class OpenDAQBro:
     ]
 
     def _konfig_kanalar(self):
-        """Sett 8 kanalar med namn og eigenskapar fraa Sundet-oppsettet."""
+        """Sett 8 kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET)."""
         try:
             self._device.set_property_value("NumberOfChannels", 8)
             log.info("  NumberOfChannels sett til 8")
@@ -236,21 +305,27 @@ class OpenDAQBro:
             log.warning(f"  Kunne ikkje sette NumberOfChannels: {e}")
             return
 
+        # Les persistert konfig (fallback til standard)
+        kanal_konfig = les_konfig()
+
         channels = list(self._device.channels)
         for i, ch in enumerate(channels):
-            if i >= len(self.SUNDET_KANALAR):
+            if i >= len(kanal_konfig):
                 break
-            cfg = self.SUNDET_KANALAR[i]
+            kk = kanal_konfig[i]
+            # Bruk SUNDET_KANALAR for amplitude/freq som fallback
+            sundet = self.SUNDET_KANALAR[i] if i < len(self.SUNDET_KANALAR) else None
             try:
-                ch.name = cfg["namn"]
-                ch.set_property_value("Amplitude", cfg["amplitude"])
-                ch.set_property_value("Frequency", cfg["freq"])
-                lo, hi = cfg["range"]
-                ch.set_property_value("CustomRange", _daq.Range(lo, hi))
+                ch.name = kk.namn
+                amp = sundet["amplitude"] if sundet else 0.0
+                freq = sundet["freq"] if sundet else 50.0
+                ch.set_property_value("Amplitude", amp if kk.aktiv else 0.0)
+                ch.set_property_value("Frequency", freq)
+                ch.set_property_value("CustomRange", _daq.Range(kk.range_min, kk.range_max))
                 # Sinus-boelgje for simulering
                 ch.set_property_value("Waveform", 0)
-                log.info(f"  {cfg['namn']}: amp={cfg['amplitude']}, "
-                         f"freq={cfg['freq']}, range=[{lo}, {hi}]")
+                log.info(f"  {kk.namn}: aktiv={kk.aktiv}, "
+                         f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
             except Exception as e:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
 
