@@ -104,25 +104,25 @@ class OpenDAQBro:
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
 
-            # Bruk InstanceBuilder med set_root_device slik at servere
-            # startar med eininga som rot (ikkje add_device som sub-eining).
-            # Same moenster som openDAQ sine eigne testar.
+            # Bruk add_device() i staden for set_root_device().
+            # Med set_root_device er referanse-eininga rota, og getDomain()
+            # på den kastar C++ exception som krasjar DewesoftX:
+            #   "External exception E06D7363 at GetDomain"
+            # Med add_device er openDAQ Instance rota (gyldig domain),
+            # og referanse-eininga er ei sub-eining under den.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
-            builder.set_root_device("daqref://device0")
-            log.info("  Root device: daqref://device0")
-
             self._instance = builder.build()
-            log.info("  Instance oppretta med root device")
+            log.info("  Instance oppretta")
 
-            # Hent root device
-            self._device = self._instance.root_device
+            # Legg til referanse-eining som sub-device
+            self._device = self._instance.add_device("daqref://device0")
             enhet_namn = ""
             try:
                 enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
             except Exception:
                 enhet_namn = "RefDevice0"
-            log.info(f"  Referanse-enhet: {enhet_namn}")
+            log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
             # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
@@ -151,7 +151,7 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanallisting feilet: {e}")
 
-            # Start servere eksplisitt ETTER root device er satt.
+            # Start servere på instance (som er rota).
             # IKKJE bruk add_standard_servers() - Native Streaming handshake
             # er broten (server lukkar tilkoblinga under handshake).
             # Start berre OPC-UA + LT Streaming (WebSocket).
@@ -406,7 +406,8 @@ class OpenDAQBro:
     def _fiks_server_capabilities(self, ip):
         """Sett server capability-adresser manuelt for Docker-miljoe."""
         try:
-            info = self._device.info
+            # Server capabilities er på instance (root), ikkje sub-device
+            info = self._instance.info
             caps = info.server_capabilities
             for cap in caps:
                 proto_id = cap.protocol_id
