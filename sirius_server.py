@@ -477,8 +477,7 @@ def _opendaq_data_callback(kanal_data):
 def start_driver_streaming(sample_rate=None, kanaler=None):
     """Start streaming fra web API.
 
-    Stoppar autonom maaling og rekoblar USB fyrst for å unngå
-    'Resource busy' på EP2.
+    Stoppar autonom maaling fyrst for å frigjere USB EP2.
     """
     global _driver, _maaler
     with _lock:
@@ -493,16 +492,6 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
         if _maaler is not None:
             log.info("Pausar autonom maaling for manuell streaming")
             _maaler.stopp()
-
-        # Rekoble for rein USB-tilstand
-        try:
-            _driver.stopp_streaming()
-        except Exception:
-            pass
-        try:
-            _driver.rekoble()
-        except Exception as e:
-            return False, f"Rekobling feilet: {e}"
 
         try:
             _driver.start_streaming(callback=_opendaq_data_callback)

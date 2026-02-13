@@ -178,46 +178,31 @@ class SiriusDriver:
         except Exception as e:
             log.debug(f"  Kunne ikkje lese USB-deskriptorar: {e}")
 
-        # Frigjor kernel-driver paa alle interface
-        for iface in range(3):
-            try:
-                if dev.is_kernel_driver_active(iface):
-                    dev.detach_kernel_driver(iface)
-                    log.debug(f"Kernel-driver frigitt for interface {iface}")
-            except (usb.core.USBError, NotImplementedError) as e:
-                log.debug(f"detach_kernel_driver({iface}): {e}")
-
-        # Sett konfigurasjon (hopp over viss allereie satt)
+        # Frigjor kernel-driver KUN paa interface 0 (same som sirius_adc_leser.py
+        # som les EP2 utan problem). Å detache alle interface kan forstyrre.
         try:
-            cfg = dev.get_active_configuration()
-            if cfg is None:
-                dev.set_configuration()
-                log.debug("set_configuration OK")
-            else:
-                log.debug(f"Konfigurasjon allereie aktiv: #{cfg.bConfigurationValue}")
+            if dev.is_kernel_driver_active(0):
+                dev.detach_kernel_driver(0)
+                log.info("Kernel-driver frigitt for interface 0")
+        except (usb.core.USBError, NotImplementedError) as e:
+            log.debug(f"detach_kernel_driver(0): {e}")
+
+        # ALLTID kall set_configuration() - dette er kritisk for at EP2 skal
+        # fungere. sirius_adc_leser.py gjer dette og les EP2 utan problem.
+        # set_configuration() nullstiller interface-tilstandar internt i USB-stakken.
+        try:
+            dev.set_configuration()
+            log.info("set_configuration OK")
         except usb.core.USBError as e:
-            # "Resource busy" er OK - betyr allereie konfigurert
+            # "Resource busy" kan skje viss allereie konfigurert - det er OK
             if "Resource busy" in str(e) or "errno 16" in str(e).lower():
-                log.debug(f"set_configuration: allereie konfigurert ({e})")
+                log.info(f"set_configuration: allereie konfigurert ({e})")
             else:
                 raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
-        # Klaim alle interface (endepunkta kan vaere paa ulike interface)
-        try:
-            cfg = dev.get_active_configuration()
-            if cfg:
-                for intf in cfg:
-                    try:
-                        usb.util.claim_interface(dev, intf.bInterfaceNumber)
-                        log.info(f"  Interface {intf.bInterfaceNumber} klaimet "
-                                 f"({intf.bNumEndpoints} endepunkt)")
-                    except usb.core.USBError as e:
-                        log.debug(f"  claim_interface({intf.bInterfaceNumber}): {e}")
-            else:
-                usb.util.claim_interface(dev, 0)
-                log.info("  Interface 0 klaimet (fallback)")
-        except usb.core.USBError as e:
-            log.debug(f"claim_interface: {e}")
+        # IKKJE klaim interface eksplisitt - sirius_adc_leser.py fungerer utan
+        # claim_interface, og eksplisitt claiming kan foraarsake EBUSY paa EP2.
+        # Linux usbfs gir tilgang til bulk-endepunkt utan eksplisitt claiming.
 
         self._dev = dev
         self._proto = SiriusProtokoll(dev)
@@ -263,18 +248,6 @@ class SiriusDriver:
 
         if self._dev is not None:
             try:
-                cfg = self._dev.get_active_configuration()
-                if cfg:
-                    for intf in cfg:
-                        try:
-                            usb.util.release_interface(self._dev, intf.bInterfaceNumber)
-                        except Exception:
-                            pass
-                else:
-                    usb.util.release_interface(self._dev, 0)
-            except Exception:
-                pass
-            try:
                 usb.util.dispose_resources(self._dev)
             except Exception as e:
                 log.debug(f"Feil ved frigjoring av USB: {e}")
@@ -288,11 +261,11 @@ class SiriusDriver:
         return self._tilkoblet and self._dev is not None
 
     def rekoble(self) -> bool:
-        """Proev aa koble til paa nytt."""
+        """Proev aa koble til paa nytt med rein USB-tilstand."""
         log.info("Proever aa rekoble til SIRIUS...")
         try:
             self.koble_fra()
-            time.sleep(1)
+            time.sleep(0.5)
             self.koble_til()
             return True
         except SiriusFeil as e:
@@ -607,13 +580,17 @@ class SiriusDriver:
         return data
 
     def _adc_leser_loop(self):
-        """Bakgrunnstraad: les ADC-data fraa EP2 og parser."""
+        """Bakgrunnstraad: les ADC-data fraa EP2 og parser.
+
+        Brukar 512 bytes per lesing (same som sirius_adc_leser.py som fungerer).
+        Stoeerre lesingar (16384) kan foraarsake EBUSY paa nokre USB-stakkar.
+        """
         io_feil_teller = 0
 
         while not self._stopp_event.is_set():
             try:
                 raa = self._proto.les_adc_data(
-                    storrelse=16384,
+                    storrelse=512,
                     timeout=TIMEOUT_DATA
                 )
 
