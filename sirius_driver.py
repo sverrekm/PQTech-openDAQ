@@ -200,14 +200,27 @@ class SiriusDriver:
             else:
                 raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
-        # IKKJE klaim interface eksplisitt - sirius_adc_leser.py fungerer utan
-        # claim_interface, og eksplisitt claiming kan foraarsake EBUSY paa EP2.
-        # Linux usbfs gir tilgang til bulk-endepunkt utan eksplisitt claiming.
+        # Klaim interface 0 eksplisitt (alle 6 endepunkt er paa interface 0)
+        try:
+            usb.util.claim_interface(dev, 0)
+            log.info("Interface 0 klaimet OK")
+        except usb.core.USBError as e:
+            log.warning(f"claim_interface(0): {e}")
 
         self._dev = dev
         self._proto = SiriusProtokoll(dev)
         self._tilkoblet = True
         self._rekoble_forsok = 0
+
+        # --- Diagnostikk: Test EP2 FOER init ---
+        log.info("Testar EP2 foer init...")
+        try:
+            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=500)
+            log.info(f"  EP2 pre-init: {len(test_ep2)} bytes OK!")
+            self._ep2_pre_init_ok = True
+        except Exception as e:
+            log.warning(f"  EP2 pre-init feilet: {e}")
+            self._ep2_pre_init_ok = False
 
         # Flush EP1 IN for aa fjerne gammal data fraa tidlegare session
         log.info("Flushar EP1 IN...")
@@ -237,6 +250,23 @@ class SiriusDriver:
         # Kjoer full initialisering (repliserer DewesoftX)
         self._initialiser()
 
+        # --- Diagnostikk: Test EP2 ETTER init ---
+        log.info("Testar EP2 etter init...")
+        try:
+            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=500)
+            log.info(f"  EP2 post-init: {len(test_ep2)} bytes OK!")
+        except Exception as e:
+            log.warning(f"  EP2 post-init feilet: {e}")
+            # Proev clear_halt for aa nullstille EP2
+            log.info("  Proever clear_halt paa EP2...")
+            try:
+                dev.clear_halt(EP_ADC_IN)
+                log.info("  clear_halt OK")
+                test_ep2 = dev.read(EP_ADC_IN, 512, timeout=500)
+                log.info(f"  EP2 etter clear_halt: {len(test_ep2)} bytes OK!")
+            except Exception as e2:
+                log.warning(f"  EP2 etter clear_halt feilet ogsaa: {e2}")
+
         log.info("SIRIUS tilkobla og initialisert")
 
     def koble_fra(self):
@@ -247,6 +277,11 @@ class SiriusDriver:
         self._tilkoblet = False
 
         if self._dev is not None:
+            # Release interface 0 (auto-klaimet av pyusb ved I/O)
+            try:
+                usb.util.release_interface(self._dev, 0)
+            except Exception:
+                pass
             try:
                 usb.util.dispose_resources(self._dev)
             except Exception as e:
@@ -531,6 +566,13 @@ class SiriusDriver:
         self._data_rate_bytes = 0
         self._data_rate_ts = time.time()
 
+        # Nullstill EP2 foer lesing
+        try:
+            self._dev.clear_halt(EP_ADC_IN)
+            log.info("EP2 clear_halt OK")
+        except Exception as e:
+            log.debug(f"EP2 clear_halt: {e}")
+
         # Start ADC-leser-traad
         self._adc_traad = threading.Thread(
             target=self._adc_leser_loop,
@@ -636,9 +678,17 @@ class SiriusDriver:
                     self._stopp_event.wait(timeout=0.5)
                     continue
 
-                # Ekte I/O-feil (Errno 5 etc.)
+                # Ekte I/O-feil (Errno 5, Errno 16 etc.)
                 io_feil_teller += 1
                 log.warning(f"ADC I/O-feil ({io_feil_teller}): {e}")
+
+                # Ved EBUSY: proev clear_halt for aa nullstille endepunktet
+                if "errno 16" in str(e).lower() or "resource busy" in str(e).lower():
+                    try:
+                        self._dev.clear_halt(EP_ADC_IN)
+                        log.info("EP2 clear_halt etter EBUSY")
+                    except Exception:
+                        pass
 
                 if io_feil_teller >= 10:
                     log.error(
