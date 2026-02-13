@@ -287,10 +287,10 @@ class OpenDAQBro:
         return dict(self._siste_verdiar)
 
     def _les_signal_loop(self):
-        """Bakgrunnstraad som genererer simulerte verdiar frå kanal-eigenskapar.
+        """Bakgrunnstraad som genererer simulerte verdiar.
 
-        Oppdaterer _siste_verdiar slik at web UI alltid viser data,
-        uavhengig av om SIRIUS er tilkobla og streamer.
+        Brukar SUNDET_KANALAR-konfig direkte (ikkje openDAQ-eigenskapar)
+        for å vise realistiske simulerte verdiar i web UI.
         Hopper over når SIRIUS leverer reelle data.
         """
         import time
@@ -308,30 +308,28 @@ class OpenDAQBro:
             if not sirius_nyleg:
                 self._sirius_aktiv = False
                 t = time.time() - t0
-                # Generer simulerte verdiar frå kanal-eigenskapar
-                for i, (ch, sig) in enumerate(self._kanal_signal):
+                # Generer simulerte verdiar frå SUNDET_KANALAR
+                for i, cfg in enumerate(self.SUNDET_KANALAR):
                     key = f"kanal_{i}"
-                    try:
-                        amp = ch.get_property_value("Amplitude")
-                        freq = ch.get_property_value("Frequency")
-                        offset = 0.0
-                        try:
-                            offset = ch.get_property_value("Offset")
-                        except Exception:
-                            pass
-                        # Simuler sinusverdi
-                        verdi = amp * math.sin(2 * math.pi * freq * t) + offset
-                        rms = amp / math.sqrt(2) if amp > 0 else 0.0
-                        self._siste_verdiar[key] = {
-                            "snitt": round(offset, 2),
-                            "rms": round(rms, 2),
-                            "topp": round(abs(amp), 2),
-                            "siste": round(verdi, 2),
-                            "antall": 100,
-                            "kjelde": "simulert",
-                        }
-                    except Exception as e:
-                        log.debug(f"  Kanal {i} sim-feil: {e}")
+                    amp = cfg["amplitude"]
+                    freq = cfg["freq"]
+                    # Forskyv fase per kanal (120° mellom fasane)
+                    faseforskyvning = 0.0
+                    if i < 3:
+                        faseforskyvning = i * (2.0 * math.pi / 3.0)  # L1, L2, L3
+                    elif 4 <= i <= 6:
+                        faseforskyvning = (i - 4) * (2.0 * math.pi / 3.0)
+
+                    verdi = amp * math.sin(2 * math.pi * freq * t + faseforskyvning)
+                    rms = amp / math.sqrt(2) if amp > 0 else 0.0
+                    self._siste_verdiar[key] = {
+                        "snitt": 0.0,
+                        "rms": round(rms, 2),
+                        "topp": round(abs(amp), 2),
+                        "siste": round(verdi, 2),
+                        "antall": 100,
+                        "kjelde": "simulert",
+                    }
 
             self._stopp_event.wait(timeout=1.0)
 
