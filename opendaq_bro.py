@@ -62,6 +62,8 @@ class OpenDAQBro:
         self._signal_lesarar = []   # StreamReader per kanal for polling
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
+        self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
+        self._sirius_ts = 0.0       # Tidsstempel for siste SIRIUS-data
         self._leser_traad = None
         self._stopp_event = threading.Event()
         self._status = {
@@ -246,6 +248,10 @@ class OpenDAQBro:
         if not self._tilgjengelig or not self._kanal_signal:
             return
 
+        import time
+        self._sirius_aktiv = True
+        self._sirius_ts = time.time()
+
         try:
             for kanal_idx, (key, data) in enumerate(sorted(kanal_data.items())):
                 if kanal_idx >= len(self._kanal_signal):
@@ -270,6 +276,7 @@ class OpenDAQBro:
                     "topp": round(topp, 2),
                     "siste": int(data[-1]),
                     "antall": len(data),
+                    "kjelde": "sirius",
                 }
 
                 # Oppdater referanse-eininga sine kanal-eigenskapar
@@ -295,33 +302,53 @@ class OpenDAQBro:
 
         Oppdaterer _siste_verdiar slik at web UI alltid viser data,
         uavhengig av om SIRIUS er tilkobla og streamer.
+        Hopper over kanalar der SIRIUS leverer reelle data.
         """
+        import time
         log.info("  Signal-leser-traad starta")
         while not self._stopp_event.is_set():
-            try:
-                for i, reader in enumerate(self._signal_lesarar):
+            # Sjekk om SIRIUS er aktiv (data motteke siste 5 sekund)
+            sirius_nyleg = (
+                self._sirius_aktiv and
+                (time.time() - self._sirius_ts) < 5.0
+            )
+
+            if not sirius_nyleg:
+                # Ingen SIRIUS-data - les frå referanse-eininga (simulert)
+                self._sirius_aktiv = False
+                try:
+                    for i, reader in enumerate(self._signal_lesarar):
+                        if reader is None:
+                            continue
+                        key = f"kanal_{i}"
+                        try:
+                            verdiar = reader.read(100, timeout_ms=0)
+                            if verdiar is not None and len(verdiar) > 0:
+                                fdata = np.asarray(verdiar, dtype=np.float64)
+                                snitt = float(np.mean(fdata))
+                                rms = float(np.sqrt(np.mean(fdata ** 2)))
+                                topp = float(np.max(np.abs(fdata)))
+                                self._siste_verdiar[key] = {
+                                    "snitt": round(snitt, 2),
+                                    "rms": round(rms, 2),
+                                    "topp": round(topp, 2),
+                                    "siste": round(float(fdata[-1]), 2),
+                                    "antall": len(fdata),
+                                    "kjelde": "simulert",
+                                }
+                        except Exception:
+                            pass
+                except Exception as e:
+                    log.debug(f"Signal-leser feil: {e}")
+            else:
+                # SIRIUS aktiv - tøm reader-bufferar for å unngå etterslep
+                for reader in self._signal_lesarar:
                     if reader is None:
                         continue
-                    key = f"kanal_{i}"
                     try:
-                        # Les tilgjengelege samples (ikkje-blokkerande)
-                        verdiar = reader.read(100, timeout_ms=0)
-                        if verdiar is not None and len(verdiar) > 0:
-                            fdata = np.asarray(verdiar, dtype=np.float64)
-                            snitt = float(np.mean(fdata))
-                            rms = float(np.sqrt(np.mean(fdata ** 2)))
-                            topp = float(np.max(np.abs(fdata)))
-                            self._siste_verdiar[key] = {
-                                "snitt": round(snitt, 2),
-                                "rms": round(rms, 2),
-                                "topp": round(topp, 2),
-                                "siste": round(float(fdata[-1]), 2),
-                                "antall": len(fdata),
-                            }
+                        reader.read(1000, timeout_ms=0)
                     except Exception:
                         pass
-            except Exception as e:
-                log.debug(f"Signal-leser feil: {e}")
 
             self._stopp_event.wait(timeout=1.0)
 

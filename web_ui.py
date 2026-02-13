@@ -2117,7 +2117,7 @@ async function oppdaterLiveVerdiar() {
             const v = odaq[key];
             if (v && v.siste !== undefined) {
                 el.textContent = v.siste;
-                el.style.color = '#10b981';
+                el.style.color = v.kjelde === 'sirius' ? '#10b981' : '#D76428';
                 // Sparkline data
                 if (!sparkData[i]) sparkData[i] = [];
                 sparkData[i].push(v.siste);
