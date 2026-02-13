@@ -97,8 +97,11 @@ _lock = threading.Lock()
 
 class SiriusAutonomMaaler:
     """
-    Maaler autonomt i bakgrunnen og lagrer data lokalt.
-    Basert paa AutonomMaaler i opendaq_server.py, tilpasset for direkte SIRIUS USB.
+    Lagrar periodiske snapshots av data frå kontinuerleg streaming.
+
+    VIKTIG: Startar/stoppar IKKJE streaming sjølv. Streaming køyrer
+    kontinuerleg frå oppstart. Denne klassen samlar data frå driveren sin
+    buffer (hent_data) med jamne mellomrom og lagrar til CSV/NPZ.
     """
 
     def __init__(self, driver, utmappe, intervall, varighet, sample_rate, prefiks,
@@ -115,7 +118,7 @@ class SiriusAutonomMaaler:
         self._traad = None
 
     def start(self):
-        """Start autonom maaling i bakgrunnstraad."""
+        """Start autonom snapshot-lagring i bakgrunnstraad."""
         if self.intervall <= 0:
             log.info("Autonom maaling deaktivert (intervall=0)")
             return
@@ -123,19 +126,19 @@ class SiriusAutonomMaaler:
         self._traad.start()
         server_status["autonom"] = True
         log.info(
-            f"Autonom maaling startet: hvert {self.intervall}s, "
-            f"varighet {self.varighet}s"
+            f"Autonom snapshot-lagring startet: hvert {self.intervall}s, "
+            f"samlevindu {self.varighet}s"
         )
 
     def stopp(self):
-        """Stopp autonom maaling."""
+        """Stopp autonom snapshot-lagring."""
         self._stopp.set()
         if self._traad:
             self._traad.join(timeout=10)
         server_status["autonom"] = False
 
     def _maal_loop(self):
-        """Hovedloekke for autonom maaling."""
+        """Hovedloekke for autonom snapshot-lagring."""
         while not self._stopp.is_set():
             try:
                 self._gjor_maaling()
@@ -146,55 +149,46 @@ class SiriusAutonomMaaler:
             self._stopp.wait(timeout=self.intervall)
 
     def _gjor_maaling(self):
-        """Utfoer en maaling: start streaming, samle data, stopp, lagre."""
+        """Samle data frå kontinuerleg stream og lagre til fil.
+
+        IKKJE start/stopp streaming - det er allereie køyrande.
+        Berre les frå driveren sin buffer i eit tidsvindu.
+        """
         maaling_nr = server_status['antall_maalinger'] + 1
-        log.info(f"--- Autonom maaling #{maaling_nr} ---")
+        log.info(f"--- Autonom snapshot #{maaling_nr} ---")
 
         if not self.driver.er_tilkoblet():
-            log.warning("Enhet ikke tilkoblet - proever rekobling")
-            if not self.driver.rekoble():
-                log.error("Rekobling feilet - hopper over maaling")
-                return
-
-        # Samle data via streaming
-        samlet_data = {}
-        data_lock = threading.Lock()
-
-        def _samle_callback(kanal_data):
-            with data_lock:
-                for k, v in kanal_data.items():
-                    if k not in samlet_data:
-                        samlet_data[k] = []
-                    samlet_data[k].append(v)
-            # Send til openDAQ for DewesoftX
-            if self._opendaq_bro and self._opendaq_bro.tilgjengelig:
-                try:
-                    self._opendaq_bro.oppdater_data(kanal_data)
-                except Exception:
-                    pass
-
-        # Start streaming, samle i X sekunder, stopp
-        try:
-            self.driver.start_streaming(callback=_samle_callback)
-            self._stopp.wait(timeout=self.varighet)
-            self.driver.stopp_streaming()
-        except SiriusFeil as e:
-            log.error(f"Streaming-feil: {e}")
-            try:
-                self.driver.stopp_streaming()
-            except Exception:
-                pass
+            log.warning("Enhet ikkje tilkobla - hoppar over")
             return
 
-        # Konsolider data
-        if not samlet_data:
-            log.warning("Ingen data samlet")
+        if not self.driver.streamer:
+            log.warning("Streaming ikkje aktiv - hoppar over")
             return
 
+        # Tøm buffer før vi startar samling
+        self.driver.hent_data()
+
+        # Samle data i varighet sekunder
+        self._stopp.wait(timeout=self.varighet)
+
+        # Hent alt som er samla opp
+        rammer = self.driver.hent_data()
+
+        if not rammer:
+            log.warning("Ingen data samla i snapshotvinduet")
+            return
+
+        # Konsolider rammer til per-kanal arrays
         kanal_arrays = {}
-        for k, blokker in samlet_data.items():
-            if blokker:
-                kanal_arrays[k] = np.concatenate(blokker)
+        for ramme in rammer:
+            for k, v in ramme.items():
+                if k not in kanal_arrays:
+                    kanal_arrays[k] = []
+                kanal_arrays[k].append(v)
+
+        # Concatener arrays per kanal
+        for k in kanal_arrays:
+            kanal_arrays[k] = np.concatenate(kanal_arrays[k])
 
         if not kanal_arrays:
             log.warning("Ingen gyldige kanal-data")
@@ -465,8 +459,12 @@ def restart_opendaq_bro():
         return False, _opendaq_feil
 
 
-def _opendaq_data_callback(kanal_data):
-    """Callback for manuell streaming som matar openDAQ-brua med data."""
+def _global_data_callback(kanal_data):
+    """Global callback for kontinuerleg streaming.
+
+    Matar openDAQ-brua med data slik at DewesoftX ser verdiar.
+    Streaming køyrer alltid - aldri stopp/start-syklus.
+    """
     if _opendaq_bro and _opendaq_bro.tilgjengelig:
         try:
             _opendaq_bro.oppdater_data(kanal_data)
@@ -475,64 +473,43 @@ def _opendaq_data_callback(kanal_data):
 
 
 def start_driver_streaming(sample_rate=None, kanaler=None):
-    """Start streaming fra web API.
+    """Start streaming (eller stadfest at det allereie køyrer).
 
-    Stoppar autonom maaling fyrst for å frigjere USB EP2.
+    Streaming startar automatisk ved oppstart. Denne funksjonen
+    er for web UI-knappen og startar streaming viss det ikkje køyrer.
     """
-    global _driver, _maaler
+    global _driver
     with _lock:
         if _driver is None:
-            return False, "Driver ikke initialisert - klikk Rekoble foerst"
+            return False, "Driver ikkje initialisert - klikk Rekoble"
         if not _driver.er_tilkoblet():
-            return False, "Ikke tilkoblet - klikk Rekoble foerst"
+            return False, "Ikkje tilkobla - klikk Rekoble"
         if _driver.streamer:
-            return False, "Streaming kjorer allerede"
-
-        # Stopp autonom maaling for å frigjere USB EP2
-        if _maaler is not None:
-            log.info("Pausar autonom maaling for manuell streaming")
-            _maaler.stopp()
+            return True, "Streaming køyrer allereie"
 
         try:
-            _driver.start_streaming(callback=_opendaq_data_callback)
+            _driver.start_streaming(callback=_global_data_callback)
             server_status["streamer"] = True
-            return True, "Streaming startet"
+            return True, "Streaming starta"
         except SiriusFeil as e:
             return False, str(e)
 
 
 def stopp_driver_streaming():
-    """Stopp streaming fra web API. Restartar autonom maaling."""
-    global _driver, _maaler
+    """Stopp streaming frå web API."""
+    global _driver
     with _lock:
         if _driver is None:
-            return False, "Driver ikke initialisert"
+            return False, "Driver ikkje initialisert"
         if not _driver.streamer:
-            return False, "Streaming kjorer ikke"
+            return False, "Streaming køyrer ikkje"
         try:
             _driver.stopp_streaming()
             server_status["streamer"] = False
         except SiriusFeil as e:
             return False, str(e)
 
-    # Restart autonom maaling i bakgrunnen
-    if _maaler is not None and _args is not None:
-        try:
-            _maaler = SiriusAutonomMaaler(
-                driver=_driver,
-                utmappe=_args.utmappe,
-                intervall=_args.maale_intervall,
-                varighet=_args.maale_varighet,
-                sample_rate=_args.sample_rate,
-                prefiks=_args.prefiks,
-                opendaq_bro=_opendaq_bro,
-            )
-            _maaler.start()
-            log.info("Autonom maaling restarta etter manuell streaming")
-        except Exception as e:
-            log.warning(f"Kunne ikkje restarte autonom maaling: {e}")
-
-    return True, "Streaming stoppet"
+    return True, "Streaming stoppa"
 
 
 def hent_siste_data():
@@ -578,6 +555,15 @@ def rekoble_driver():
                     ],
                     "feil": None,
                 })
+                # Restart kontinuerleg streaming etter rekonnektering
+                if not _driver.streamer:
+                    try:
+                        _driver.start_streaming(callback=_global_data_callback)
+                        server_status["streamer"] = True
+                        log.info("Streaming restarta etter rekobling")
+                    except SiriusFeil as e:
+                        log.warning(f"Kunne ikkje starte streaming etter rekobling: {e}")
+
                 return True, "Rekoblet"
             else:
                 server_status["feil"] = "Rekobling feilet"
@@ -680,8 +666,17 @@ def start_server(args):
         log.error(traceback.format_exc())
         _opendaq_bro = None
 
-    # Start autonom maaling (kun hvis tilkoblet)
+    # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet:
+        # Start streaming ÉIN GONG og hald det køyrande.
+        # Aldri stopp/start-syklus - det skapar EBUSY ved rekonnektering.
+        try:
+            _driver.start_streaming(callback=_global_data_callback)
+            server_status["streamer"] = True
+            log.info("Kontinuerleg streaming starta (EP2 → openDAQ + web UI)")
+        except SiriusFeil as e:
+            log.warning(f"Kunne ikkje starte streaming: {e}")
+
         _maaler = SiriusAutonomMaaler(
             driver=_driver,
             utmappe=args.utmappe,
@@ -693,7 +688,7 @@ def start_server(args):
         )
         _maaler.start()
     else:
-        log.info("Autonom maaling utsatt til enhet kobles til")
+        log.info("Streaming og autonom lagring utsett til enhet er tilkobla")
 
     # Hold serveren kjorende
     stopp = False
