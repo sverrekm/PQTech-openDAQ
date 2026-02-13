@@ -24,6 +24,7 @@ Bruk:
 import time
 import threading
 import logging
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
@@ -148,20 +149,17 @@ class SiriusDriver:
         """
         Finn og koble til SIRIUS via USB.
 
-        Brukar EKSAKT same moenster som sirius_adc_leser.py som fungerer:
+        Brukar same moenster som sirius_adc_leser.py:
         1. usb.core.find()
         2. detach_kernel_driver(0)
         3. set_configuration()
         4. Les EP2 direkte
 
-        VIKTIG: Korkje dev.reset() eller init-sekvensen (A0/B0/AD) maa
-        køyrast! Begge øydelegg EP2 ADC-streaming permanent:
-        - dev.reset() set FX2 i all-0xFF tilstand → EP2 timeout
-        - init-sekvensen stoppar EP2 streaming permanent
-        - Einaste fix etter dette er fysisk USB-replug
+        Viss EP2 feilar, prøver automatisk sysfs USB power-cycle
+        (ekvivalent med fysisk replug) og retrying.
 
-        Device-metadata (serial, produsent) hentast frå USB string descriptors
-        i staden for init-sekvensen.
+        VIKTIG: Korkje dev.reset() eller init-sekvensen (A0/B0/AD) maa
+        køyrast! Begge øydelegg EP2 ADC-streaming permanent.
 
         Raises:
             SiriusIkkeFunnet: Hvis SIRIUS ikkje finst paa USB
@@ -170,6 +168,40 @@ class SiriusDriver:
         if usb is None:
             raise SiriusFeil("pyusb er ikkje installert (pip install pyusb)")
 
+        # Forsøk 1: Direkte tilkobling
+        self._koble_til_intern()
+
+        # Viss EP2 feila, prøv sysfs USB power-cycle og retry
+        if not self._ep2_ok:
+            log.info("EP2 feila - prøver sysfs USB power-cycle (software-replug)...")
+            self._frigjer_dev()
+            if self.sysfs_usb_reset():
+                log.info("Prøver tilkobling på nytt etter sysfs reset...")
+                try:
+                    self._koble_til_intern()
+                except (SiriusFeil, Exception) as e:
+                    log.warning(f"Tilkobling etter sysfs reset feila: {e}")
+
+        if not self._ep2_ok:
+            log.warning("EP2 framleis ikkje OK etter alle forsøk")
+
+    def _frigjer_dev(self):
+        """Frigjer USB-handle utan full koble_fra (unngår stopp_streaming)."""
+        if self._dev is not None:
+            try:
+                usb.util.release_interface(self._dev, 0)
+            except Exception:
+                pass
+            try:
+                usb.util.dispose_resources(self._dev)
+            except Exception:
+                pass
+            self._dev = None
+            self._proto = None
+            self._tilkoblet = False
+
+    def _koble_til_intern(self):
+        """Intern tilkoblingslogikk (find → detach → configure → test EP2)."""
         log.info(f"Soeker etter SIRIUS (VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})...")
 
         dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
@@ -181,7 +213,6 @@ class SiriusDriver:
 
         log.info(f"SIRIUS funnet: Bus {dev.bus}, Adresse {dev.address}")
 
-        # EKSAKT same moenster som sirius_adc_leser.py:
         # 1. Detach kernel driver paa interface 0
         try:
             if dev.is_kernel_driver_active(0):
@@ -190,14 +221,12 @@ class SiriusDriver:
         except (usb.core.USBError, NotImplementedError) as e:
             log.debug(f"  detach_kernel_driver(0): {e}")
 
-        # 2. set_configuration() - med EBUSY-handtering for rekonnektering
+        # 2. set_configuration()
         try:
             dev.set_configuration()
             log.info("  set_configuration() OK")
         except usb.core.USBError as e:
             if "Resource busy" in str(e) or "errno 16" in str(e).lower():
-                # Interface framleis klaimet frå førre sesjon.
-                # Frigjer og prøver på nytt.
                 log.info("  set_configuration EBUSY - frigjor interface og prøver igjen")
                 try:
                     usb.util.release_interface(dev, 0)
@@ -209,7 +238,7 @@ class SiriusDriver:
                     log.info("  set_configuration() OK (etter release)")
                 except usb.core.USBError as e2:
                     if "Resource busy" in str(e2) or "errno 16" in str(e2).lower():
-                        log.info(f"  set_configuration: framleis busy, held fram likevel")
+                        log.info("  set_configuration: framleis busy, held fram likevel")
                     else:
                         raise SiriusUSBFeil(f"set_configuration feilet: {e2}") from e2
             else:
@@ -220,41 +249,18 @@ class SiriusDriver:
         self._tilkoblet = True
         self._rekoble_forsok = 0
 
-        # Hent device-metadata frå USB string descriptors (krev ikkje init)
+        # Hent device-metadata frå USB string descriptors
         self._les_usb_metadata(dev)
 
-        # 3. Test EP2 direkte - med EBUSY retry
+        # 3. Test EP2 direkte (5s timeout for trege device)
         log.info("Testar EP2 (ADC-data)...")
         self._ep2_ok = False
         try:
-            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
+            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=5000)
             log.info(f"  EP2 OK: {len(test_ep2)} bytes lest")
             self._ep2_ok = True
         except usb.core.USBError as e:
-            if "Resource busy" in str(e).lower() or "errno 16" in str(e).lower():
-                # EBUSY: Interface framleis klaimet. Release + retry.
-                log.info("  EP2 EBUSY - frigjor interface og prøver igjen")
-                try:
-                    usb.util.release_interface(dev, 0)
-                except Exception:
-                    pass
-                time.sleep(0.5)
-                try:
-                    usb.util.claim_interface(dev, 0)
-                except Exception:
-                    pass
-                try:
-                    test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
-                    log.info(f"  EP2 OK (etter release/claim): {len(test_ep2)} bytes lest")
-                    self._ep2_ok = True
-                except usb.core.USBError as e2:
-                    log.warning(f"  EP2 retry feilet: {e2}")
-            else:
-                log.warning(
-                    f"  EP2 test feilet: {e}\n"
-                    f"  Device kan vere i dårleg tilstand etter tidlegare reset/init.\n"
-                    f"  Fix: Koble fraa og til USB-kabelen fysisk, restart container."
-                )
+            log.warning(f"  EP2 test feilet: {e}")
 
         log.info(f"SIRIUS tilkobla (EP2: {'OK' if self._ep2_ok else 'FEIL'})")
 
@@ -277,6 +283,63 @@ class SiriusDriver:
             log.debug(f"  Kunne ikkje lese USB-strengar: {e}")
             self._enhetsinfo.enhetsstreng = "SIRIUS"
             self._enhetsinfo.serienummer = ""
+
+    @staticmethod
+    def _finn_sysfs_sti():
+        """Finn sysfs-stien til SIRIUS USB-devicet.
+
+        Søker i /sys/bus/usb/devices/ etter VID=1ced, PID=1002.
+        Returns: Path eller None
+        """
+        sysfs_base = Path("/sys/bus/usb/devices")
+        if not sysfs_base.exists():
+            return None
+        for dev_dir in sysfs_base.iterdir():
+            try:
+                vid_file = dev_dir / "idVendor"
+                pid_file = dev_dir / "idProduct"
+                if vid_file.exists() and pid_file.exists():
+                    vid = vid_file.read_text().strip()
+                    pid = pid_file.read_text().strip()
+                    if vid == "1ced" and pid == "1002":
+                        return dev_dir
+            except (OSError, PermissionError):
+                continue
+        return None
+
+    @staticmethod
+    def sysfs_usb_reset():
+        """Soft-reset SIRIUS via sysfs authorized-flag.
+
+        Ekvivalent med fysisk USB-replug - deauthorize → reauthorize.
+        Krev privilegert tilgang og /sys montert i containeren.
+
+        Returns: True viss reset vart utført
+        """
+        dev_dir = SiriusDriver._finn_sysfs_sti()
+        if dev_dir is None:
+            log.warning("sysfs: Fann ikkje SIRIUS i /sys/bus/usb/devices/")
+            return False
+
+        auth_file = dev_dir / "authorized"
+        if not auth_file.exists():
+            log.warning(f"sysfs: {auth_file} finst ikkje")
+            return False
+
+        try:
+            log.info(f"sysfs USB power-cycle: {dev_dir.name}")
+            # Deauthorize (koble frå)
+            auth_file.write_text("0")
+            log.info("  sysfs: deauthorized (USB fråkopla)")
+            time.sleep(2)
+            # Reauthorize (koble til att)
+            auth_file.write_text("1")
+            log.info("  sysfs: reauthorized (USB tilkopla)")
+            time.sleep(3)  # Gi FX2 firmware tid til å starte
+            return True
+        except Exception as e:
+            log.error(f"sysfs USB reset feilet: {e}")
+            return False
 
     def koble_fra(self):
         """Stopp streaming og frigjor USB-enhet.
