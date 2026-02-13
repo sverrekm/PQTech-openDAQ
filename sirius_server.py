@@ -475,8 +475,12 @@ def _opendaq_data_callback(kanal_data):
 
 
 def start_driver_streaming(sample_rate=None, kanaler=None):
-    """Start streaming fra web API."""
-    global _driver
+    """Start streaming fra web API.
+
+    Stoppar autonom maaling og rekoblar USB fyrst for å unngå
+    'Resource busy' på EP2.
+    """
+    global _driver, _maaler
     with _lock:
         if _driver is None:
             return False, "Driver ikke initialisert - klikk Rekoble foerst"
@@ -484,6 +488,22 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
             return False, "Ikke tilkoblet - klikk Rekoble foerst"
         if _driver.streamer:
             return False, "Streaming kjorer allerede"
+
+        # Stopp autonom maaling for å frigjere USB EP2
+        if _maaler is not None:
+            log.info("Pausar autonom maaling for manuell streaming")
+            _maaler.stopp()
+
+        # Rekoble for rein USB-tilstand
+        try:
+            _driver.stopp_streaming()
+        except Exception:
+            pass
+        try:
+            _driver.rekoble()
+        except Exception as e:
+            return False, f"Rekobling feilet: {e}"
+
         try:
             _driver.start_streaming(callback=_opendaq_data_callback)
             server_status["streamer"] = True
@@ -493,8 +513,8 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
 
 
 def stopp_driver_streaming():
-    """Stopp streaming fra web API."""
-    global _driver
+    """Stopp streaming fra web API. Restartar autonom maaling."""
+    global _driver, _maaler
     with _lock:
         if _driver is None:
             return False, "Driver ikke initialisert"
@@ -503,9 +523,27 @@ def stopp_driver_streaming():
         try:
             _driver.stopp_streaming()
             server_status["streamer"] = False
-            return True, "Streaming stoppet"
         except SiriusFeil as e:
             return False, str(e)
+
+    # Restart autonom maaling i bakgrunnen
+    if _maaler is not None and _args is not None:
+        try:
+            _maaler = SiriusAutonomMaaler(
+                driver=_driver,
+                utmappe=_args.utmappe,
+                intervall=_args.maale_intervall,
+                varighet=_args.maale_varighet,
+                sample_rate=_args.sample_rate,
+                prefiks=_args.prefiks,
+                opendaq_bro=_opendaq_bro,
+            )
+            _maaler.start()
+            log.info("Autonom maaling restarta etter manuell streaming")
+        except Exception as e:
+            log.warning(f"Kunne ikkje restarte autonom maaling: {e}")
+
+    return True, "Streaming stoppet"
 
 
 def hent_siste_data():
