@@ -142,6 +142,10 @@ class SiriusDriver:
         """
         Finn og koble til SIRIUS via USB.
 
+        VIKTIG: Init-sekvensen (A0/B0/AD-kommandoar) STOPPAR EP2 ADC-streaming
+        permanent. Derfor: reset USB for rein tilstand, set config, og les EP2
+        direkte - same moenster som sirius_adc_leser.py som fungerer.
+
         Raises:
             SiriusIkkeFunnet: Hvis SIRIUS ikkje finst paa USB
             SiriusUSBFeil: Ved USB-feil
@@ -160,130 +164,84 @@ class SiriusDriver:
 
         log.info(f"SIRIUS funnet: Bus {dev.bus}, Adresse {dev.address}")
 
-        # VIKTIG: IKKJE gjer dev.reset() - det forstyrrer FX2-firmware og
-        # gjer at enheten responderer med all-0xFF paa alle kommandoar.
+        # USB-reset for å nullstille device-tilstand. Tidlegare init-sekvens
+        # (frå førre køyring) stoppar EP2 permanent. Reset fiksar dette.
+        # FX2-firmware gir all-0xFF etter reset, men det er OK fordi vi
+        # IKKJE køyrer init (vi treng berre EP2 for ADC-data).
+        log.info("USB reset for rein tilstand...")
+        try:
+            dev.reset()
+            log.info("  dev.reset() OK")
+            time.sleep(1.0)  # Vent på re-enumerering
+        except usb.core.USBError as e:
+            log.warning(f"  dev.reset(): {e}")
+            time.sleep(0.5)
 
-        # Logg USB-deskriptorar for feilsoeking
+        # Re-finn enheten etter reset (handle kan vere ugyldig)
+        dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
+        if dev is None:
+            raise SiriusIkkeFunnet("SIRIUS forsvann etter USB reset")
+        log.info(f"  SIRIUS re-funnet: Bus {dev.bus}, Adresse {dev.address}")
+
+        # Logg USB-deskriptorar
         try:
             cfg = dev.get_active_configuration()
             if cfg:
                 log.info(f"  USB-konfig: #{cfg.bConfigurationValue}, "
                          f"{cfg.bNumInterfaces} interface(s)")
-                for intf in cfg:
-                    log.info(f"  Interface {intf.bInterfaceNumber}: "
-                             f"{intf.bNumEndpoints} endepunkt, "
-                             f"klasse=0x{intf.bInterfaceClass:02X}")
             else:
                 log.info("  Ingen aktiv USB-konfigurasjon")
         except Exception as e:
             log.debug(f"  Kunne ikkje lese USB-deskriptorar: {e}")
 
-        # Frigjor kernel-driver KUN paa interface 0 (same som sirius_adc_leser.py
-        # som les EP2 utan problem). Å detache alle interface kan forstyrre.
+        # Same moenster som sirius_adc_leser.py (som les EP2 utan problem):
+        # 1. Detach kernel driver paa interface 0
+        # 2. set_configuration()
+        # 3. Les EP2 direkte
         try:
             if dev.is_kernel_driver_active(0):
                 dev.detach_kernel_driver(0)
-                log.info("Kernel-driver frigitt for interface 0")
+                log.info("  Kernel-driver frigitt for interface 0")
         except (usb.core.USBError, NotImplementedError) as e:
-            log.debug(f"detach_kernel_driver(0): {e}")
-
-        # ALLTID kall set_configuration() - dette er kritisk for at EP2 skal
-        # fungere. sirius_adc_leser.py gjer dette og les EP2 utan problem.
-        # set_configuration() nullstiller interface-tilstandar internt i USB-stakken.
-        try:
-            dev.set_configuration()
-            log.info("set_configuration OK")
-        except usb.core.USBError as e:
-            # "Resource busy" kan skje viss allereie konfigurert - det er OK
-            if "Resource busy" in str(e) or "errno 16" in str(e).lower():
-                log.info(f"set_configuration: allereie konfigurert ({e})")
-            else:
-                raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
-
-        # Klaim interface 0 eksplisitt (alle 6 endepunkt er paa interface 0)
-        try:
-            usb.util.claim_interface(dev, 0)
-            log.info("Interface 0 klaimet OK")
-        except usb.core.USBError as e:
-            log.warning(f"claim_interface(0): {e}")
-
-        self._dev = dev
-        self._proto = SiriusProtokoll(dev)
-        self._tilkoblet = True
-        self._rekoble_forsok = 0
-
-        # --- Diagnostikk: Test EP2 FOER init ---
-        log.info("Testar EP2 foer init...")
-        try:
-            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=500)
-            log.info(f"  EP2 pre-init: {len(test_ep2)} bytes OK!")
-            self._ep2_pre_init_ok = True
-        except Exception as e:
-            log.warning(f"  EP2 pre-init feilet: {e}")
-            self._ep2_pre_init_ok = False
-
-        # Flush EP1 IN for aa fjerne gammal data fraa tidlegare session
-        log.info("Flushar EP1 IN...")
-        self._proto.flush_endepunkt(EP_CMD_IN, forsok=10)
-
-        # Test tilkoblinga med AE foer full init
-        log.info("Testar tilkobling med AE heartbeat...")
-        try:
-            test = self._proto.send_telemetri()
-            all_ff = all(b == 0xFF for b in test)
-            log.info(f"  AE test-svar: {test[:16].hex()} "
-                     f"({'ALL-FF - eining responderer ikkje ennaa' if all_ff else 'OK'})")
-            if all_ff:
-                log.warning(
-                    "Enheten gir all-0xFF svar. "
-                    "Proever EP1 flush + ny AE etter kort pause..."
-                )
-                time.sleep(0.5)
-                self._proto.flush_endepunkt(EP_CMD_IN, forsok=10)
-                test2 = self._proto.send_telemetri()
-                all_ff2 = all(b == 0xFF for b in test2)
-                log.info(f"  AE test #2: {test2[:16].hex()} "
-                         f"({'FRAMLEIS ALL-FF' if all_ff2 else 'OK'})")
-        except SiriusUSBFeil as e:
-            log.warning(f"  AE test feilet: {e}")
-
-        # Kjoer full initialisering (repliserer DewesoftX)
-        self._initialiser()
-
-        # Init-sekvensen stoppar EP2-streaming (bekrefta med diagnostikk:
-        # EP2 fungerer pre-init men timeout post-init).
-        # Loesing: Gjer set_configuration() paa nytt for aa restarte EP2.
-        log.info("Restartar EP2 etter init (set_configuration på nytt)...")
-        try:
-            usb.util.release_interface(dev, 0)
-            log.info("  release_interface OK")
-        except Exception as e:
-            log.debug(f"  release_interface: {e}")
+            log.debug(f"  detach_kernel_driver(0): {e}")
 
         try:
             dev.set_configuration()
             log.info("  set_configuration OK")
         except usb.core.USBError as e:
             if "Resource busy" in str(e) or "errno 16" in str(e).lower():
-                log.info(f"  set_configuration: {e} (prøver vidare)")
+                log.info(f"  set_configuration: allereie konfigurert ({e})")
             else:
-                log.warning(f"  set_configuration feilet: {e}")
+                raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
-        try:
-            usb.util.claim_interface(dev, 0)
-            log.info("  claim_interface OK")
-        except usb.core.USBError as e:
-            log.warning(f"  claim_interface: {e}")
+        self._dev = dev
+        self._proto = SiriusProtokoll(dev)
+        self._tilkoblet = True
+        self._rekoble_forsok = 0
 
-        # Test EP2 etter restart
-        log.info("Testar EP2 etter restart...")
+        # Test EP2 - skal fungere etter reset + set_configuration
+        log.info("Testar EP2...")
+        ep2_ok = False
         try:
-            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=1000)
-            log.info(f"  EP2 etter restart: {len(test_ep2)} bytes OK!")
+            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
+            log.info(f"  EP2: {len(test_ep2)} bytes OK!")
+            ep2_ok = True
         except Exception as e:
-            log.warning(f"  EP2 etter restart: {e}")
+            log.warning(f"  EP2 test feilet: {e}")
 
-        log.info("SIRIUS tilkobla og initialisert")
+        # IKKJE køyr init-sekvens! Den drep EP2-streaming permanent.
+        # Metadata (serienr, slot-info) er ikkje tilgjengeleg utan init,
+        # men EP2 ADC-data er viktigare.
+        if ep2_ok:
+            log.info("EP2 fungerer - hoppar over init (init stoppar EP2)")
+            self._enhetsinfo.enhetsstreng = "SIRIUS"
+            self._enhetsinfo.serienummer = ""
+        else:
+            # EP2 fungerer ikkje etter reset - prøv init som fallback
+            log.warning("EP2 fungerer ikkje etter reset - prøver init som fallback")
+            self._initialiser()
+
+        log.info("SIRIUS tilkobla")
 
     def koble_fra(self):
         """Stopp streaming og frigjor USB-enhet."""
@@ -582,13 +540,6 @@ class SiriusDriver:
         self._data_rate_bytes = 0
         self._data_rate_ts = time.time()
 
-        # Nullstill EP2 foer lesing
-        try:
-            self._dev.clear_halt(EP_ADC_IN)
-            log.info("EP2 clear_halt OK")
-        except Exception as e:
-            log.debug(f"EP2 clear_halt: {e}")
-
         # Start ADC-leser-traad
         self._adc_traad = threading.Thread(
             target=self._adc_leser_loop,
@@ -597,13 +548,8 @@ class SiriusDriver:
         )
         self._adc_traad.start()
 
-        # Start heartbeat-traad
-        self._heartbeat_traad = threading.Thread(
-            target=self._heartbeat_loop,
-            name="sirius-heartbeat",
-            daemon=True,
-        )
-        self._heartbeat_traad.start()
+        # IKKJE start heartbeat - EP1-kommandoar (AE telemetri) kan forstyrre
+        # EP2-streaming, og vi har ikkje køyrt init uansett.
 
         log.info("Streaming starta")
 
