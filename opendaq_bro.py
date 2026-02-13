@@ -59,8 +59,11 @@ class OpenDAQBro:
         )
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
+        self._signal_lesarar = []   # StreamReader per kanal for polling
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
+        self._leser_traad = None
+        self._stopp_event = threading.Event()
         self._status = {
             "tilgjengelig": False,
             "aktiv": False,
@@ -125,15 +128,25 @@ class OpenDAQBro:
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
             self._kanal_signal = []
+            self._signal_lesarar = []
             try:
                 for ch in self._device.channels:
                     sigs = list(ch.signals)
                     if sigs:
                         self._kanal_signal.append((ch, sigs[0]))
+                        # Opprett StreamReader for å lese signal-verdiar
+                        try:
+                            reader = _daq.StreamReader(sigs[0])
+                            self._signal_lesarar.append(reader)
+                        except Exception:
+                            self._signal_lesarar.append(None)
                     else:
                         self._kanal_signal.append((ch, None))
+                        self._signal_lesarar.append(None)
                 log.info(f"  Signal-referansar: {len(self._kanal_signal)} kanalar, "
                          f"{sum(1 for _, s in self._kanal_signal if s is not None)} med signal")
+                log.info(f"  StreamReaders: "
+                         f"{sum(1 for r in self._signal_lesarar if r is not None)} oppretta")
             except Exception as e:
                 log.warning(f"  Signal-henting feilet: {e}")
 
@@ -195,6 +208,13 @@ class OpenDAQBro:
                     log.warning("  OPC-UA vil annonsere localhost. Fiks /etc/hosts.")
             except Exception:
                 pass
+
+            # Start bakgrunnstraad for å lese signal-verdiar (for web UI)
+            self._stopp_event.clear()
+            self._leser_traad = threading.Thread(
+                target=self._les_signal_loop, daemon=True
+            )
+            self._leser_traad.start()
 
             log.info("")
             log.info("  openDAQ nettverksbro aktiv:")
@@ -270,12 +290,53 @@ class OpenDAQBro:
         """Returner siste kanal-verdiar for web UI live-visning."""
         return dict(self._siste_verdiar)
 
+    def _les_signal_loop(self):
+        """Bakgrunnstraad som les signal-verdiar frå referanse-eininga.
+
+        Oppdaterer _siste_verdiar slik at web UI alltid viser data,
+        uavhengig av om SIRIUS er tilkobla og streamer.
+        """
+        log.info("  Signal-leser-traad starta")
+        while not self._stopp_event.is_set():
+            try:
+                for i, reader in enumerate(self._signal_lesarar):
+                    if reader is None:
+                        continue
+                    key = f"kanal_{i}"
+                    try:
+                        # Les tilgjengelege samples (ikkje-blokkerande)
+                        verdiar = reader.read(100, timeout_ms=0)
+                        if verdiar is not None and len(verdiar) > 0:
+                            fdata = np.asarray(verdiar, dtype=np.float64)
+                            snitt = float(np.mean(fdata))
+                            rms = float(np.sqrt(np.mean(fdata ** 2)))
+                            topp = float(np.max(np.abs(fdata)))
+                            self._siste_verdiar[key] = {
+                                "snitt": round(snitt, 2),
+                                "rms": round(rms, 2),
+                                "topp": round(topp, 2),
+                                "siste": round(float(fdata[-1]), 2),
+                                "antall": len(fdata),
+                            }
+                    except Exception:
+                        pass
+            except Exception as e:
+                log.debug(f"Signal-leser feil: {e}")
+
+            self._stopp_event.wait(timeout=1.0)
+
+        log.info("  Signal-leser-traad stoppa")
+
     def stopp(self):
         """Stopp openDAQ instance og servere."""
         self._tilgjengelig = False
+        self._stopp_event.set()
+        if self._leser_traad and self._leser_traad.is_alive():
+            self._leser_traad.join(timeout=3)
         with self._lock:
             self._status["aktiv"] = False
         # Instance-opprydding handtert av Python GC
+        self._signal_lesarar = []
         self._instance = None
         self._device = None
         log.info("openDAQ nettverksbro stoppa")
