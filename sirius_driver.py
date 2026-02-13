@@ -184,13 +184,28 @@ class SiriusDriver:
         except (usb.core.USBError, NotImplementedError) as e:
             log.debug(f"  detach_kernel_driver(0): {e}")
 
-        # 2. set_configuration()
+        # 2. set_configuration() - med EBUSY-handtering for rekonnektering
         try:
             dev.set_configuration()
             log.info("  set_configuration() OK")
         except usb.core.USBError as e:
             if "Resource busy" in str(e) or "errno 16" in str(e).lower():
-                log.info(f"  set_configuration: allereie konfigurert ({e})")
+                # Interface framleis klaimet frå førre sesjon.
+                # Frigjer og prøver på nytt.
+                log.info("  set_configuration EBUSY - frigjor interface og prøver igjen")
+                try:
+                    usb.util.release_interface(dev, 0)
+                except Exception:
+                    pass
+                time.sleep(0.3)
+                try:
+                    dev.set_configuration()
+                    log.info("  set_configuration() OK (etter release)")
+                except usb.core.USBError as e2:
+                    if "Resource busy" in str(e2) or "errno 16" in str(e2).lower():
+                        log.info(f"  set_configuration: framleis busy, held fram likevel")
+                    else:
+                        raise SiriusUSBFeil(f"set_configuration feilet: {e2}") from e2
             else:
                 raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
@@ -202,22 +217,40 @@ class SiriusDriver:
         # Hent device-metadata frå USB string descriptors (krev ikkje init)
         self._les_usb_metadata(dev)
 
-        # 3. Test EP2 direkte
+        # 3. Test EP2 direkte - med EBUSY retry
         log.info("Testar EP2 (ADC-data)...")
+        ep2_ok = False
         try:
             test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
             log.info(f"  EP2 OK: {len(test_ep2)} bytes lest")
+            ep2_ok = True
         except usb.core.USBError as e:
-            log.warning(
-                f"  EP2 test feilet: {e}\n"
-                f"  Device kan vere i dårleg tilstand etter tidlegare reset/init.\n"
-                f"  Fix: Koble fraa og til USB-kabelen fysisk, restart container."
-            )
-            # IKKJE køyr init som fallback - det gjer ting verre!
-            # IKKJE køyr dev.reset() - det øydelegg FX2 firmware-tilstanden!
-            # Einaste fix er fysisk USB-replug.
+            if "Resource busy" in str(e).lower() or "errno 16" in str(e).lower():
+                # EBUSY: Interface framleis klaimet. Release + retry.
+                log.info("  EP2 EBUSY - frigjor interface og prøver igjen")
+                try:
+                    usb.util.release_interface(dev, 0)
+                except Exception:
+                    pass
+                time.sleep(0.5)
+                try:
+                    usb.util.claim_interface(dev, 0)
+                except Exception:
+                    pass
+                try:
+                    test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
+                    log.info(f"  EP2 OK (etter release/claim): {len(test_ep2)} bytes lest")
+                    ep2_ok = True
+                except usb.core.USBError as e2:
+                    log.warning(f"  EP2 retry feilet: {e2}")
+            else:
+                log.warning(
+                    f"  EP2 test feilet: {e}\n"
+                    f"  Device kan vere i dårleg tilstand etter tidlegare reset/init.\n"
+                    f"  Fix: Koble fraa og til USB-kabelen fysisk, restart container."
+                )
 
-        log.info("SIRIUS tilkobla")
+        log.info(f"SIRIUS tilkobla (EP2: {'OK' if ep2_ok else 'FEIL'})")
 
     def _les_usb_metadata(self, dev):
         """Les device-metadata frå USB string descriptors.
@@ -240,22 +273,41 @@ class SiriusDriver:
             self._enhetsinfo.serienummer = ""
 
     def koble_fra(self):
-        """Stopp streaming og frigjor USB-enhet."""
+        """Stopp streaming og frigjor USB-enhet.
+
+        Tre-stegs frigjering for å unngå EBUSY ved neste tilkobling:
+        1. release_interface(0) - frigjer pyusb auto-claim
+        2. attach_kernel_driver(0) - gir interface tilbake til kernel
+        3. dispose_resources() - frigjer backend-ressursar
+        """
         if self._streamer:
             self.stopp_streaming()
 
         self._tilkoblet = False
 
         if self._dev is not None:
-            # Release interface 0 (auto-klaimet av pyusb ved I/O)
+            # Steg 1: Release interface 0 (auto-klaimet av pyusb ved I/O)
             try:
                 usb.util.release_interface(self._dev, 0)
+                log.debug("  release_interface(0) OK")
             except Exception:
                 pass
+
+            # Steg 2: Re-attach kernel driver for å tvinge full frigjering
+            # Utan dette held Linux-kernelen interfacet "busy" og neste
+            # tilkobling får EBUSY på set_configuration() og EP2-lesingar.
+            try:
+                self._dev.attach_kernel_driver(0)
+                log.debug("  attach_kernel_driver(0) OK")
+            except (usb.core.USBError, NotImplementedError):
+                pass
+
+            # Steg 3: Frigjer backend-ressursar
             try:
                 usb.util.dispose_resources(self._dev)
             except Exception as e:
-                log.debug(f"Feil ved frigjoring av USB: {e}")
+                log.debug(f"  dispose_resources: {e}")
+
             self._dev = None
             self._proto = None
 
