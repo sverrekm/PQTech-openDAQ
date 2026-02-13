@@ -101,6 +101,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
+    libusb-1.0-0-dev \
     libudev1 \
     libstdc++6 \
     libxrandr2 \
@@ -110,6 +111,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     usbutils \
     usbip \
     procps \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Bygg uhubctl fraa kildekode (for USB port power-cycling)
+RUN git clone --depth 1 https://github.com/mvp/uhubctl /tmp/uhubctl \
+    && cd /tmp/uhubctl && make && make install \
+    && rm -rf /tmp/uhubctl \
+    && apt-mark manual libusb-1.0-0 \
+    && apt-get purge -y --auto-remove git build-essential libusb-1.0-0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir numpy flask pyusb
