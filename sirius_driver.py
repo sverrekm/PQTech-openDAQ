@@ -142,9 +142,20 @@ class SiriusDriver:
         """
         Finn og koble til SIRIUS via USB.
 
-        VIKTIG: Init-sekvensen (A0/B0/AD-kommandoar) STOPPAR EP2 ADC-streaming
-        permanent. Derfor: reset USB for rein tilstand, set config, og les EP2
-        direkte - same moenster som sirius_adc_leser.py som fungerer.
+        Brukar EKSAKT same moenster som sirius_adc_leser.py som fungerer:
+        1. usb.core.find()
+        2. detach_kernel_driver(0)
+        3. set_configuration()
+        4. Les EP2 direkte
+
+        VIKTIG: Korkje dev.reset() eller init-sekvensen (A0/B0/AD) maa
+        køyrast! Begge øydelegg EP2 ADC-streaming permanent:
+        - dev.reset() set FX2 i all-0xFF tilstand → EP2 timeout
+        - init-sekvensen stoppar EP2 streaming permanent
+        - Einaste fix etter dette er fysisk USB-replug
+
+        Device-metadata (serial, produsent) hentast frå USB string descriptors
+        i staden for init-sekvensen.
 
         Raises:
             SiriusIkkeFunnet: Hvis SIRIUS ikkje finst paa USB
@@ -164,40 +175,8 @@ class SiriusDriver:
 
         log.info(f"SIRIUS funnet: Bus {dev.bus}, Adresse {dev.address}")
 
-        # USB-reset for å nullstille device-tilstand. Tidlegare init-sekvens
-        # (frå førre køyring) stoppar EP2 permanent. Reset fiksar dette.
-        # FX2-firmware gir all-0xFF etter reset, men det er OK fordi vi
-        # IKKJE køyrer init (vi treng berre EP2 for ADC-data).
-        log.info("USB reset for rein tilstand...")
-        try:
-            dev.reset()
-            log.info("  dev.reset() OK")
-            time.sleep(1.0)  # Vent på re-enumerering
-        except usb.core.USBError as e:
-            log.warning(f"  dev.reset(): {e}")
-            time.sleep(0.5)
-
-        # Re-finn enheten etter reset (handle kan vere ugyldig)
-        dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
-        if dev is None:
-            raise SiriusIkkeFunnet("SIRIUS forsvann etter USB reset")
-        log.info(f"  SIRIUS re-funnet: Bus {dev.bus}, Adresse {dev.address}")
-
-        # Logg USB-deskriptorar
-        try:
-            cfg = dev.get_active_configuration()
-            if cfg:
-                log.info(f"  USB-konfig: #{cfg.bConfigurationValue}, "
-                         f"{cfg.bNumInterfaces} interface(s)")
-            else:
-                log.info("  Ingen aktiv USB-konfigurasjon")
-        except Exception as e:
-            log.debug(f"  Kunne ikkje lese USB-deskriptorar: {e}")
-
-        # Same moenster som sirius_adc_leser.py (som les EP2 utan problem):
+        # EKSAKT same moenster som sirius_adc_leser.py:
         # 1. Detach kernel driver paa interface 0
-        # 2. set_configuration()
-        # 3. Les EP2 direkte
         try:
             if dev.is_kernel_driver_active(0):
                 dev.detach_kernel_driver(0)
@@ -205,9 +184,10 @@ class SiriusDriver:
         except (usb.core.USBError, NotImplementedError) as e:
             log.debug(f"  detach_kernel_driver(0): {e}")
 
+        # 2. set_configuration()
         try:
             dev.set_configuration()
-            log.info("  set_configuration OK")
+            log.info("  set_configuration() OK")
         except usb.core.USBError as e:
             if "Resource busy" in str(e) or "errno 16" in str(e).lower():
                 log.info(f"  set_configuration: allereie konfigurert ({e})")
@@ -219,29 +199,45 @@ class SiriusDriver:
         self._tilkoblet = True
         self._rekoble_forsok = 0
 
-        # Test EP2 - skal fungere etter reset + set_configuration
-        log.info("Testar EP2...")
-        ep2_ok = False
+        # Hent device-metadata frå USB string descriptors (krev ikkje init)
+        self._les_usb_metadata(dev)
+
+        # 3. Test EP2 direkte
+        log.info("Testar EP2 (ADC-data)...")
         try:
             test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
-            log.info(f"  EP2: {len(test_ep2)} bytes OK!")
-            ep2_ok = True
-        except Exception as e:
-            log.warning(f"  EP2 test feilet: {e}")
-
-        # IKKJE køyr init-sekvens! Den drep EP2-streaming permanent.
-        # Metadata (serienr, slot-info) er ikkje tilgjengeleg utan init,
-        # men EP2 ADC-data er viktigare.
-        if ep2_ok:
-            log.info("EP2 fungerer - hoppar over init (init stoppar EP2)")
-            self._enhetsinfo.enhetsstreng = "SIRIUS"
-            self._enhetsinfo.serienummer = ""
-        else:
-            # EP2 fungerer ikkje etter reset - prøv init som fallback
-            log.warning("EP2 fungerer ikkje etter reset - prøver init som fallback")
-            self._initialiser()
+            log.info(f"  EP2 OK: {len(test_ep2)} bytes lest")
+        except usb.core.USBError as e:
+            log.warning(
+                f"  EP2 test feilet: {e}\n"
+                f"  Device kan vere i dårleg tilstand etter tidlegare reset/init.\n"
+                f"  Fix: Koble fraa og til USB-kabelen fysisk, restart container."
+            )
+            # IKKJE køyr init som fallback - det gjer ting verre!
+            # IKKJE køyr dev.reset() - det øydelegg FX2 firmware-tilstanden!
+            # Einaste fix er fysisk USB-replug.
 
         log.info("SIRIUS tilkobla")
+
+    def _les_usb_metadata(self, dev):
+        """Les device-metadata frå USB string descriptors.
+
+        Dette krev IKKJE init-sekvensen og forstyrrar ikkje EP2.
+        USB string descriptors er standard USB-funksjonalitet.
+        """
+        try:
+            produsent = usb.util.get_string(dev, dev.iManufacturer) if dev.iManufacturer else ""
+            produkt = usb.util.get_string(dev, dev.iProduct) if dev.iProduct else ""
+            serienr = usb.util.get_string(dev, dev.iSerialNumber) if dev.iSerialNumber else ""
+            log.info(f"  Produsent: {produsent or '(ikkje tilgjengeleg)'}")
+            log.info(f"  Produkt:   {produkt or '(ikkje tilgjengeleg)'}")
+            log.info(f"  Serienr:   {serienr or '(ikkje tilgjengeleg)'}")
+            self._enhetsinfo.enhetsstreng = produkt or produsent or "SIRIUS"
+            self._enhetsinfo.serienummer = serienr or ""
+        except Exception as e:
+            log.debug(f"  Kunne ikkje lese USB-strengar: {e}")
+            self._enhetsinfo.enhetsstreng = "SIRIUS"
+            self._enhetsinfo.serienummer = ""
 
     def koble_fra(self):
         """Stopp streaming og frigjor USB-enhet."""
@@ -270,11 +266,15 @@ class SiriusDriver:
         return self._tilkoblet and self._dev is not None
 
     def rekoble(self) -> bool:
-        """Proev aa koble til paa nytt med rein USB-tilstand."""
+        """Proev aa koble til paa nytt.
+
+        Frigjer USB-handle og koplar til på nytt.
+        VIKTIG: Ingen dev.reset() eller init - berre rein fråkopling/tilkopling.
+        """
         log.info("Proever aa rekoble til SIRIUS...")
         try:
             self.koble_fra()
-            time.sleep(0.5)
+            time.sleep(1.0)  # Gi USB-stakken tid til å frigjere handle
             self.koble_til()
             return True
         except SiriusFeil as e:
