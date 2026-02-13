@@ -114,6 +114,7 @@ class SiriusDriver:
         self._data_rate_kbs = 0.0
         self._siste_data = {}
         self._siste_data_lock = threading.Lock()
+        self._ep2_ok = False
 
     @property
     def enhetsinfo(self) -> EnhetsInfo:
@@ -126,6 +127,11 @@ class SiriusDriver:
     @property
     def streamer(self) -> bool:
         return self._streamer
+
+    @property
+    def ep2_ok(self) -> bool:
+        """True viss EP2 (ADC-data) svarte ved tilkobling."""
+        return self._ep2_ok
 
     @property
     def data_rate_kbs(self) -> float:
@@ -219,11 +225,11 @@ class SiriusDriver:
 
         # 3. Test EP2 direkte - med EBUSY retry
         log.info("Testar EP2 (ADC-data)...")
-        ep2_ok = False
+        self._ep2_ok = False
         try:
             test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
             log.info(f"  EP2 OK: {len(test_ep2)} bytes lest")
-            ep2_ok = True
+            self._ep2_ok = True
         except usb.core.USBError as e:
             if "Resource busy" in str(e).lower() or "errno 16" in str(e).lower():
                 # EBUSY: Interface framleis klaimet. Release + retry.
@@ -240,7 +246,7 @@ class SiriusDriver:
                 try:
                     test_ep2 = dev.read(EP_ADC_IN, 512, timeout=2000)
                     log.info(f"  EP2 OK (etter release/claim): {len(test_ep2)} bytes lest")
-                    ep2_ok = True
+                    self._ep2_ok = True
                 except usb.core.USBError as e2:
                     log.warning(f"  EP2 retry feilet: {e2}")
             else:
@@ -250,7 +256,7 @@ class SiriusDriver:
                     f"  Fix: Koble fraa og til USB-kabelen fysisk, restart container."
                 )
 
-        log.info(f"SIRIUS tilkobla (EP2: {'OK' if ep2_ok else 'FEIL'})")
+        log.info(f"SIRIUS tilkobla (EP2: {'OK' if self._ep2_ok else 'FEIL'})")
 
     def _les_usb_metadata(self, dev):
         """Les device-metadata frå USB string descriptors.
@@ -788,6 +794,7 @@ class SiriusDriver:
             ],
             "sample_rate": self._konfig.sample_rate,
             "data_rate_kbs": round(self._data_rate_kbs, 1),
+            "ep2_ok": self._ep2_ok,
         }
 
     def __repr__(self):

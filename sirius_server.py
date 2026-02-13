@@ -484,6 +484,8 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
             return False, "Driver ikkje initialisert - klikk Rekoble"
         if not _driver.er_tilkoblet():
             return False, "Ikkje tilkobla - klikk Rekoble"
+        if not _driver.ep2_ok:
+            return False, "EP2 (ADC) ikkje klar - replug USB-kabel og klikk Rekoble"
         if _driver.streamer:
             return True, "Streaming køyrer allereie"
 
@@ -556,13 +558,16 @@ def rekoble_driver():
                     "feil": None,
                 })
                 # Restart kontinuerleg streaming etter rekonnektering
-                if not _driver.streamer:
+                if _driver.ep2_ok and not _driver.streamer:
                     try:
                         _driver.start_streaming(callback=_global_data_callback)
                         server_status["streamer"] = True
                         log.info("Streaming restarta etter rekobling")
                     except SiriusFeil as e:
                         log.warning(f"Kunne ikkje starte streaming etter rekobling: {e}")
+                elif not _driver.ep2_ok:
+                    server_status["feil"] = "EP2 timeout - replug USB-kabel"
+                    log.error("EP2 svarte ikkje etter rekobling - replug USB fysisk")
 
                 return True, "Rekoblet"
             else:
@@ -667,7 +672,7 @@ def start_server(args):
         _opendaq_bro = None
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
-    if enhet_tilkoblet:
+    if enhet_tilkoblet and _driver.ep2_ok:
         # Start streaming ÉIN GONG og hald det køyrande.
         # Aldri stopp/start-syklus - det skapar EBUSY ved rekonnektering.
         try:
@@ -687,6 +692,10 @@ def start_server(args):
             opendaq_bro=_opendaq_bro,
         )
         _maaler.start()
+    elif enhet_tilkoblet and not _driver.ep2_ok:
+        log.error("EP2 (ADC) svarte ikkje - streaming IKKJE starta")
+        log.error("Fix: Koble fraa og til USB-kabelen fysisk, restart container")
+        server_status["feil"] = "EP2 timeout - replug USB-kabel"
     else:
         log.info("Streaming og autonom lagring utsett til enhet er tilkobla")
 
