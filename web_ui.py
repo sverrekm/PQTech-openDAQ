@@ -2108,25 +2108,52 @@ async function oppdaterLiveVerdiar() {
         const res = await fetch('/api/kanalar/live');
         const data = await res.json();
         const odaq = data.opendaq || {};
+        const drv = data.driver || {};
 
         for (let i = 0; i < 8; i++) {
             const key = 'kanal_' + i;
             const el = document.getElementById('kanal-verdi-' + i);
             if (!el) continue;
 
-            const v = odaq[key];
-            if (v && v.siste !== undefined) {
-                el.textContent = v.siste;
-                el.style.color = v.kjelde === 'sirius' ? '#10b981' : '#D76428';
-                // Sparkline data
+            // Prioritet: openDAQ sirius > driver > openDAQ simulert
+            const vo = odaq[key];
+            const vd = drv[key];
+            let verdi = null, kjelde = '', farge = '#6b6b6b';
+
+            if (vo && vo.kjelde === 'sirius' && vo.siste !== undefined) {
+                verdi = vo.siste;
+                kjelde = 'S';
+                farge = '#10b981';
+            } else if (vd && vd.siste !== null && vd.siste !== undefined) {
+                verdi = vd.siste;
+                kjelde = 'D';
+                farge = '#3b82f6';
+            } else if (vo && vo.siste !== undefined) {
+                verdi = vo.siste;
+                kjelde = '~';
+                farge = '#D76428';
+            }
+
+            if (verdi !== null) {
+                el.textContent = verdi + ' ' + kjelde;
+                el.style.color = farge;
                 if (!sparkData[i]) sparkData[i] = [];
-                sparkData[i].push(v.siste);
+                sparkData[i].push(typeof verdi === 'number' ? verdi : parseFloat(verdi));
                 if (sparkData[i].length > 30) sparkData[i].shift();
                 tegnSparkline(i);
             } else {
                 el.textContent = '-';
                 el.style.color = '#6b6b6b';
             }
+        }
+
+        // Debug-info
+        const dbg = odaq._debug;
+        if (dbg) {
+            const el = document.getElementById('kanal-konfig-melding');
+            el.textContent = 'data_teller=' + dbg.data_teller +
+                ' sirius=' + dbg.sirius_aktiv;
+            el.style.color = '#6b6b6b';
         }
     } catch(e) {}
 }

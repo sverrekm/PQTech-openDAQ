@@ -284,7 +284,13 @@ class OpenDAQBro:
 
     def hent_siste_verdiar(self) -> dict:
         """Returner siste kanal-verdiar for web UI live-visning."""
-        return dict(self._siste_verdiar)
+        result = dict(self._siste_verdiar)
+        result["_debug"] = {
+            "data_teller": self._data_teller,
+            "sirius_aktiv": self._sirius_aktiv,
+            "sirius_ts": self._sirius_ts,
+        }
+        return result
 
     def _les_signal_loop(self):
         """Bakgrunnstraad som genererer simulerte verdiar.
