@@ -31,6 +31,7 @@ try:
         hent_logg as _sirius_hent_logg,
         send_debug_kommando as _sirius_debug_cmd,
         frigjor_usb as _sirius_frigjor_usb,
+        gjenoppliv_ep2 as _sirius_gjenoppliv_ep2,
         hent_opendaq_status as _opendaq_hent_status,
         restart_opendaq_bro as _opendaq_restart,
         hent_opendaq_verdiar as _opendaq_hent_verdiar,
@@ -448,6 +449,18 @@ def api_sirius_rekoble():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/sirius/gjenoppliv-ep2", methods=["POST"])
+def api_sirius_gjenoppliv_ep2():
+    """Forsøk å gjenopplive EP2 via kommando-strategiar."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "Driver ikke lastet"}), 503
+    try:
+        suksess, melding = _sirius_gjenoppliv_ep2()
+        return jsonify({"suksess": suksess, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 # --- Logg og Debug API ---
 
 @app.route("/api/logg")
@@ -851,6 +864,8 @@ body {
 .melding-feil { background: #fee2e2; color: #991b1b; display: block; }
 .btn-rod { background: #fee2e2; color: #991b1b; }
 .btn-rod:hover { background: #fecaca; }
+.btn-gul { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
+.btn-gul:hover { background: #fde68a; }
 .usbip-status-rad {
     display: flex;
     align-items: center;
@@ -1067,6 +1082,7 @@ body {
             <button class="btn btn-gronn" id="btn-sirius-start" onclick="siriusStart()">Start streaming</button>
             <button class="btn btn-rod" id="btn-sirius-stopp" onclick="siriusStopp()" style="display:none;">Stopp streaming</button>
             <button class="btn btn-blaa" id="btn-sirius-rekoble" onclick="siriusRekoble()">Rekoble</button>
+            <button class="btn btn-gul" id="btn-gjenoppliv-ep2" onclick="gjenopplivEp2()" style="display:none;">Gjenoppliv EP2</button>
         </div>
         <div id="sirius-melding" class="melding"></div>
     </div>
@@ -1860,6 +1876,11 @@ function oppdaterSiriusUI(s) {
     // Vis/skjul knapper
     document.getElementById('btn-sirius-start').style.display = s.streamer ? 'none' : 'inline-block';
     document.getElementById('btn-sirius-stopp').style.display = s.streamer ? 'inline-block' : 'none';
+    // Vis Gjenoppliv EP2-knapp når tilkobla men EP2 ikkje OK
+    const ep2Btn = document.getElementById('btn-gjenoppliv-ep2');
+    if (ep2Btn) {
+        ep2Btn.style.display = (s.tilkoblet && !s.ep2_ok) ? 'inline-block' : 'none';
+    }
 
     // Slot-info
     const slotEl = document.getElementById('sirius-slot-info');
@@ -1936,6 +1957,26 @@ async function siriusRekoble() {
     } catch (e) {}
     btn.disabled = false;
     btn.textContent = 'Rekoble';
+    hentSiriusStatus();
+}
+
+async function gjenopplivEp2() {
+    const btn = document.getElementById('btn-gjenoppliv-ep2');
+    btn.disabled = true;
+    btn.textContent = 'Prøver strategiar...';
+    try {
+        const res = await fetch('/api/sirius/gjenoppliv-ep2', {method: 'POST'});
+        const data = await res.json();
+        const mel = document.getElementById('sirius-melding');
+        mel.textContent = data.melding;
+        mel.className = 'melding ' + (data.suksess ? 'melding-ok' : 'melding-feil');
+    } catch (e) {
+        const mel = document.getElementById('sirius-melding');
+        mel.textContent = 'Nettverksfeil';
+        mel.className = 'melding melding-feil';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Gjenoppliv EP2';
     hentSiriusStatus();
 }
 

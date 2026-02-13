@@ -401,6 +401,7 @@ def hent_driver_status():
                 "slot_info": drv_status.get("slotter", []),
                 "serienummer": drv_status.get("serienummer", ""),
                 "enhet_navn": drv_status.get("enhetsstreng", "") or server_status.get("enhet_navn", ""),
+                "ep2_ok": drv_status.get("ep2_ok", False),
             })
         else:
             server_status["tilkoblet"] = False
@@ -472,6 +473,37 @@ def _global_data_callback(kanal_data):
             pass
 
 
+def gjenoppliv_ep2():
+    """Forsøk å gjenopplive EP2 via kommando-strategiar (web UI-knapp)."""
+    global _driver
+    with _lock:
+        if _driver is None:
+            return False, "Driver ikkje initialisert - klikk Rekoble"
+        if not _driver.er_tilkoblet():
+            return False, "Ikkje tilkobla - klikk Rekoble fyrst"
+        if _driver.ep2_ok:
+            return True, "EP2 fungerer allereie"
+
+        try:
+            ok = _driver.forsok_gjenoppliv_ep2()
+            if ok:
+                server_status["feil"] = None
+                # Start streaming automatisk etter vellukka gjenoppliving
+                if not _driver.streamer:
+                    try:
+                        _driver.start_streaming(callback=_global_data_callback)
+                        server_status["streamer"] = True
+                        log.info("Streaming starta etter EP2 gjenoppliving")
+                    except SiriusFeil as e:
+                        log.warning(f"Kunne ikkje starte streaming: {e}")
+                return True, "EP2 gjenoppliva! Streaming starta."
+            else:
+                server_status["feil"] = "EP2 gjenoppliving feilet - alle strategiar prøvd"
+                return False, "Alle EP2-strategiar feilet. Instrumentet kan trenge full power-cycle."
+        except Exception as e:
+            return False, f"Feil under gjenoppliving: {e}"
+
+
 def start_driver_streaming(sample_rate=None, kanaler=None):
     """Start streaming (eller stadfest at det allereie køyrer).
 
@@ -485,7 +517,7 @@ def start_driver_streaming(sample_rate=None, kanaler=None):
         if not _driver.er_tilkoblet():
             return False, "Ikkje tilkobla - klikk Rekoble"
         if not _driver.ep2_ok:
-            return False, "EP2 (ADC) ikkje klar - replug USB-kabel og klikk Rekoble"
+            return False, "EP2 (ADC) ikkje klar - klikk Gjenoppliv EP2"
         if _driver.streamer:
             return True, "Streaming køyrer allereie"
 
@@ -566,8 +598,8 @@ def rekoble_driver():
                     except SiriusFeil as e:
                         log.warning(f"Kunne ikkje starte streaming etter rekobling: {e}")
                 elif not _driver.ep2_ok:
-                    server_status["feil"] = "EP2 timeout - replug USB-kabel"
-                    log.error("EP2 svarte ikkje etter rekobling - replug USB fysisk")
+                    server_status["feil"] = "EP2 timeout - klikk Gjenoppliv EP2"
+                    log.warning("EP2 svarte ikkje etter rekobling - prøv Gjenoppliv EP2 i web UI")
 
                 return True, "Rekoblet"
             else:
@@ -694,8 +726,8 @@ def start_server(args):
         _maaler.start()
     elif enhet_tilkoblet and not _driver.ep2_ok:
         log.error("EP2 (ADC) svarte ikkje - streaming IKKJE starta")
-        log.error("Fix: Koble fraa og til USB-kabelen fysisk, restart container")
-        server_status["feil"] = "EP2 timeout - replug USB-kabel"
+        log.error("Bruk 'Gjenoppliv EP2'-knappen i web UI for å prøve kommando-strategiar")
+        server_status["feil"] = "EP2 timeout - klikk Gjenoppliv EP2"
     else:
         log.info("Streaming og autonom lagring utsett til enhet er tilkobla")
 

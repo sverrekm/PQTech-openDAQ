@@ -44,6 +44,7 @@ from sirius_protokoll_impl import (
     REG_CMD, REG_COMMIT, REG_SAMPLE_CFG,
     REG_TRIG_33, REG_TRIG_08, REG_TRIG_0B, REG_TRIG_0A,
     ADC_KANALER,
+    OPCODE_SETMODE, OPCODE_INIT,
     SiriusFeil, SiriusUSBFeil, SiriusPollTimeout, SiriusIkkeFunnet,
     TIMEOUT_DATA,
 )
@@ -183,7 +184,11 @@ class SiriusDriver:
                     log.warning(f"Tilkobling etter sysfs reset feila: {e}")
 
         if not self._ep2_ok:
-            log.warning("EP2 framleis ikkje OK etter alle forsøk")
+            log.info("EP2 framleis daud etter sysfs reset - prøver kommando-gjenoppliving...")
+            self.forsok_gjenoppliv_ep2()
+
+        if not self._ep2_ok:
+            log.warning("EP2 ikkje OK etter alle forsøk - bruk Gjenoppliv EP2 i web UI")
 
     def _frigjer_dev(self):
         """Frigjer USB-handle utan full koble_fra (unngår stopp_streaming)."""
@@ -340,6 +345,168 @@ class SiriusDriver:
         except Exception as e:
             log.error(f"sysfs USB reset feilet: {e}")
             return False
+
+    def _test_ep2(self, timeout=3000):
+        """Rask test om EP2 leverer data.
+
+        Returns: True viss EP2 svarte med data
+        """
+        try:
+            data = self._dev.read(EP_ADC_IN, 512, timeout=timeout)
+            if data and len(data) > 0:
+                log.info(f"  EP2 test OK: {len(data)} bytes")
+                self._ep2_ok = True
+                return True
+        except Exception as e:
+            log.debug(f"  EP2 test feilet: {e}")
+        return False
+
+    def forsok_gjenoppliv_ep2(self):
+        """
+        Forsøk å gjenopplive EP2 ADC-streaming via USB-kommandoar.
+
+        EP2 kan ha blitt stoppa av ein tidlegare init-sekvens (A0/B0/AD).
+        SIRIUS sin hovudkontrollar har eigen straumforsyning og overlever
+        USB-fråkopling, så tilstanden "EP2 stoppa" heng att.
+
+        Prøver fleire strategiar frå minst til mest invasiv.
+        Returns: True viss EP2 vart gjenoppliva
+        """
+        if not self._tilkoblet or self._proto is None:
+            log.warning("Kan ikkje gjenopplive EP2: ikkje tilkobla")
+            return False
+
+        proto = self._proto
+        log.info("=" * 50)
+        log.info("EP2 GJENOPPLIVING - prøver kommando-strategiar")
+        log.info("=" * 50)
+
+        # --- Strategi 1: Enkel modus-toggle (A0 00 → A0 01) ---
+        log.info("Strategi 1/7: Modus-toggle (A0 00→01)...")
+        try:
+            proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x00]))
+            time.sleep(0.5)
+            proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x01]))
+            time.sleep(1.0)
+            if self._test_ep2():
+                log.info("SUKSESS: Strategi 1 (modus-toggle)")
+                return True
+        except SiriusUSBFeil as e:
+            log.debug(f"Strategi 1 feilet: {e}")
+
+        # --- Strategi 2: Init-reset + aktiver (B0 → A0 01) ---
+        log.info("Strategi 2/7: Init-reset (B0) + aktiver...")
+        try:
+            proto.init_kommando()  # B0 3F 0C
+            time.sleep(0.5)
+            proto.sett_aktiv_modus()  # A0 01
+            time.sleep(1.0)
+            if self._test_ep2():
+                log.info("SUKSESS: Strategi 2 (init-reset + aktiver)")
+                return True
+        except SiriusUSBFeil as e:
+            log.debug(f"Strategi 2 feilet: {e}")
+
+        # --- Strategi 3: Full init-sekvens ---
+        # EP2 er allereie daud, så init kan ikkje gjere det verre.
+        log.info("Strategi 3/7: Full init-sekvens...")
+        try:
+            self._initialiser()
+            time.sleep(1.0)
+            if self._test_ep2():
+                log.info("SUKSESS: Strategi 3 (full init)")
+                return True
+        except Exception as e:
+            log.warning(f"Strategi 3 feilet: {e}")
+
+        # --- Strategi 4: Full init + per-slot commit (kanskje "start" trigger) ---
+        log.info("Strategi 4/7: Per-slot commit etter init...")
+        try:
+            for slot in ALLE_SLOTTER:
+                proto.commit(slot)
+            time.sleep(0.5)
+            if self._test_ep2(timeout=2000):
+                log.info("SUKSESS: Strategi 4 (per-slot commit)")
+                return True
+
+            # Prøv global commit (slot=0xFF)
+            proto.skriv_register(0xFF, REG_COMMIT, bytes([0x00, 0x00, 0x00]))
+            time.sleep(0.5)
+            if self._test_ep2(timeout=2000):
+                log.info("SUKSESS: Strategi 4b (global commit)")
+                return True
+        except Exception as e:
+            log.debug(f"Strategi 4 feilet: {e}")
+
+        # --- Strategi 5: Alternative A0 modus-verdiar ---
+        # DewesoftX kan bruke A0 med andre verdiar for "start acquisition"
+        log.info("Strategi 5/7: Alternative A0-modusar...")
+        for mode_val in [0x02, 0x03, 0x04, 0x10, 0x80, 0xFF]:
+            try:
+                svar = proto.send_raa_kommando(bytes([OPCODE_SETMODE, mode_val]))
+                log.debug(f"  A0 {mode_val:02X} svar: {svar[:8].hex()}")
+                time.sleep(0.5)
+                if self._test_ep2(timeout=2000):
+                    log.info(f"SUKSESS: Strategi 5 (A0 {mode_val:02X})")
+                    return True
+            except SiriusUSBFeil as e:
+                log.debug(f"  A0 {mode_val:02X}: {e}")
+        # Sett tilbake til A0 01 (aktiv)
+        try:
+            proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x01]))
+        except Exception:
+            pass
+
+        # --- Strategi 6: B0 med ulike parametrar ---
+        log.info("Strategi 6/7: B0 init med ulike parametrar...")
+        for b1, b2 in [(0x00, 0x00), (0x3F, 0x00), (0x00, 0x0C), (0xFF, 0xFF), (0x7F, 0x0C)]:
+            try:
+                svar = proto.send_raa_kommando(bytes([OPCODE_INIT, b1, b2]))
+                log.debug(f"  B0 {b1:02X} {b2:02X} svar: {svar[:8].hex()}")
+                time.sleep(1.0)
+                if self._test_ep2(timeout=2000):
+                    log.info(f"SUKSESS: Strategi 6 (B0 {b1:02X} {b2:02X})")
+                    return True
+            except SiriusUSBFeil as e:
+                log.debug(f"  B0 {b1:02X} {b2:02X}: {e}")
+
+        # --- Strategi 7: sysfs USB-reset + full init ---
+        # Kombiner hardware-reset (FX2) med software-init (hovudkontrollar)
+        log.info("Strategi 7/7: sysfs USB-reset + full init...")
+        try:
+            self._frigjer_dev()
+            if self.sysfs_usb_reset():
+                time.sleep(1)
+                self._koble_til_intern()
+                if self._ep2_ok:
+                    log.info("SUKSESS: Strategi 7 (sysfs + rein tilkobling)")
+                    return True
+                # sysfs åleine hjelper ikkje - prøv init etter reset
+                self._initialiser()
+                time.sleep(1.0)
+                if self._test_ep2():
+                    log.info("SUKSESS: Strategi 7b (sysfs + full init)")
+                    return True
+                # Prøv A0 toggle etter sysfs+init
+                proto = self._proto
+                if proto:
+                    proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x00]))
+                    time.sleep(0.3)
+                    proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x01]))
+                    time.sleep(0.5)
+                    if self._test_ep2():
+                        log.info("SUKSESS: Strategi 7c (sysfs + init + modus-toggle)")
+                        return True
+        except Exception as e:
+            log.warning(f"Strategi 7 feilet: {e}")
+
+        log.error("=" * 50)
+        log.error("ALLE EP2-strategiar feilet.")
+        log.error("Mogleg årsak: SIRIUS hovudkontrollar treng straumsykling")
+        log.error("(ikkje berre USB-replug, men full power-off/on av instrumentet)")
+        log.error("Bruk 'Debug-kommando' i web UI for å teste manuelt")
+        log.error("=" * 50)
+        return False
 
     def koble_fra(self):
         """Stopp streaming og frigjor USB-enhet.
