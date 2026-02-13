@@ -250,22 +250,38 @@ class SiriusDriver:
         # Kjoer full initialisering (repliserer DewesoftX)
         self._initialiser()
 
-        # --- Diagnostikk: Test EP2 ETTER init ---
-        log.info("Testar EP2 etter init...")
+        # Init-sekvensen stoppar EP2-streaming (bekrefta med diagnostikk:
+        # EP2 fungerer pre-init men timeout post-init).
+        # Loesing: Gjer set_configuration() paa nytt for aa restarte EP2.
+        log.info("Restartar EP2 etter init (set_configuration på nytt)...")
         try:
-            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=500)
-            log.info(f"  EP2 post-init: {len(test_ep2)} bytes OK!")
+            usb.util.release_interface(dev, 0)
+            log.info("  release_interface OK")
         except Exception as e:
-            log.warning(f"  EP2 post-init feilet: {e}")
-            # Proev clear_halt for aa nullstille EP2
-            log.info("  Proever clear_halt paa EP2...")
-            try:
-                dev.clear_halt(EP_ADC_IN)
-                log.info("  clear_halt OK")
-                test_ep2 = dev.read(EP_ADC_IN, 512, timeout=500)
-                log.info(f"  EP2 etter clear_halt: {len(test_ep2)} bytes OK!")
-            except Exception as e2:
-                log.warning(f"  EP2 etter clear_halt feilet ogsaa: {e2}")
+            log.debug(f"  release_interface: {e}")
+
+        try:
+            dev.set_configuration()
+            log.info("  set_configuration OK")
+        except usb.core.USBError as e:
+            if "Resource busy" in str(e) or "errno 16" in str(e).lower():
+                log.info(f"  set_configuration: {e} (prøver vidare)")
+            else:
+                log.warning(f"  set_configuration feilet: {e}")
+
+        try:
+            usb.util.claim_interface(dev, 0)
+            log.info("  claim_interface OK")
+        except usb.core.USBError as e:
+            log.warning(f"  claim_interface: {e}")
+
+        # Test EP2 etter restart
+        log.info("Testar EP2 etter restart...")
+        try:
+            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=1000)
+            log.info(f"  EP2 etter restart: {len(test_ep2)} bytes OK!")
+        except Exception as e:
+            log.warning(f"  EP2 etter restart: {e}")
 
         log.info("SIRIUS tilkobla og initialisert")
 
