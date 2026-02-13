@@ -59,7 +59,6 @@ class OpenDAQBro:
         )
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
-        self._signal_lesarar = []   # StreamReader per kanal for polling
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
@@ -130,25 +129,15 @@ class OpenDAQBro:
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
             self._kanal_signal = []
-            self._signal_lesarar = []
             try:
                 for ch in self._device.channels:
                     sigs = list(ch.signals)
                     if sigs:
                         self._kanal_signal.append((ch, sigs[0]))
-                        # Opprett StreamReader for å lese signal-verdiar
-                        try:
-                            reader = _daq.StreamReader(sigs[0])
-                            self._signal_lesarar.append(reader)
-                        except Exception:
-                            self._signal_lesarar.append(None)
                     else:
                         self._kanal_signal.append((ch, None))
-                        self._signal_lesarar.append(None)
                 log.info(f"  Signal-referansar: {len(self._kanal_signal)} kanalar, "
                          f"{sum(1 for _, s in self._kanal_signal if s is not None)} med signal")
-                log.info(f"  StreamReaders: "
-                         f"{sum(1 for r in self._signal_lesarar if r is not None)} oppretta")
             except Exception as e:
                 log.warning(f"  Signal-henting feilet: {e}")
 
@@ -298,14 +287,17 @@ class OpenDAQBro:
         return dict(self._siste_verdiar)
 
     def _les_signal_loop(self):
-        """Bakgrunnstraad som les signal-verdiar frå referanse-eininga.
+        """Bakgrunnstraad som genererer simulerte verdiar frå kanal-eigenskapar.
 
         Oppdaterer _siste_verdiar slik at web UI alltid viser data,
         uavhengig av om SIRIUS er tilkobla og streamer.
-        Hopper over kanalar der SIRIUS leverer reelle data.
+        Hopper over når SIRIUS leverer reelle data.
         """
         import time
+        import math
         log.info("  Signal-leser-traad starta")
+
+        t0 = time.time()
         while not self._stopp_event.is_set():
             # Sjekk om SIRIUS er aktiv (data motteke siste 5 sekund)
             sirius_nyleg = (
@@ -314,41 +306,32 @@ class OpenDAQBro:
             )
 
             if not sirius_nyleg:
-                # Ingen SIRIUS-data - les frå referanse-eininga (simulert)
                 self._sirius_aktiv = False
-                try:
-                    for i, reader in enumerate(self._signal_lesarar):
-                        if reader is None:
-                            continue
-                        key = f"kanal_{i}"
+                t = time.time() - t0
+                # Generer simulerte verdiar frå kanal-eigenskapar
+                for i, (ch, sig) in enumerate(self._kanal_signal):
+                    key = f"kanal_{i}"
+                    try:
+                        amp = ch.get_property_value("Amplitude")
+                        freq = ch.get_property_value("Frequency")
+                        offset = 0.0
                         try:
-                            verdiar = reader.read(100, timeout_ms=0)
-                            if verdiar is not None and len(verdiar) > 0:
-                                fdata = np.asarray(verdiar, dtype=np.float64)
-                                snitt = float(np.mean(fdata))
-                                rms = float(np.sqrt(np.mean(fdata ** 2)))
-                                topp = float(np.max(np.abs(fdata)))
-                                self._siste_verdiar[key] = {
-                                    "snitt": round(snitt, 2),
-                                    "rms": round(rms, 2),
-                                    "topp": round(topp, 2),
-                                    "siste": round(float(fdata[-1]), 2),
-                                    "antall": len(fdata),
-                                    "kjelde": "simulert",
-                                }
+                            offset = ch.get_property_value("Offset")
                         except Exception:
                             pass
-                except Exception as e:
-                    log.debug(f"Signal-leser feil: {e}")
-            else:
-                # SIRIUS aktiv - tøm reader-bufferar for å unngå etterslep
-                for reader in self._signal_lesarar:
-                    if reader is None:
-                        continue
-                    try:
-                        reader.read(1000, timeout_ms=0)
-                    except Exception:
-                        pass
+                        # Simuler sinusverdi
+                        verdi = amp * math.sin(2 * math.pi * freq * t) + offset
+                        rms = amp / math.sqrt(2) if amp > 0 else 0.0
+                        self._siste_verdiar[key] = {
+                            "snitt": round(offset, 2),
+                            "rms": round(rms, 2),
+                            "topp": round(abs(amp), 2),
+                            "siste": round(verdi, 2),
+                            "antall": 100,
+                            "kjelde": "simulert",
+                        }
+                    except Exception as e:
+                        log.debug(f"  Kanal {i} sim-feil: {e}")
 
             self._stopp_event.wait(timeout=1.0)
 
@@ -363,7 +346,6 @@ class OpenDAQBro:
         with self._lock:
             self._status["aktiv"] = False
         # Instance-opprydding handtert av Python GC
-        self._signal_lesarar = []
         self._instance = None
         self._device = None
         log.info("openDAQ nettverksbro stoppa")
