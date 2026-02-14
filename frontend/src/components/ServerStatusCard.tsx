@@ -1,12 +1,11 @@
-import { useCallback } from 'react'
-import { fetchStatus } from '../api/status'
-import { usePolling } from '../hooks/usePolling'
+import type { ServerStatus } from '../api/types'
 import InfoGrid from './InfoGrid'
 
-export default function ServerStatusCard() {
-  const fetcher = useCallback(() => fetchStatus(), [])
-  const { data: s } = usePolling(fetcher, 5000)
+interface Props {
+  status: ServerStatus | null
+}
 
+export default function ServerStatusCard({ status: s }: Props) {
   if (!s) return null
 
   return (

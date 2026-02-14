@@ -1,19 +1,23 @@
-import { useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchKanalar, fetchKanalLive } from '../api/kanalar'
 import { usePolling } from '../hooks/usePolling'
+import type { KanalKonfig } from '../api/types'
 import SparklineChart from './SparklineChart'
 
 export default function ChannelLiveCard() {
-  const konfFetcher = useCallback(() => fetchKanalar(), [])
+  const [kanalar, setKanalar] = useState<KanalKonfig[] | null>(null)
   const liveFetcher = useCallback(() => fetchKanalLive(), [])
-  const { data: kanalar } = usePolling(konfFetcher, 10000)
   const { data: live } = usePolling(liveFetcher, 2000)
 
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
 
+  // Fetch channel config once on mount
+  useEffect(() => {
+    fetchKanalar().then(setKanalar).catch(() => {})
+  }, [])
+
   if (!kanalar) return null
 
-  // Compute current values
   const getChannelValue = (idx: number) => {
     const key = `kanal_${idx}`
     const odaq = live?.opendaq?.[key] as { siste?: number; kjelde?: string } | undefined
@@ -48,7 +52,6 @@ export default function ChannelLiveCard() {
         <tbody>
           {kanalar.map((k, i) => {
             const cv = getChannelValue(i)
-            // Update sparkline data
             if (cv !== null) {
               const arr = sparkDataRef.current.get(i) || []
               const numVal = typeof cv.value === 'number' ? cv.value : parseFloat(String(cv.value))

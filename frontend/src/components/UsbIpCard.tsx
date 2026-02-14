@@ -1,21 +1,20 @@
 import { useState, useCallback } from 'react'
 import { fetchUsbIpStatus, usbipDel, usbipStopp } from '../api/usbip'
-import { fetchStatus } from '../api/status'
 import { usePolling } from '../hooks/usePolling'
 import InfoGrid from './InfoGrid'
 import CopyableCommand from './CopyableCommand'
 
-export default function UsbIpCard() {
+interface Props {
+  ip: string
+}
+
+export default function UsbIpCard({ ip }: Props) {
   const fetcher = useCallback(() => fetchUsbIpStatus(), [])
-  const ipFetcher = useCallback(() => fetchStatus(), [])
   const { data: u, refresh } = usePolling(fetcher, 5000)
-  const { data: serverStatus } = usePolling(ipFetcher, 10000)
   const [feil, setFeil] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   if (!u) return null
-
-  const ip = serverStatus?.ip || '-'
 
   const handleDel = async () => {
     setBusy(true)

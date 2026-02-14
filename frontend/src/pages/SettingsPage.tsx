@@ -1,3 +1,4 @@
+import type { ServerStatus } from '../api/types'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import UsbIpCard from '../components/UsbIpCard'
 import DeviceConnectionCard from '../components/DeviceConnectionCard'
@@ -5,11 +6,15 @@ import DebugConsoleCard from '../components/DebugConsoleCard'
 import ProbeAnalysisCard from '../components/ProbeAnalysisCard'
 import Ep2RecoveryCard from '../components/Ep2RecoveryCard'
 
-export default function SettingsPage() {
+interface Props {
+  status: ServerStatus | null
+}
+
+export default function SettingsPage({ status }: Props) {
   return (
     <>
       <ChannelConfigCard />
-      <UsbIpCard />
+      <UsbIpCard ip={status?.ip || '-'} />
       <DeviceConnectionCard />
       <DebugConsoleCard />
       <ProbeAnalysisCard />
