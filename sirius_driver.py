@@ -45,7 +45,7 @@ from sirius_protokoll_impl import (
     REG_CMD, REG_COMMIT, REG_SAMPLE_CFG,
     REG_TRIG_33, REG_TRIG_08, REG_TRIG_0B, REG_TRIG_0A,
     ADC_KANALER,
-    OPCODE_SETMODE, OPCODE_INIT,
+    OPCODE_SETMODE, OPCODE_INIT, OPCODE_PRESTART,
     SiriusFeil, SiriusUSBFeil, SiriusPollTimeout, SiriusIkkeFunnet,
     TIMEOUT_DATA,
 )
@@ -157,11 +157,12 @@ class SiriusDriver:
         3. set_configuration()
         4. Les EP2 direkte
 
-        Viss EP2 feilar, prøver automatisk sysfs USB power-cycle
-        (ekvivalent med fysisk replug) og retrying.
-
         VIKTIG: Korkje dev.reset() eller init-sekvensen (A0/B0/AD) maa
         køyrast! Begge øydelegg EP2 ADC-streaming permanent.
+
+        EP2 fungerer på factory-fresh SIRIUS etter USB-enumerering.
+        Viss EP2 feilar, logg ei melding - brukaren kan klikke
+        "Gjenoppliv EP2" i web UI for å prøve recovery-strategiar.
 
         Raises:
             SiriusIkkeFunnet: Hvis SIRIUS ikkje finst paa USB
@@ -170,26 +171,13 @@ class SiriusDriver:
         if usb is None:
             raise SiriusFeil("pyusb er ikkje installert (pip install pyusb)")
 
-        # Forsøk 1: Direkte tilkobling
         self._koble_til_intern()
 
-        # Viss EP2 feila, prøv sysfs USB power-cycle og retry
         if not self._ep2_ok:
-            log.info("EP2 feila - prøver sysfs USB power-cycle (software-replug)...")
-            self._frigjer_dev()
-            if self.sysfs_usb_reset():
-                log.info("Prøver tilkobling på nytt etter sysfs reset...")
-                try:
-                    self._koble_til_intern()
-                except (SiriusFeil, Exception) as e:
-                    log.warning(f"Tilkobling etter sysfs reset feila: {e}")
-
-        if not self._ep2_ok:
-            log.info("EP2 framleis daud etter sysfs reset - prøver kommando-gjenoppliving...")
-            self.forsok_gjenoppliv_ep2()
-
-        if not self._ep2_ok:
-            log.warning("EP2 ikkje OK etter alle forsøk - bruk Gjenoppliv EP2 i web UI")
+            log.warning(
+                "EP2 (ADC) svarte ikkje - bruk 'Gjenoppliv EP2' i web UI. "
+                "IKKJE klikk Rekoble (det hjelper ikkje med EP2)."
+            )
 
     def _frigjer_dev(self):
         """Frigjer USB-handle utan full koble_fra (unngår stopp_streaming)."""
@@ -457,8 +445,15 @@ class SiriusDriver:
                 ["uhubctl", "-l", bus, "-p", port, "-a", "on"],
                 capture_output=True, timeout=10
             )
-            log.info(f"  uhubctl: port {port} power ON - ventar på enumerering...")
-            time.sleep(5)
+            log.info(f"  uhubctl: port {port} power ON - ventar på enumerering (8s)...")
+            time.sleep(8)  # Lenger vent: FX2 treng tid til firmware-lasting
+
+            # Tøm pyusb sin device-cache slik at neste find() får ferskt handle
+            try:
+                import usb.backend.libusb1
+                usb.core._device_cache = {}
+            except (AttributeError, ImportError):
+                pass  # Cache-tømming er best-effort
 
             return True
         except subprocess.TimeoutExpired:
@@ -479,83 +474,96 @@ class SiriusDriver:
 
     def forsok_gjenoppliv_ep2(self):
         """
-        Forsøk å gjenopplive EP2 ADC-streaming.
+        Forsoek aa gjenopplive EP2 ADC-streaming.
 
         EP2 kan ha blitt stoppa av ein tidlegare init-sekvens.
         SIRIUS hovudkontrollar har eigen straumforsyning og overlever
-        USB-fråkopling, så tilstanden "EP2 stoppa" heng att.
+        USB-fråkopling, saa tilstanden "EP2 stoppa" heng att.
 
-        Strategiar (hardware-reset fyrst, deretter kommando-basert):
-        1-2: dev.reset() (USB bus reset → FX2 firmware reboot)
-        3-4: uhubctl (ekte USB power-cycle)
-        5-9: EP1 kommandoar (A0, B0, init, etc.)
+        VIKTIG: Stoppar streaming fyrst for aa frigjoere EP2 fraa leser-traaden.
+
+        Strategiar (i prioritert rekkjefylgje):
+        1: Start-acquisition sekvens (DewesoftX-replika, fraa pcapng-analyse)
+        2: Init + start-acquisition (full DewesoftX-syklus)
+        3: dev.reset() + start-acquisition
+        4: uhubctl power-cycle + start-acquisition
 
         Returns: True viss EP2 vart gjenoppliva
         """
-        log.info("=" * 50)
-        log.info("EP2 GJENOPPLIVING - hardware + kommando-strategiar")
-        log.info("=" * 50)
+        # Stopp streaming FYRST - leser-traaden held EP2 oppteken
+        if self._streamer:
+            log.info("Stoppar streaming foer EP2-gjenoppliving...")
+            self.stopp_streaming()
+
+        log.info("=" * 60)
+        log.info("EP2 GJENOPPLIVING - Start Acquisition sekvens")
+        log.info("  (reverse-engineered fraa DewesoftX pcapng 2026-02-14)")
+        log.info("=" * 60)
 
         # ============================================================
-        # GRUPPE A: Hardware-reset (mest lovande)
+        # STRATEGI 1: Start-acquisition sekvens direkte
+        # Sender dei 35 register-kommandoane som DewesoftX brukar
+        # for aa starte EP2 ADC-streaming (reg 0x02 trigger).
         # ============================================================
+        if not self._tilkoblet or self._proto is None:
+            try:
+                self._koble_til_intern()
+            except Exception as e:
+                log.error(f"Kan ikkje koble til: {e}")
+                return False
 
-        # --- Strategi 1: dev.reset() åleine (FX2 reboot, INGEN init) ---
-        # Viss FX2 firmware sin oppstartsrutine sender "start stream" til
-        # hovudkontrollaren, er dette alt me treng.
-        log.info("Strategi 1/9: dev.reset() (USB bus reset, ingen init)...")
+        log.info("Strategi 1/4: Start-acquisition sekvens (direkte)...")
+        try:
+            self._start_acquisition()
+            time.sleep(0.5)
+            if self._test_ep2():
+                log.info("SUKSESS: Strategi 1 (start-acquisition)")
+                return True
+            log.info("  Start-acquisition sendt, men EP2 svarte ikkje enno")
+        except (SiriusPollTimeout, SiriusUSBFeil) as e:
+            log.warning(f"  Strategi 1 feilet: {e}")
+
+        # ============================================================
+        # STRATEGI 2: Init-sekvens + start-acquisition
+        # Kjoer full DewesoftX-syklus: init fyrst (A0/A1/A8/B0/AD),
+        # deretter start-acquisition. Init drep EP2, men start-
+        # acquisition bringer den tilbake.
+        # ============================================================
+        log.info("Strategi 2/4: Init + start-acquisition (full DewesoftX-syklus)...")
+        try:
+            self._initialiser()
+            time.sleep(0.5)
+            self._start_acquisition()
+            time.sleep(0.5)
+            if self._test_ep2():
+                log.info("SUKSESS: Strategi 2 (init + start-acquisition)")
+                return True
+            log.info("  Init + start sendt, men EP2 svarte ikkje")
+        except (SiriusPollTimeout, SiriusUSBFeil) as e:
+            log.warning(f"  Strategi 2 feilet: {e}")
+
+        # ============================================================
+        # STRATEGI 3: dev.reset() (USB bus reset) + start-acquisition
+        # Reset FX2 firmware, koble til att, kjoer start-sekvens.
+        # ============================================================
+        log.info("Strategi 3/4: dev.reset() + start-acquisition...")
         try:
             if self._usb_bus_reset():
                 self._frigjer_dev()
                 time.sleep(1)
                 self._koble_til_intern()
                 if self._ep2_ok:
-                    log.info("SUKSESS: Strategi 1 (dev.reset åleine)")
+                    log.info("SUKSESS: Strategi 3a (dev.reset åleine)")
                     return True
-                log.info("  dev.reset: tilkobla men EP2 framleis daud")
-        except Exception as e:
-            log.warning(f"  Strategi 1 feilet: {e}")
-            # Prøv å koble til att
-            try:
-                self._koble_til_intern()
-            except Exception:
-                pass
-
-        # --- Strategi 2: dev.reset() + minimal init (B0 + A0) ---
-        log.info("Strategi 2/9: dev.reset() + minimal init...")
-        try:
-            if self._tilkoblet and self._proto:
-                if self._usb_bus_reset():
-                    self._frigjer_dev()
-                    time.sleep(1)
-                    self._koble_til_intern()
-                    if not self._ep2_ok and self._proto:
-                        # Prøv minimal init etter FX2 reboot
-                        self._proto.init_kommando()
-                        time.sleep(0.3)
-                        self._proto.sett_aktiv_modus()
-                        time.sleep(1.0)
-                        if self._test_ep2():
-                            log.info("SUKSESS: Strategi 2 (dev.reset + B0/A0)")
-                            return True
-        except Exception as e:
-            log.warning(f"  Strategi 2 feilet: {e}")
-            try:
-                self._koble_til_intern()
-            except Exception:
-                pass
-
-        # --- Strategi 3: uhubctl power-cycle (ekte straumkutt) ---
-        # Kuttar USB-straum heilt → resetter FX2 OG hovudkontrollar
-        log.info("Strategi 3/9: uhubctl USB power-cycle...")
-        try:
-            self._frigjer_dev()
-            if self._uhubctl_power_cycle():
-                self._koble_til_intern()
-                if self._ep2_ok:
-                    log.info("SUKSESS: Strategi 3 (uhubctl åleine)")
-                    return True
-                log.info("  uhubctl: tilkobla men EP2 framleis daud")
+                # EP2 ikkje oppe etter reset - proev start-sekvens
+                try:
+                    self._start_acquisition()
+                    time.sleep(0.5)
+                    if self._test_ep2():
+                        log.info("SUKSESS: Strategi 3b (dev.reset + start-acquisition)")
+                        return True
+                except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                    log.warning(f"  Start-acquisition etter reset feilet: {e}")
         except Exception as e:
             log.warning(f"  Strategi 3 feilet: {e}")
             try:
@@ -563,127 +571,48 @@ class SiriusDriver:
             except Exception:
                 pass
 
-        # --- Strategi 4: uhubctl + full init ---
-        log.info("Strategi 4/9: uhubctl + full init...")
+        # ============================================================
+        # STRATEGI 4: uhubctl power-cycle + start-acquisition
+        # Fysisk USB-straumkutt, koble til att, kjoer start-sekvens.
+        # ============================================================
+        log.info("Strategi 4/4: uhubctl + start-acquisition...")
         try:
-            if self._tilkoblet and self._proto and not self._ep2_ok:
-                self._initialiser()
-                time.sleep(1.0)
-                if self._test_ep2():
-                    log.info("SUKSESS: Strategi 4 (uhubctl + init)")
+            self._frigjer_dev()
+            if self._uhubctl_power_cycle():
+                for forsok in range(3):
+                    try:
+                        self._koble_til_intern()
+                        break
+                    except SiriusIkkeFunnet:
+                        log.info(f"  uhubctl: enhet ikkje funne enno (forsoek {forsok+1}/3)...")
+                        time.sleep(3)
+                    except Exception as e:
+                        log.warning(f"  uhubctl tilkobling forsoek {forsok+1}: {e}")
+                        time.sleep(2)
+                if self._ep2_ok:
+                    log.info("SUKSESS: Strategi 4a (uhubctl åleine)")
                     return True
+                # EP2 ikkje oppe - proev start-sekvens
+                if self._tilkoblet and self._proto:
+                    try:
+                        self._start_acquisition()
+                        time.sleep(0.5)
+                        if self._test_ep2():
+                            log.info("SUKSESS: Strategi 4b (uhubctl + start-acquisition)")
+                            return True
+                    except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                        log.warning(f"  Start-acquisition etter uhubctl feilet: {e}")
         except Exception as e:
             log.warning(f"  Strategi 4 feilet: {e}")
-
-        # ============================================================
-        # GRUPPE B: Kommando-basert (EP1)
-        # ============================================================
-
-        if not self._tilkoblet or self._proto is None:
             try:
                 self._koble_til_intern()
             except Exception:
-                log.error("Kan ikkje koble til for kommando-strategiar")
-                return False
-
-        proto = self._proto
-
-        # --- Strategi 5: Modus-toggle (A0 00 → A0 01) ---
-        log.info("Strategi 5/9: Modus-toggle (A0 00→01)...")
-        try:
-            proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x00]))
-            time.sleep(0.5)
-            proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x01]))
-            time.sleep(1.0)
-            if self._test_ep2():
-                log.info("SUKSESS: Strategi 5 (modus-toggle)")
-                return True
-        except SiriusUSBFeil as e:
-            log.debug(f"  Strategi 5: {e}")
-
-        # --- Strategi 6: B0 init + A0 aktiver ---
-        log.info("Strategi 6/9: Init-reset (B0) + aktiver (A0 01)...")
-        try:
-            proto.init_kommando()
-            time.sleep(0.5)
-            proto.sett_aktiv_modus()
-            time.sleep(1.0)
-            if self._test_ep2():
-                log.info("SUKSESS: Strategi 6 (B0 + A0)")
-                return True
-        except SiriusUSBFeil as e:
-            log.debug(f"  Strategi 6: {e}")
-
-        # --- Strategi 7: Full init + per-slot commit ---
-        log.info("Strategi 7/9: Full init + commit...")
-        try:
-            self._initialiser()
-            for slot in ALLE_SLOTTER:
-                try:
-                    proto.commit(slot)
-                except Exception:
-                    pass
-            time.sleep(1.0)
-            if self._test_ep2():
-                log.info("SUKSESS: Strategi 7 (init + commit)")
-                return True
-        except Exception as e:
-            log.debug(f"  Strategi 7: {e}")
-
-        # --- Strategi 8: Alternative A0/B0 verdiar ---
-        log.info("Strategi 8/9: Alternative A0-modusar...")
-        for mode_val in [0x02, 0x03, 0x04, 0x10, 0x80, 0xFF]:
-            try:
-                proto.send_raa_kommando(bytes([OPCODE_SETMODE, mode_val]))
-                time.sleep(0.5)
-                if self._test_ep2(timeout=2000):
-                    log.info(f"SUKSESS: Strategi 8 (A0 {mode_val:02X})")
-                    return True
-            except SiriusUSBFeil:
                 pass
-        try:
-            proto.send_raa_kommando(bytes([OPCODE_SETMODE, 0x01]))
-        except Exception:
-            pass
 
-        # --- Strategi 9: sysfs + dev.reset() + init ---
-        log.info("Strategi 9/9: sysfs + dev.reset + init (kombinert)...")
-        try:
-            self._frigjer_dev()
-            if self.sysfs_usb_reset():
-                time.sleep(1)
-                # Finn device, send dev.reset
-                dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
-                if dev:
-                    try:
-                        dev.reset()
-                        log.info("  dev.reset etter sysfs OK")
-                    except usb.core.USBError:
-                        log.info("  dev.reset etter sysfs: USB error (forventa)")
-                    try:
-                        usb.util.dispose_resources(dev)
-                    except Exception:
-                        pass
-                    time.sleep(4)
-                self._koble_til_intern()
-                if self._ep2_ok:
-                    log.info("SUKSESS: Strategi 9 (sysfs + dev.reset)")
-                    return True
-                if self._proto:
-                    self._initialiser()
-                    time.sleep(1.0)
-                    if self._test_ep2():
-                        log.info("SUKSESS: Strategi 9b (sysfs + dev.reset + init)")
-                        return True
-        except Exception as e:
-            log.warning(f"  Strategi 9: {e}")
-
-        log.error("=" * 50)
-        log.error("ALLE EP2-strategiar feilet (9/9).")
-        log.error("Mogleg årsak: Hovudkontrollaren treng full straumsykling")
-        log.error("(ikkje berre USB - skru av/paa heile instrumentet)")
-        log.error("Eller: Fang DewesoftX USB-trafikk for å finne 'start' kommando")
-        log.error("=" * 50)
+        log.error("=" * 60)
+        log.error("ALLE EP2-strategiar feilet (4/4).")
+        log.error("Siste utveg: full straumsykling av SIRIUS (skru av/paa)")
+        log.error("=" * 60)
         return False
 
     def koble_fra(self):
@@ -734,19 +663,122 @@ class SiriusDriver:
     def rekoble(self) -> bool:
         """Proev aa koble til paa nytt.
 
-        Frigjer USB-handle og koplar til på nytt.
-        VIKTIG: Ingen dev.reset() eller init - berre rein fråkopling/tilkopling.
+        Stoppar streaming, frigjer USB-handle, og koplar til på nytt.
+        VIKTIG: Ingen dev.reset(), sysfs reset, eller EP2 recovery.
+        Berre rein fråkopling/tilkopling. Viss EP2 ikkje fungerer
+        etter rekoble, bruk "Gjenoppliv EP2"-knappen separat.
         """
-        log.info("Proever aa rekoble til SIRIUS...")
+        log.info("Rekoble: stoppar streaming og frigjer USB...")
         try:
+            # 1. Stopp streaming FYRST (frigjer EP2 frå leser-traaden)
+            if self._streamer:
+                self.stopp_streaming()
+
+            # 2. Frigjer USB-handle
             self.koble_fra()
-            time.sleep(1.0)  # Gi USB-stakken tid til å frigjere handle
-            self.koble_til()
+            time.sleep(1.5)  # Gi USB-stakken tid til å frigjere handle
+
+            # 3. Koble til att (berre find + configure + test EP2)
+            self._koble_til_intern()
             return True
         except SiriusFeil as e:
             self._rekoble_forsok += 1
             log.error(f"Rekonnektering feilet ({self._rekoble_forsok}/{self._maks_rekoble}): {e}")
             return False
+
+    # ---- Start Acquisition (fraa Wireshark pcapng-analyse) ----
+
+    def _start_acquisition(self):
+        """
+        Send komplett start-acquisition-sekvens for aa starte EP2 ADC-streaming.
+
+        Reverse-engineered fraa DewesoftX Wireshark USB-capture (sirius1.pcapng,
+        2026-02-14). Konfigurerer ADC-sampling, DMA, kalibrering og triggar
+        streaming-start via register 0x02.
+
+        Sekvensen er 35 steg:
+          1. A4 00 (pre-start modus)
+          2. AC (hent slot-typar)
+          3-34. Globale register-skrivingar via AD-kommando
+          35. Register 0x02 trigger (startar EP2, ~137ms ventetid)
+
+        Raises:
+            SiriusPollTimeout: Viss trigger-registeret ikkje responderer
+            SiriusUSBFeil: Ved USB-feil
+        """
+        proto = self._proto
+        log.info("Start-acquisition sekvens (35 steg)...")
+
+        # Steg 1: A4 00 (pre-start modus)
+        log.info("  Steg 1/35: A4 00 (pre-start)")
+        proto.send_prestart()
+
+        # Steg 2: AC (hent slot-typar)
+        log.info("  Steg 2/35: AC (slot-typar)")
+        proto.hent_slot_typer()
+
+        # Steg 3-34: Globale register-skrivingar
+        # Format: AD 3F 0C 00 00 00 [reg] [8 bytes data]
+        # Eksakte verdiar fraa DewesoftX pcapng (verifisert med tshark)
+        regs = [
+            # Sample rate og buffer
+            (0x67, '80004e20005a0306'),   # Sample rate 20 kHz
+            (0x7B, '00000c8000000040'),   # Buffer-konfig
+        ]
+
+        # ADC-konfig per kanal (reg 0x82, kanal 0-7)
+        for ch in range(8):
+            data = bytearray.fromhex('0000000000000031')
+            data[3] = ch
+            regs.append((0x82, data.hex()))
+
+        # Timing, kontroll, filter, kalibrering
+        regs.extend([
+            (0xE5, '00001800ffffffff'),   # Timing/sync
+            (0x6F, '3fff231fffffffff'),   # Kanal-enable-maske
+            (0x72, '0000000200000000'),   # Trigger-konfig
+            (0x10, '00000000ffffffff'),   # Kontroll
+            (0x11, '00000000ffffffff'),   # Kontroll
+            (0x07, '03000000ffffffff'),   # Mode/kontroll
+            (0x9C, '00640064ffffffff'),   # Filter
+            (0x98, '0214320000000000'),   # Desimering/averaging
+            (0x99, '60600000ffffffff'),   # Sample timing
+            (0x9D, '0000000000000000'),   # Tilleggskonfig
+            (0x96, 'ffffffffffffffff'),   # Status-sjekk (les)
+            (0xD0, '00000001ffffffff'),   # Stream enable
+            (0x68, '000000ffffffffff'),   # DMA/transfer-konfig
+            (0xCC, '000000c0ffffffff'),   # Tilleggskonfig
+            (0xCD, '000001ffffffffff'),   # Tilleggskonfig
+            (0xCA, '0010001000100010'),   # Kalibrering
+            (0xCB, '0010001000100010'),   # Kalibrering
+            (0xCE, '1010000000000000'),   # Tilleggskonfig
+            (0xCF, '00000000ffffffff'),   # Tilleggskonfig
+            (0x84, '0000000000000000'),   # Clear status
+            (0xC8, 'ffffffffffffffff'),   # Status readback (les)
+            (0x64, 'ffffffffffffffff'),   # Status readback (les)
+        ])
+
+        steg = 3
+        for reg, data_hex in regs:
+            cmd = bytes([0xAD, 0x3F, 0x0C, 0x00, 0x00, 0x00, reg]) + bytes.fromhex(data_hex)
+            try:
+                proto.send_ad_raa_og_poll(cmd)
+                log.debug(f"  Steg {steg}/35: reg 0x{reg:02X} OK")
+            except SiriusPollTimeout:
+                log.warning(f"  Steg {steg}/35: reg 0x{reg:02X} poll timeout (held fram)")
+            steg += 1
+
+        # Steg 35: TRIGGER - Register 0x02 (startar EP2 ADC-streaming)
+        # Denne tek ~137ms og krev mange B1-poll-syklusar
+        log.info("  Steg 35/35: reg 0x02 TRIGGER (startar streaming)...")
+        trigger_cmd = bytes.fromhex('ad3f0c00000002ffffffffffffffff')
+        try:
+            proto.send_ad_raa_og_poll(trigger_cmd, maks_forsok=1000)
+            log.info("  Reg 0x02 trigger FULLFOERT (status=klar)")
+        except SiriusPollTimeout:
+            log.warning("  Reg 0x02 trigger: poll timeout (EP2 kan likevel starte)")
+
+        log.info("Start-acquisition sekvens sendt")
 
     # ---- Initialisering (repliserer DewesoftX-sekvensen) ----
 

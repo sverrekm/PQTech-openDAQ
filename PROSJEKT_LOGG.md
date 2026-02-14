@@ -74,7 +74,83 @@ SIRIUS ──USB──> SiriusDriver (native, reverse-engineered)
   - FX2 USB-brikke: handterer USB-kommunikasjon, RESETTAR ved USB-fråkopling
   - Hovudkontrollar: styrer ADC/EP2, HAR EIGEN STRAUMFORSYNING, overlever USB-fråkopling
 - **USB-replug og sysfs authorized-toggle** resetter berre FX2, IKKJE hovudkontrollaren
-- **Ingen kjend kommando** for aa restarte EP2 etter at init har stoppa den
+- **START STREAMING FUNNE!** Register 0x02 via AD-kommando startar EP2 (sjå nedanfor)
+
+### Start Acquisition-sekvens (FUNNE 2026-02-14, Wireshark pcapng)
+
+**Kjelde:** `sirius1.pcapng` - Wireshark USBPcap capture fraa DewesoftX paa Windows.
+105 sekund, 73 657 frames. Fangar komplett init → idle → start → streaming syklus.
+
+**Trigger-kommando (Register 0x02):**
+```
+ad 3f 0c 00 00 00 02 ff ff ff ff ff ff ff ff
+```
+- Siste kommando før EP2/EP4/EP6 URB-ar vert submitterte
+- Tek ~137ms aa fullfoere (lengste register-operasjon i heile capturen)
+- EP2 ADC-data ankjem ~187ms etter trigger
+- Finst nøyaktig 2 gonger i capturen, begge etterfølgt av EP2-data
+
+**Komplett pre-start sekvens (34 register-skrivingar + trigger):**
+```
+Steg 1:  A4 00                                          Pre-start modus
+Steg 2:  AC                                             GetSlotTypes
+Steg 3:  AD reg 0x67 = 00 4E 20 00 5A 03 06             Sample rate (20000 Hz)
+Steg 4:  AD reg 0x7B = 00 0C 80 00 00 00 40             Buffer-konfig
+Steg 5:  AD reg 0x82 ch0 = 00 00 00 00 00 31            ADC-konfig kanal 0
+Steg 6:  AD reg 0x82 ch1 = 00 00 01 00 00 31            ADC-konfig kanal 1
+Steg 7:  AD reg 0x82 ch2 = 00 00 02 00 00 31            ADC-konfig kanal 2
+Steg 8:  AD reg 0x82 ch3 = 00 00 03 00 00 31            ADC-konfig kanal 3
+Steg 9:  AD reg 0x82 ch4 = 00 00 04 00 00 31            ADC-konfig kanal 4
+Steg 10: AD reg 0x82 ch5 = 00 00 05 00 00 31            ADC-konfig kanal 5
+Steg 11: AD reg 0x82 ch6 = 00 00 06 00 00 31            ADC-konfig kanal 6
+Steg 12: AD reg 0x82 ch7 = 00 00 07 00 00 31            ADC-konfig kanal 7
+Steg 13: AD reg 0xE5 = 00 18 00 ff ff ff ff             Timing/sync
+Steg 14: AD reg 0x6F = 3f ff 23 1f ff ff ff             Kanal-enable-maske
+Steg 15: AD reg 0x72 = 00 00 00 02 00 00 00             Trigger-konfig
+Steg 16: AD reg 0x10 = 00 00 00 00 ff ff ff             Kontroll
+Steg 17: AD reg 0x11 = 00 00 00 00 ff ff ff             Kontroll
+Steg 18: AD reg 0x07 = 03 00 00 00 ff ff ff             Mode/kontroll
+Steg 19: AD reg 0x9C = 00 64 00 64 ff ff ff             Filter-konfig
+Steg 20: AD reg 0x98 = 02 14 32 00 00 00 00             Desimering/averaging
+Steg 21: AD reg 0x99 = 60 60 00 00 ff ff ff             Sample timing
+Steg 22: AD reg 0x9D = 00 00 00 00 00 00 00             ???
+Steg 23: AD reg 0x96 = ff ff ff ff ff ff ff             Status-sjekk (les)
+Steg 24: AD reg 0xD0 = 00 00 00 01 ff ff ff             Stream enable
+Steg 25: AD reg 0x68 = 00 00 00 ff ff ff ff             DMA/transfer-konfig
+Steg 26: AD reg 0xCC = 00 00 00 c0 ff ff ff             ???
+Steg 27: AD reg 0xCD = 00 00 01 ff ff ff ff             ???
+Steg 28: AD reg 0xCA = 00 10 00 10 00 10 00 10          Kalibrering
+Steg 29: AD reg 0xCB = 00 10 00 10 00 10 00 10          Kalibrering
+Steg 30: AD reg 0xCE = 10 10 00 00 00 00 00 00          ???
+Steg 31: AD reg 0xCF = 00 00 00 00 ff ff ff             ???
+Steg 32: AD reg 0x84 = 00 00 00 00 00 00 00             Clear status
+Steg 33: AD reg 0xC8 = ff ff ff ff ff ff ff             Status readback (les)
+Steg 34: AD reg 0x64 = ff ff ff ff ff ff ff             Status readback (les)
+Steg 35: AD reg 0x02 = ff ff ff ff ff ff ff  <<<---     START STREAMING TRIGGER
+```
+Poll med B1 etter reg 0x02 til status=0x01 (~137ms). Deretter strøymer EP2.
+
+**Post-start (valfritt):**
+```
+AD reg 0x03 = les (verifikasjon)
+AD reg 0x65, 0xC9, 0x97, 0x07, 0x0D, 0x0B = readbacks
+```
+
+**Tidslinje fraa pcapng:**
+| Fase | Tid (s) | Varighet | Beskriving |
+|------|---------|----------|------------|
+| Init | 14.28-14.48 | ~200ms | A1, A0 01, 00, A8 x64, B0 3F 0C |
+| Idle/polling | 14.5-50.2 | ~36s | AD register-lesing per slot (1107 AD-cmds) |
+| Kanal-konfig | 50.2-50.88 | ~680ms | Per-kanal AD skriving (reg 0x13/0x14) |
+| Start #1 | 50.88-51.32 | ~440ms | Start-sekvens → EP2 startar (2 pakkar) |
+| Start #2 | 51.47-51.73 | ~260ms | Identisk re-start |
+| Streaming | 51.78-104.9 | ~53s | Kontinuerleg EP2 (15872B, 20pkt/s, 20kHz) |
+
+**EP2 data-format (ved 20 kHz):**
+- Pakkestorleik: 15 872 bytes (alltid)
+- = 992 frames x 8 kanalar x 2 bytes (int16 LE)
+- Rate: ~20 pakkar/sek (~50ms intervall)
+- Datarate: ~317 KB/s
 
 ### Init-sekvens (DewesoftX-replika)
 ```
@@ -90,7 +166,7 @@ Fase 5: Flush EP2/EP4/EP6
 alle 4 slottar. Hovudkontrollaren responderer paa enkle kommandoar (AE, A0, A1, AC, B0)
 men ikkje paa per-slot register-lesingar (AD op=0x14).
 
-## Status per 2026-02-13
+## Status per 2026-02-14
 
 ### Fungerer
 - [x] Native SIRIUS USB-driver (reverse-engineered protokoll)
@@ -112,31 +188,38 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 - [x] mDNS-annonsering via avahi
 - [x] DewesoftX oppdagar og koplar til eininga
 
-### KRITISK BLOKKERING: EP2 (ADC-data) er daud
-- EP2 vart stoppa av ein tidlegare init-sekvens
-- Hovudkontrollaren sin tilstand overlever USB-fråkopling (eigen straumforsyning)
-- Alle 7 gjenoppliving-strategiar feilet:
-  1. Modus-toggle (A0 00→01): EP2 timeout
-  2. Init-reset (B0) + aktiver (A0 01): EP2 timeout
-  3. Full init-sekvens: Per-slot init feilar, EP2 timeout
-  4. Per-slot commit: EP2 timeout
-  5. Alternative A0-modusar (02,03,04,10,80,FF): EP2 timeout
-  6. B0 med ulike parametrar: EP2 timeout
-  7. sysfs reset + full init + modus-toggle: EP2 timeout
+### EP2 STATUS: Fungerer ved boot!
+- EP2 streamer ADC-data ved factory-default (etter docker rebuild/USB re-enumerering)
+- Fyrste reelle data: 10112 samples, 8 kanalar, RMS ~7455/5313
+- **Ingen "start EP2" kommando trengst** - EP2 er PÅ som standard
 
-### Neste steg (ikkje prøvd enno)
-- [ ] **dev.reset()** - Ekte USB RESET-signal som tvingar FX2 firmware-reboot.
-      Forskjellig fraa sysfs authorized som berre er kernel-nivaa drop/reacquire.
-      Viss FX2 firmware sin oppstartsrutine sender "start stream" til hovudkontrollar,
-      kan dette vere løysinga.
-- [ ] **uhubctl** - Ekte USB port power-cycling (kutt straum til porten).
-      Viss SIRIUS hovudkontrollar faar straum fraa USB, vil dette resette alt.
-- [ ] **EP8 OUT (0x08)** - Uutforska data-endepunkt. DewesoftX kan sende
-      "start acquisition" via dette endepunktet.
-- [ ] **Fange DewesoftX "Start Store" USB-trafikk** - Wireshark+USBPcap paa Windows
-      for aa finne eksakt kommando som startar EP2-streaming.
+### USB-SNIFF FUNN (stadfesta)
+- **Init-sekvensen (A0/A1/A8/B0) DREP EP2** - USB-sniff frå DewesoftX stadfester dette
+- I opptak MED EP2-data: kun AD/B1-polling og AE-telemetri, INGEN A0/A1/A8/B0
+- I opptak UTAN EP2-data: init-sekvens køyrt, EP2 forsvinn
 
-### Framtidig (etter EP2 er fiksa)
+### WIRESHARK PCAPNG FUNN (2026-02-14) - START STREAMING FUNNE!
+- **sirius1.pcapng**: Komplett Wireshark USBPcap-capture fraa DewesoftX paa Windows
+- **105 sekund**, 73 657 frames, fangar init → idle → "Start Store" → streaming
+- **Register 0x02 via AD-kommando** er "Start Acquisition"-triggeren
+- **34 register-skrivingar** (sample rate, ADC-konfig, DMA, kalibrering) som preamble
+- **A4 00 + AC** sendes før register-sekvensen
+- EP2 leverer 15 872 bytes/pakke ved 20 pkt/s (20 kHz, 8 kanalar, int16 LE)
+- **EP8 OUT (0x08)** var IKKJE brukt i capturen - start skjer via EP1 AD-kommandoar
+
+### Neste steg
+- [x] **Fange DewesoftX "Start Store" USB-trafikk** - GJORT! (sirius1.pcapng)
+- [x] **Identifiser start-kommando** - FUNNE! Register 0x02 via AD-kommando
+- [ ] **Implementer start-sekvens i sirius_driver.py** - Send 34 register-skrivingar
+      + reg 0x02 trigger for aa starte EP2 etter init-sekvensen har stoppa den
+- [ ] **Test start-sekvens paa Pi** - Verifiser at EP2 kjem tilbake etter init
+- [x] **EP8 OUT (0x08)** - Ikkje brukt av DewesoftX for start. Kan ignorerast.
+- [x] **dev.reset()** - Implementert (commit ab9a419). FX2 rebootter men EP2
+      kjem ikkje tilbake automatisk (hovudkontrollar bevarer tilstand).
+- [x] **uhubctl** - Implementert (commit ab9a419). Power-cycle funkar men
+      treng lang ventetid og pyusb cache-tømming.
+
+### Framtidig (etter EP2-start er implementert)
 - [ ] Injiser reelle SIRIUS-data i openDAQ-signalar (oppdater_data fungerer)
 - [ ] DewesoftX ser live ADC-verdiar
 - [ ] Full DewesoftX-integrasjon med 8 kanalar
@@ -199,12 +282,12 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 **Aarsak:** Streaming starta utan aa sjekke ep2_ok
 **Loysing:** ep2_ok property, sjekk i alle streaming-start-stiar (commit 23d6425)
 
-### Problem 12: EP2 timeout etter tidlegare init (ULOYST - KRITISK)
+### Problem 12: EP2 timeout etter tidlegare init (DELVIS LOYST)
 **Symptom:** EP2 (0x82) returnerer aldri data, timeout etter 5 sekunder
 **Aarsak:** Tidlegare init-sekvens (A0/B0/AD-kommandoar) stoppa EP2-streaming.
   SIRIUS hovudkontrollar bevarer denne tilstanden sjolv etter USB-fråkopling,
   sysfs reset, og alle kjende EP1-kommandoar.
-**Prøvd:**
+**Prøvd (kommando-basert, alle feila):**
 - sysfs USB power-cycle (authorized 0→1): FX2 re-enumererer, EP2 framleis daud
 - A0 modus-toggle (00→01): Ingen effekt
 - B0 init-reset + A0 01: Ingen effekt
@@ -213,14 +296,33 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 - Alternative A0-verdiar (02,03,04,10,80,FF): Ingen effekt
 - B0 med ulike parametrar (00/00, 3F/00, 00/0C, FF/FF, 7F/0C): Ingen effekt
 - sysfs + full init + A0 toggle: Ingen effekt
-**Observasjonar:**
-- EP1 fungerer: AE returnerer `0000000000000000` (ikkje FF)
-- FW-versjon les OK: `020b0101`
-- Slot-typar endrar seg mellom runs (04042804→04040404) = sysfs HAR delvis effekt
-- Slot-tilstedevaerelse endrar seg litt mellom runs
-- EEPROM returnerer all-FF
-- Per-slot register-lesing (AD op=0x14) timeout konsekvent
-**Status:** ULOYST. Neste steg: dev.reset(), uhubctl, EP8 OUT, USB-capture.
+**Prøvd (hardware-reset, commit ab9a419):**
+- dev.reset() (USB bus reset): FX2 rebootter, men EP2 framleis daud etter reconnect
+- uhubctl power-cycle: Fysisk straumkutt, device forsvinn, kjem attende men EP2 timeout
+**GJENNOMBROT (docker rebuild + restart):**
+- Etter `docker compose up --build -d` → EP2 fungerer ved boot!
+- Fyrste reelle ADC-data: 10112 samples, 8 kanalar, RMS ~7455/5313
+- EP2 streamer utan nokon init-sekvens, akkurat som factory-fresh
+**Rotårsak:** Docker rebuild → Pi restart USB-stakken → full re-enumerering →
+  FX2 rebootter → EP2 streamer naturleg (ingen init-kommandoar sendt)
+**Status:** EP2 fungerer ved boot. Problem er at Rekoble knappen øydelegg det.
+
+### Problem 13: Rekoble øydelegg fungerande EP2 (LOYST)
+**Symptom:** EP2 fungerer ved boot, brukar klikkar Rekoble, EP2 døyr
+**Årsak (flerfaldig):**
+1. Gammal streaming-tråd held EP2 oppteken → ny driver får EBUSY
+2. rekoble_driver() oppretta ny SiriusDriver utan å stoppe gammal streaming
+3. koble_til() trigga aggressiv EP2-recovery (sysfs reset → 9 strategiar)
+   som faktisk ØYDELA det fungerande EP2
+4. sysfs reset under aktiv streaming → cascading I/O errors (Errno 19, 5)
+5. uhubctl: for kort vent, pyusb-cache hadde stale device handle
+**Loysning:**
+- koble_til() er no enkel: berre _koble_til_intern(), INGEN auto-recovery
+- rekoble() stoppar streaming FYRST, deretter clean disconnect/reconnect
+- rekoble_driver() stoppar streaming eksplisitt før rekoble
+- forsok_gjenoppliv_ep2() stoppar streaming før recovery-strategiar
+- uhubctl: lenger vent (8s), pyusb cache-tømming, retry-loop for reconnect
+- EP2 recovery er no MANUELT (Gjenoppliv EP2-knappen), ikkje auto-trigga
 
 ## Git-commits (kronologisk)
 
@@ -242,6 +344,7 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 | 23d6425 | Skip streaming when EP2 test fails - prevent cascading EBUSY errors |
 | 31e4453 | Auto-recover EP2 via sysfs USB power-cycle when EP2 test fails |
 | 3257461 | EP2 revival: 7 command strategies to restart dead ADC streaming |
+| ab9a419 | EP2 hardware reset: dev.reset() + uhubctl power-cycle |
 
 ## Filar
 

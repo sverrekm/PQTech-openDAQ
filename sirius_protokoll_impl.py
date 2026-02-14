@@ -57,6 +57,7 @@ EP_DATA_OUT = 0x08  # Data til enhet (bulk)
 OPCODE_FW_VERSJON = 0x00    # Firmware-versjon
 OPCODE_SETMODE = 0xA0       # Sett modus
 OPCODE_GETCONFIG = 0xA1     # Hent slot-tilstedevaerelse
+OPCODE_PRESTART = 0xA4      # Pre-start modus (sendes foer start-sekvens)
 OPCODE_EEPROM = 0xA8        # Les EEPROM
 OPCODE_GETSLOTTYPES = 0xAC  # Hent slot-typer
 OPCODE_TELEMETRI = 0xAE     # Telemetri/heartbeat
@@ -240,6 +241,12 @@ class SiriusProtokoll:
         """Send AE telemetri-kommando (heartbeat) og les svar."""
         return self.send_raa_kommando(bytes([OPCODE_TELEMETRI, 0x1F, 0x0C]))
 
+    def send_prestart(self):
+        """Send A4 00 pre-start kommando (foer start-sekvens)."""
+        svar = self.send_raa_kommando(bytes([OPCODE_PRESTART, 0x00]))
+        log.info("Pre-start (A4 00) sendt")
+        return svar
+
     # ---- Eldre FX2-kommandoer (beholdt for kompatibilitet) ----
 
     def les_enhetsid(self):
@@ -371,6 +378,53 @@ class SiriusProtokoll:
             raise SiriusPollTimeout(
                 f"Poll timeout etter {maks_forsok} forsok "
                 f"(op=0x{op_type:02X}, slot=0x{slot:02X}, reg=0x{register:02X})"
+            )
+
+    def send_ad_raa_og_poll(self, ad_cmd, maks_forsok=MAKS_POLL_FORSOK):
+        """
+        Send ferdigbygd AD-kommando og poll med B1 til ferdig.
+
+        Brukt for globale register-kommandoar i start-sekvensen.
+        Desse har formatet: AD 3F 0C 00 00 00 [reg] [8 bytes data]
+        og fylgjer same ACK + B1-poll syklus som vanlege AD-kommandoar.
+
+        Pollar til status=0x01 (klar) eller maks_forsok er naadd.
+        For trigger-register (0x02) trengst mange forsok (~1000).
+
+        Args:
+            ad_cmd: Ferdigbygde 15 bytes AD-kommando
+            maks_forsok: Maks antal B1-poll-forsok
+
+        Returns:
+            bytes: Poll-svaret med status=0x01
+
+        Raises:
+            SiriusPollTimeout: Viss maks_forsok er naadd
+        """
+        with self._cmd_lock:
+            self._send_cmd(ad_cmd)
+
+            ack = self._les_svar(timeout=TIMEOUT_CMD)
+            if not all(b == ACK_BYTE for b in ack[:4]):
+                log.debug(f"ACK: {ack[:8].hex()}")
+
+            for forsok in range(maks_forsok):
+                self._send_cmd(self._bygg_b1_kommando())
+                svar = self._les_svar(timeout=TIMEOUT_POLL)
+
+                if len(svar) < 2:
+                    continue
+
+                if svar[0] == POLL_KLAR:
+                    return bytes(svar)
+                elif svar[0] == POLL_VENT:
+                    continue
+                else:
+                    return bytes(svar)
+
+            raise SiriusPollTimeout(
+                f"Poll timeout etter {maks_forsok} forsok "
+                f"(raa cmd: {ad_cmd[:8].hex()}...)"
             )
 
     # ---- AD hoeynivaa-wrappers ----

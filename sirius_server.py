@@ -474,7 +474,10 @@ def _global_data_callback(kanal_data):
 
 
 def gjenoppliv_ep2():
-    """Forsøk å gjenopplive EP2 via kommando-strategiar (web UI-knapp)."""
+    """Forsøk å gjenopplive EP2 via kommando-strategiar (web UI-knapp).
+
+    Stoppar streaming fyrst for å frigjere EP2, deretter prøver recovery.
+    """
     global _driver
     with _lock:
         if _driver is None:
@@ -483,6 +486,15 @@ def gjenoppliv_ep2():
             return False, "Ikkje tilkobla - klikk Rekoble fyrst"
         if _driver.ep2_ok:
             return True, "EP2 fungerer allereie"
+
+        # Stopp streaming FYRST (frigjer EP2 frå leser-traaden)
+        if _driver.streamer:
+            log.info("Gjenoppliv EP2: stoppar aktiv streaming fyrst...")
+            try:
+                _driver.stopp_streaming()
+            except Exception as e:
+                log.warning(f"stopp_streaming feilet: {e}")
+            server_status["streamer"] = False
 
         try:
             ok = _driver.forsok_gjenoppliv_ep2()
@@ -567,15 +579,36 @@ def hent_siste_data():
 
 
 def rekoble_driver():
-    """Proev rekobling fra web API. Oppretter driver hvis den ikke finnes."""
+    """Proev rekobling fra web API. Oppretter driver hvis den ikke finnes.
+
+    VIKTIG: Stoppar streaming FYRST for å frigjere EP2, deretter rekoble.
+    Viss _driver er None (t.d. etter frigjor_usb), opprettar ny driver.
+    """
     global _driver
     with _lock:
         try:
-            if _driver is None:
-                log.info("Oppretter ny SiriusDriver for rekobling...")
-                _driver = SiriusDriver()
+            if _driver is not None:
+                # Stopp streaming eksplisitt FYRST (frigjer EP2)
+                if _driver.streamer:
+                    log.info("Rekoble: stoppar aktiv streaming fyrst...")
+                    try:
+                        _driver.stopp_streaming()
+                    except Exception as e:
+                        log.warning(f"Rekoble: stopp_streaming feilet: {e}")
+                    server_status["streamer"] = False
 
-            ok = _driver.rekoble()
+                ok = _driver.rekoble()
+            else:
+                log.info("Oppretter ny SiriusDriver (driver var None)...")
+                _driver = SiriusDriver()
+                try:
+                    _driver.koble_til()
+                    ok = True
+                except SiriusFeil as e:
+                    log.error(f"Ny tilkobling feilet: {e}")
+                    ok = False
+
+            # (rekoble resultat handtert nedanfor)
             if ok:
                 info = _driver.hent_status()
                 server_status.update({
