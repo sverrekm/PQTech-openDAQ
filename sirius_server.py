@@ -29,6 +29,7 @@ import numpy as np
 
 from sirius_driver import SiriusDriver, SiriusFeil, SiriusIkkeFunnet
 from opendaq_bro import OpenDAQBro
+import usbip_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -349,11 +350,22 @@ def send_debug_kommando(hex_kommando, poll=False):
 def frigjor_usb():
     """Frigjor SIRIUS USB-enheten slik at USB/IP kan bruke den.
 
-    Stoppar streaming og koplar fraa driveren fullstendig.
+    Stoppar streaming FYRST (utanfor lock for å unngaa deadlock med
+    ADC-traaden sin callback), deretter koplar fraa driveren.
     Returns:
         (suksess, melding)
     """
     global _driver, _maaler
+
+    # Stopp streaming UTANFOR lock — ADC-traaden sin callback kan halde _lock
+    # via oppdater_data, og stopp_streaming ventar på join().
+    try:
+        if _driver is not None and _driver.streamer:
+            log.info("frigjor_usb: stoppar streaming fyrst...")
+            _driver.stopp_streaming()
+    except Exception as e:
+        log.warning(f"frigjor_usb: stopp_streaming feilet: {e}")
+
     with _lock:
         if _driver is None:
             return True, "Driver ikkje aktiv"
@@ -367,7 +379,7 @@ def frigjor_usb():
                     pass
                 _maaler = None
 
-            # Koble fraa USB
+            # Koble fraa USB (stopp_streaming allereie gjort ovanfor)
             _driver.koble_fra()
             _driver = None
 
@@ -441,6 +453,13 @@ def restart_opendaq_bro():
             _opendaq_bro.stopp()
         except Exception:
             pass
+        _opendaq_bro = None
+
+    # Tving GC og vent slik at C++ server-sockets (OPC-UA :4840,
+    # Native Streaming :7420, WebSocket :7414) vert frigjort.
+    import gc
+    gc.collect()
+    time.sleep(2)
 
     try:
         _opendaq_bro = OpenDAQBro()
@@ -479,6 +498,11 @@ def gjenoppliv_ep2():
     Stoppar streaming fyrst for å frigjere EP2, deretter prøver recovery.
     """
     global _driver
+
+    # Guard: USB/IP og lokal driver er gjensidig ekskluderande
+    if usbip_manager.usbip_status.get("deling_aktiv"):
+        return False, "USB/IP deling er aktiv - stopp deling fyrst"
+
     with _lock:
         if _driver is None:
             return False, "Driver ikkje initialisert - klikk Rekoble"
@@ -585,6 +609,11 @@ def rekoble_driver():
     Viss _driver er None (t.d. etter frigjor_usb), opprettar ny driver.
     """
     global _driver
+
+    # Guard: USB/IP og lokal driver er gjensidig ekskluderande
+    if usbip_manager.usbip_status.get("deling_aktiv"):
+        return False, "USB/IP deling er aktiv - stopp deling fyrst"
+
     with _lock:
         try:
             if _driver is not None:
