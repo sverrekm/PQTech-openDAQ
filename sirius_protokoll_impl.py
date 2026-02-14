@@ -117,17 +117,19 @@ TIMEOUT_DATA = 5000   # Datastroemming
 TIMEOUT_SHORT = 300   # Korte operasjoner
 
 # --- Poll-konstanter ---
-MAKS_POLL_FORSOK = 10
+MAKS_POLL_FORSOK = 50    # Auka fraa 10 - globale register treng fleire forsok
 POLL_KLAR = 1   # Nye data tilgjengelig (lesing)
 POLL_VENT = 0   # Venter / skrivebekreftelse
 
 # ACK-moenstre
 ACK_BYTE = 0xFF
 
-# --- ADC-format (fraa snifferanalyse) ---
-ADC_KANALER = 8           # 8 kanaler per ramme
-ADC_SAMPLES_PER_PAKKE = 2 # 2 rammer per 32-byte pakke
-ADC_PAKKESTORRELSE = 32   # Bytes per EP2-pakke
+# --- ADC-format (fraa pcapng-analyse 2026-02-14) ---
+ADC_KANALER = 8              # 8 kanalar per ramme
+ADC_RAMMER_PER_PAKKE = 992   # 992 rammer per USB-pakke
+ADC_PAKKESTORRELSE = 15872   # 992 * 8 * 2 bytes per EP2-pakke
+# Eldre alias
+ADC_SAMPLES_PER_PAKKE = ADC_RAMMER_PER_PAKKE
 
 
 # --- Unntak ---
@@ -380,7 +382,8 @@ class SiriusProtokoll:
                 f"(op=0x{op_type:02X}, slot=0x{slot:02X}, reg=0x{register:02X})"
             )
 
-    def send_ad_raa_og_poll(self, ad_cmd, maks_forsok=MAKS_POLL_FORSOK):
+    def send_ad_raa_og_poll(self, ad_cmd, maks_forsok=MAKS_POLL_FORSOK,
+                            er_skriving=True):
         """
         Send ferdigbygd AD-kommando og poll med B1 til ferdig.
 
@@ -388,15 +391,19 @@ class SiriusProtokoll:
         Desse har formatet: AD 3F 0C 00 00 00 [reg] [8 bytes data]
         og fylgjer same ACK + B1-poll syklus som vanlege AD-kommandoar.
 
-        Pollar til status=0x01 (klar) eller maks_forsok er naadd.
-        For trigger-register (0x02) trengst mange forsok (~1000).
+        For skrivingar: aksepterer B1-svar med status=0x00 (skrivebekreftelse)
+        med ein gong, same som send_ad_og_poll gjer for op=0x13.
+        For lesingar (er_skriving=False): ventar paa status=0x01 (data klar).
+        Trigger-register (0x02) treng mange forsok (~1000).
 
         Args:
             ad_cmd: Ferdigbygde 15 bytes AD-kommando
             maks_forsok: Maks antal B1-poll-forsok
+            er_skriving: True for register-skriving (aksepter 0x00),
+                         False for lesing (vent paa 0x01)
 
         Returns:
-            bytes: Poll-svaret med status=0x01
+            bytes: Poll-svaret
 
         Raises:
             SiriusPollTimeout: Viss maks_forsok er naadd
@@ -418,6 +425,9 @@ class SiriusProtokoll:
                 if svar[0] == POLL_KLAR:
                     return bytes(svar)
                 elif svar[0] == POLL_VENT:
+                    if er_skriving:
+                        # Skriving: 0x00 er normal bekreftelse (same som send_ad_og_poll)
+                        return bytes(svar)
                     continue
                 else:
                     return bytes(svar)

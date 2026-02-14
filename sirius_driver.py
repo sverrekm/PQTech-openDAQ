@@ -769,11 +769,13 @@ class SiriusDriver:
             steg += 1
 
         # Steg 35: TRIGGER - Register 0x02 (startar EP2 ADC-streaming)
-        # Denne tek ~137ms og krev mange B1-poll-syklusar
+        # Denne tek ~137ms og krev mange B1-poll-syklusar.
+        # er_skriving=False fordi vi MÅ vente på POLL_KLAR (0x01)
         log.info("  Steg 35/35: reg 0x02 TRIGGER (startar streaming)...")
         trigger_cmd = bytes.fromhex('ad3f0c00000002ffffffffffffffff')
         try:
-            proto.send_ad_raa_og_poll(trigger_cmd, maks_forsok=1000)
+            proto.send_ad_raa_og_poll(trigger_cmd, maks_forsok=1000,
+                                      er_skriving=False)
             log.info("  Reg 0x02 trigger FULLFOERT (status=klar)")
         except SiriusPollTimeout:
             log.warning("  Reg 0x02 trigger: poll timeout (EP2 kan likevel starte)")
@@ -1084,15 +1086,17 @@ class SiriusDriver:
     def _adc_leser_loop(self):
         """Bakgrunnstraad: les ADC-data fraa EP2 og parser.
 
-        Brukar 512 bytes per lesing (same som sirius_adc_leser.py som fungerer).
-        Stoeerre lesingar (16384) kan foraarsake EBUSY paa nokre USB-stakkar.
+        Brukar 16384 bytes per lesing for aa matche SIRIUS sin faktiske
+        pakkestorleik (15 872 bytes = 992 rammer x 8 kanalar x int16 LE).
+        Med 512B-lesingar trengst 620+ lesingar/sek for aa halde tritt med
+        20 kHz straumen (317 KB/s), noko som overvalder USB-stakken paa Pi.
         """
         io_feil_teller = 0
 
         while not self._stopp_event.is_set():
             try:
                 raa = self._proto.les_adc_data(
-                    storrelse=512,
+                    storrelse=16384,
                     timeout=TIMEOUT_DATA
                 )
 
@@ -1150,10 +1154,10 @@ class SiriusDriver:
                     except Exception:
                         pass
 
-                if io_feil_teller >= 10:
+                if io_feil_teller >= 50:
                     log.error(
-                        "For mange ADC I/O-feil - stoppar streaming. "
-                        "Bruk Rekoble + Start streaming fraa web UI."
+                        "For mange ADC I/O-feil (50) - stoppar streaming. "
+                        "Bruk Gjenoppliv EP2 i web UI."
                     )
                     self._streamer = False
                     break
@@ -1188,8 +1192,8 @@ class SiriusDriver:
         """
         Split interleaved int16-data til per-kanal arrays.
 
-        EP2 format: 2 rammer x 8 kanaler x int16 LE = 32 bytes per pakke.
-        Ved stoeerre buffer (16384 bytes): 512 pakker x 2 rammer = 1024 rammer.
+        EP2 format (fraa pcapng-analyse): 15 872 bytes per USB-pakke
+        = 992 rammer x 8 kanalar x int16 LE. 20 pakkar/sek ved 20 kHz.
         """
         if len(raa_bytes) < 2:
             return {}
