@@ -5,3 +5,5 @@ maalinger/
 *.service
 setup_usbip.sh
 setup_host.sh
+frontend/node_modules/
+frontend/dist/

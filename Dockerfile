@@ -94,7 +94,16 @@ RUN mkdir -p /opt/opendaq/lib /opt/opendaq/python && \
     ls -la /opt/opendaq/python/
 
 
-# ---- Stage 2: Runtime ----
+# ---- Stage 2: Bygg React frontend ----
+FROM node:20-slim AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+
+# ---- Stage 3: Runtime ----
 FROM python:3.11-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -149,6 +158,9 @@ COPY opendaq_bro.py .
 COPY kanal_konfig.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
+
+# React frontend (bygga i stage 2)
+COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 
 # udev-regler for Dewesoft USB-enheter (tilgang uten root)
 COPY 99-dewesoft.rules /etc/udev/rules.d/
