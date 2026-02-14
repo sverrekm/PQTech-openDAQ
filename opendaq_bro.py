@@ -152,12 +152,11 @@ class OpenDAQBro:
                 log.warning(f"  Kanallisting feilet: {e}")
 
             # Start servere på instance (som er rota).
-            # IKKJE bruk add_standard_servers() - Native Streaming handshake
-            # er broten (server lukkar tilkoblinga under handshake).
-            # Start berre OPC-UA + LT Streaming (WebSocket).
+            # Inkluderer Native Streaming som DewesoftX treng for full
+            # NewSetup-forhandling.
             servere = []
-            for srv_type in ['OpenDAQOPCUA', 'OpenDAQLTStreaming',
-                             'OpenDAQNewLTStreaming']:
+            for srv_type in ['OpenDAQOPCUA', 'OpenDAQNativeStreaming',
+                             'OpenDAQLTStreaming', 'OpenDAQNewLTStreaming']:
                 try:
                     self._instance.add_server(srv_type, None)
                     servere.append(srv_type)
@@ -404,7 +403,12 @@ class OpenDAQBro:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
 
     def _fiks_server_capabilities(self, ip):
-        """Sett server capability-adresser manuelt for Docker-miljoe."""
+        """Sett server capability-adresser manuelt for Docker-miljoe.
+
+        Overskriver ALLTID, ogsaa pre-populerte verdiar. openDAQ sin
+        mDNS-oppdaging kan sette feil IP (Docker bridge 172.17.x.x)
+        som DewesoftX ikkje kan naa.
+        """
         try:
             # Server capabilities er på instance (root), ikkje sub-device
             info = self._instance.info
@@ -413,9 +417,6 @@ class OpenDAQBro:
                 proto_id = cap.protocol_id
                 prefix = cap.prefix
                 port = cap.port
-                conn_str = cap.connection_string
-                if conn_str:
-                    continue  # Allereie satt, ikkje overskriv
 
                 # Bygg connection string: daq.ns://ip:port/
                 ny_conn = f"{prefix}://{ip}:{port}/"

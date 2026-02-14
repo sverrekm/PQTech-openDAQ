@@ -111,7 +111,7 @@ echo ""
 
 # Deaktiver modular som ikkje trengst for server-modus og kan foraarsake
 # feil i DewesoftX-klienten (t.d. 0x80000014 ved GetAvailableFunctionBlockTypes)
-for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libnative_stream_srv_module libsimulator_device_module; do
+for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libsimulator_device_module; do
     MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
     if [ -n "$MODULFIL" ]; then
         mv "$MODULFIL" "${MODULFIL}.disabled"

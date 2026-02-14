@@ -77,7 +77,7 @@ export default function ChannelLiveCard() {
                   {cv ? `${cv.value} ${cv.source}` : '-'}
                 </td>
                 <td>
-                  <SparklineChart data={sparkArr} />
+                  <SparklineChart data={[...sparkArr]} />
                 </td>
               </tr>
             )
