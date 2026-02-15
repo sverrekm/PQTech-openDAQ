@@ -827,7 +827,8 @@ class SiriusDriver:
     def koble_fra(self):
         """Stopp streaming og frigjor USB-enhet.
 
-        Tre-stegs frigjering for å unngå EBUSY ved neste tilkobling:
+        Fire-stegs frigjering for å unngå EBUSY ved neste tilkobling:
+        0. Drep orphan-trådar via USB reset (KRITISK for å unngå EBUSY)
         1. release_interface(0) - frigjer pyusb auto-claim
         2. attach_kernel_driver(0) - gir interface tilbake til kernel
         3. dispose_resources() - frigjer backend-ressursar
@@ -835,10 +836,40 @@ class SiriusDriver:
         if self._streamer:
             self.stopp_streaming()
 
+        # Steg 0: Drep orphan-trådar som framleis blokkerer på USB I/O.
+        # stopp_streaming() sett _stopp_event, men trådar kan blokkere på
+        # dev.read() i opptil 1 sekund (timeout).  dev.reset() tvingar
+        # ENODEV på ALLE blokkerande USB-operasjonar, slik at trådane
+        # avsluttar umiddelbart.
+        orphans = [
+            t for t in threading.enumerate()
+            if t.name in ("sirius-adc", "sirius-heartbeat") and t.is_alive()
+        ]
+        if orphans and self._dev is not None:
+            log.warning(
+                f"Orphan-trådar ({', '.join(t.name for t in orphans)}) "
+                f"— tvingar avslutning med USB reset..."
+            )
+            try:
+                self._dev.reset()
+                log.info("USB reset sendt — ventar på at trådar avsluttar...")
+            except Exception as e:
+                log.debug(f"USB reset feilet (ikkje kritisk): {e}")
+            for t in orphans:
+                t.join(timeout=3)
+            framleis = [t for t in orphans if t.is_alive()]
+            if framleis:
+                log.error(
+                    f"{len(framleis)} orphan-tråd(ar) lever framleis etter USB reset!"
+                )
+            else:
+                log.info("Alle orphan-trådar avslutta etter USB reset")
+
         self._tilkoblet = False
 
         if self._dev is not None:
             # Steg 1: Release interface 0 (auto-klaimet av pyusb ved I/O)
+            # (kan feile etter USB reset — det er OK)
             try:
                 usb.util.release_interface(self._dev, 0)
                 log.debug("  release_interface(0) OK")
@@ -846,8 +877,6 @@ class SiriusDriver:
                 pass
 
             # Steg 2: Re-attach kernel driver for å tvinge full frigjering
-            # Utan dette held Linux-kernelen interfacet "busy" og neste
-            # tilkobling får EBUSY på set_configuration() og EP2-lesingar.
             try:
                 self._dev.attach_kernel_driver(0)
                 log.debug("  attach_kernel_driver(0) OK")
@@ -873,8 +902,8 @@ class SiriusDriver:
         """Proev aa koble til paa nytt.
 
         Stoppar streaming, frigjer USB-handle, og koplar til på nytt.
-        Bruker koble_til() som inkluderer auto start-acquisition viss
-        EP2 ikkje svarer etter tilkobling.
+        koble_fra() brukar dev.reset() for å tvinge orphan-trådar til å
+        avslutte (ENODEV), noko som ogsaa re-enumererer USB-eininga.
         """
         log.info("Rekoble: stoppar streaming og frigjer USB...")
         try:
@@ -882,9 +911,9 @@ class SiriusDriver:
             if self._streamer:
                 self.stopp_streaming()
 
-            # 2. Frigjer USB-handle
+            # 2. Frigjer USB-handle (dev.reset() drep orphan-trådar)
             self.koble_fra()
-            time.sleep(1.5)  # Gi USB-stakken tid til å frigjere handle
+            time.sleep(2.0)  # Gi USB tid til re-enumerering etter reset
 
             # 3. Koble til att (inkl. auto start-acquisition viss EP2 feilar)
             self.koble_til()
@@ -1284,7 +1313,12 @@ class SiriusDriver:
         log.info("Streaming starta (ADC + B1-heartbeat)")
 
     def stopp_streaming(self):
-        """Stopp streaming og vent paa at traader avslutter."""
+        """Stopp streaming og vent paa at traader avslutter.
+
+        ADC-tråden har maks 1s USB-timeout, så den sjekkar _stopp_event
+        minst kvart sekund.  Viss trådar framleis lever etter join,
+        vil koble_fra() tvinge dei ut med dev.reset().
+        """
         if not self._streamer:
             return
 
@@ -1294,9 +1328,12 @@ class SiriusDriver:
 
         current = threading.current_thread()
         if self._adc_traad and self._adc_traad.is_alive() and self._adc_traad is not current:
-            self._adc_traad.join(timeout=5)
+            self._adc_traad.join(timeout=3)
+            if self._adc_traad.is_alive():
+                log.warning("ADC-tråd lever framleis etter join(3s) — "
+                            "koble_fra() vil tvinge avslutning")
         if self._heartbeat_traad and self._heartbeat_traad.is_alive() and self._heartbeat_traad is not current:
-            self._heartbeat_traad.join(timeout=5)
+            self._heartbeat_traad.join(timeout=3)
 
         self._adc_traad = None
         self._heartbeat_traad = None
@@ -1327,7 +1364,7 @@ class SiriusDriver:
             try:
                 raa = self._proto.les_adc_data(
                     storrelse=16384,
-                    timeout=TIMEOUT_DATA
+                    timeout=1000
                 )
 
                 if raa:

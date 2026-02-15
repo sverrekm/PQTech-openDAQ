@@ -676,7 +676,9 @@ def rekoble_driver():
                         log.info("Rekoble: alle orphan-trådar avslutta")
 
             if _driver is not None:
-                # Stopp streaming eksplisitt FYRST (frigjer EP2)
+                # Stopp streaming eksplisitt FYRST.
+                # koble_fra() i driveren brukar dev.reset() for å tvinge
+                # orphan-trådar til å avslutte ENODEV (løyser EBUSY).
                 if _driver.streamer:
                     log.info("Rekoble: stoppar aktiv streaming fyrst...")
                     try:
