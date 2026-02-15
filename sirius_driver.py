@@ -1195,28 +1195,35 @@ class SiriusDriver:
                     self._stopp_event.wait(timeout=0.5)
                     continue
 
+                # ENODEV (Errno 19) = eininga er fysisk borte etter reset/power-cycle.
+                # Ingen vits å prøve på nytt — stopp umiddelbart så USB vert frigjeven.
+                if "errno 19" in feil_str or "no such device" in feil_str:
+                    log.error(f"ADC: Eining borte (ENODEV) — stoppar umiddelbart: {e}")
+                    self._streamer = False
+                    break
+
                 # Ekte I/O-feil (Errno 5, Errno 16 etc.)
                 io_feil_teller += 1
                 log.warning(f"ADC I/O-feil ({io_feil_teller}): {e}")
 
                 # Ved EBUSY: proev clear_halt for aa nullstille endepunktet
-                if "errno 16" in str(e).lower() or "resource busy" in str(e).lower():
+                if "errno 16" in feil_str or "resource busy" in feil_str:
                     try:
                         self._dev.clear_halt(EP_ADC_IN)
                         log.info("EP2 clear_halt etter EBUSY")
                     except Exception:
                         pass
 
-                if io_feil_teller >= 50:
+                if io_feil_teller >= 10:
                     log.error(
-                        "For mange ADC I/O-feil (50) - stoppar streaming. "
-                        "Bruk Gjenoppliv EP2 i web UI."
+                        "For mange ADC I/O-feil (10) - stoppar streaming. "
+                        "Bruk Rekoble i web UI."
                     )
                     self._streamer = False
                     break
 
                 # Kort pause foer retry
-                self._stopp_event.wait(timeout=1.0)
+                self._stopp_event.wait(timeout=0.5)
 
             except Exception as e:
                 if self._stopp_event.is_set():
@@ -1230,12 +1237,19 @@ class SiriusDriver:
             try:
                 self._proto.send_telemetri()
             except SiriusUSBFeil as e:
+                feil_str = str(e).lower()
+                if "errno 19" in feil_str or "no such device" in feil_str:
+                    log.error(f"Heartbeat: Eining borte (ENODEV) — stoppar: {e}")
+                    break
                 log.debug(f"Heartbeat telemetri feilet: {e}")
 
             try:
                 self._proto.les_ctrl_data(timeout=500)
-            except SiriusUSBFeil:
-                pass
+            except SiriusUSBFeil as e:
+                feil_str = str(e).lower()
+                if "errno 19" in feil_str or "no such device" in feil_str:
+                    log.error(f"Heartbeat ctrl: Eining borte (ENODEV) — stoppar: {e}")
+                    break
 
             # Vent 2 sekunder mellom heartbeats
             self._stopp_event.wait(timeout=2.0)
