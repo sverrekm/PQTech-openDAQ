@@ -649,30 +649,30 @@ def rekoble_driver():
 
     with _lock:
         try:
-            # Stopp foreldrelause trådar frå tidlegare driver
-            # (kan skje viss _driver vart sett til None utan stopp_streaming)
-            if _siste_stopp_event is not None and _driver is None:
-                log.info("Rekoble: stoppar foreldrelause trådar frå tidlegare driver...")
-                _siste_stopp_event.set()
-                _siste_stopp_event = None
+            if _driver is None:
+                # Stopp foreldrelause trådar frå tidlegare driver
+                # (kan skje viss _driver vart sett til None utan stopp_streaming)
+                if _siste_stopp_event is not None:
+                    log.info("Rekoble: stoppar foreldrelause trådar frå tidlegare driver...")
+                    _siste_stopp_event.set()
+                    _siste_stopp_event = None
 
-            # Vent til eventuelle sirius-trådar (ADC/heartbeat) er ferdige.
-            # Med ENODEV-fix stoppar dei nesten umiddelbart når eininga er borte.
-            sirius_threads = [
-                t for t in threading.enumerate()
-                if t.name in ("sirius-adc", "sirius-heartbeat") and t.is_alive()
-            ]
-            if sirius_threads:
-                log.info(f"Rekoble: ventar på {len(sirius_threads)} sirius-tråd(ar) "
-                         f"({', '.join(t.name for t in sirius_threads)})...")
-                for t in sirius_threads:
-                    t.join(timeout=3)
-                # Sjekk om trådane faktisk stoppa
-                framleis = [t for t in sirius_threads if t.is_alive()]
-                if framleis:
-                    log.warning(f"Rekoble: {len(framleis)} tråd(ar) lever framleis!")
-                else:
-                    log.info("Rekoble: alle sirius-trådar avslutta")
+                # Vent til eventuelle orphan sirius-trådar er ferdige.
+                # Med ENODEV-fix stoppar dei nesten umiddelbart når eininga er borte.
+                sirius_threads = [
+                    t for t in threading.enumerate()
+                    if t.name in ("sirius-adc", "sirius-heartbeat") and t.is_alive()
+                ]
+                if sirius_threads:
+                    log.info(f"Rekoble: ventar på {len(sirius_threads)} orphan-tråd(ar) "
+                             f"({', '.join(t.name for t in sirius_threads)})...")
+                    for t in sirius_threads:
+                        t.join(timeout=3)
+                    framleis = [t for t in sirius_threads if t.is_alive()]
+                    if framleis:
+                        log.warning(f"Rekoble: {len(framleis)} tråd(ar) lever framleis!")
+                    else:
+                        log.info("Rekoble: alle orphan-trådar avslutta")
 
             if _driver is not None:
                 # Stopp streaming eksplisitt FYRST (frigjer EP2)

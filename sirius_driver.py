@@ -705,9 +705,8 @@ class SiriusDriver:
         """Proev aa koble til paa nytt.
 
         Stoppar streaming, frigjer USB-handle, og koplar til på nytt.
-        VIKTIG: Ingen dev.reset(), sysfs reset, eller EP2 recovery.
-        Berre rein fråkopling/tilkopling. Viss EP2 ikkje fungerer
-        etter rekoble, bruk "Gjenoppliv EP2"-knappen separat.
+        Bruker koble_til() som inkluderer auto start-acquisition viss
+        EP2 ikkje svarer etter tilkobling.
         """
         log.info("Rekoble: stoppar streaming og frigjer USB...")
         try:
@@ -719,8 +718,8 @@ class SiriusDriver:
             self.koble_fra()
             time.sleep(1.5)  # Gi USB-stakken tid til å frigjere handle
 
-            # 3. Koble til att (berre find + configure + test EP2)
-            self._koble_til_intern()
+            # 3. Koble til att (inkl. auto start-acquisition viss EP2 feilar)
+            self.koble_til()
             return True
         except SiriusFeil as e:
             self._rekoble_forsok += 1
@@ -1104,21 +1103,17 @@ class SiriusDriver:
         )
         self._adc_traad.start()
 
-        # Heartbeat (AE telemetri) berre etter start-acquisition.
-        # I factory-default modus streamer EP2 av seg sjølv — heartbeat
-        # på EP1 DREP EP2 ved å forstyrre SIRIUS sin idle-tilstand.
-        # Etter start-acquisition treng SIRIUS heartbeat for å halde
-        # EP2 gåande (DewesoftX sender AE kontinuerleg).
-        if self._treng_heartbeat:
-            self._heartbeat_traad = threading.Thread(
-                target=self._heartbeat_loop,
-                name="sirius-heartbeat",
-                daemon=True,
-            )
-            self._heartbeat_traad.start()
-            log.info("Streaming starta (ADC + heartbeat)")
-        else:
-            log.info("Streaming starta (ADC, heartbeat av — factory-default EP2)")
+        # B1-heartbeat køyrer ALLTID under streaming.
+        # pcapng-analyse viser at DewesoftX sender 0xB1 kontinuerleg i alle modi.
+        # Tidlegare slo vi av heartbeat i factory-default fordi 0xAE drap EP2,
+        # men 0xB1 (enkel poll) er trygt og naudsynt for å halde EP2 aktiv.
+        self._heartbeat_traad = threading.Thread(
+            target=self._heartbeat_loop,
+            name="sirius-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_traad.start()
+        log.info("Streaming starta (ADC + B1-heartbeat)")
 
     def stopp_streaming(self):
         """Stopp streaming og vent paa at traader avslutter."""
