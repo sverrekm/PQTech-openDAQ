@@ -151,18 +151,13 @@ class SiriusDriver:
         """
         Finn og koble til SIRIUS via USB.
 
-        Brukar same moenster som sirius_adc_leser.py:
-        1. usb.core.find()
-        2. detach_kernel_driver(0)
-        3. set_configuration()
-        4. Les EP2 direkte
+        1. usb.core.find() + detach_kernel_driver + set_configuration
+        2. Test EP2 direkte (ADC-data)
+        3. Viss EP2 ikkje svarer: køyr start-acquisition automatisk
+        4. Viss start-acquisition feilar: prøv init + start-acquisition
 
-        VIKTIG: Korkje dev.reset() eller init-sekvensen (A0/B0/AD) maa
-        køyrast! Begge øydelegg EP2 ADC-streaming permanent.
-
-        EP2 fungerer på factory-fresh SIRIUS etter USB-enumerering.
-        Viss EP2 feilar, logg ei melding - brukaren kan klikke
-        "Gjenoppliv EP2" i web UI for å prøve recovery-strategiar.
+        SIRIUS treng start-acquisition-sekvensen (register 0x02 trigger)
+        for å aktivere EP2 ADC-streaming.
 
         Raises:
             SiriusIkkeFunnet: Hvis SIRIUS ikkje finst paa USB
@@ -174,9 +169,32 @@ class SiriusDriver:
         self._koble_til_intern()
 
         if not self._ep2_ok:
+            # EP2 ikkje aktiv etter USB-enumerering.  Køyr start-acquisition
+            # automatisk — SIRIUS treng dette for å aktivere ADC-streaming.
+            log.info("EP2 ikkje aktiv — køyrer start-acquisition automatisk...")
+            try:
+                self._start_acquisition()
+                time.sleep(0.5)
+                if self._test_ep2():
+                    log.info("EP2 starta etter automatisk start-acquisition")
+                else:
+                    log.warning("EP2 svarte ikkje etter start-acquisition — prøver init + start...")
+                    # Strategi 2: full init + start-acquisition
+                    try:
+                        self._initialiser()
+                        time.sleep(0.5)
+                        self._start_acquisition()
+                        time.sleep(0.5)
+                        if self._test_ep2():
+                            log.info("EP2 starta etter init + start-acquisition")
+                    except Exception as e2:
+                        log.warning(f"Init + start-acquisition feilet: {e2}")
+            except Exception as e:
+                log.warning(f"Automatisk start-acquisition feilet: {e}")
+
+        if not self._ep2_ok:
             log.warning(
-                "EP2 (ADC) svarte ikkje - bruk 'Gjenoppliv EP2' i web UI. "
-                "IKKJE klikk Rekoble (det hjelper ikkje med EP2)."
+                "EP2 (ADC) svarte ikkje - bruk 'Gjenoppliv EP2' i web UI."
             )
 
     def _frigjer_dev(self):
@@ -197,6 +215,17 @@ class SiriusDriver:
     def _koble_til_intern(self):
         """Intern tilkoblingslogikk (find → detach → configure → test EP2)."""
         log.info(f"Soeker etter SIRIUS (VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})...")
+
+        # Vent til udev har prosessert USB-endringar slik at device-noder
+        # finst i /dev/bus/usb/.  Nødvendig etter USB reset/power-cycle
+        # der devicet re-enumererer med ny bus-adresse.
+        try:
+            subprocess.run(
+                ["udevadm", "settle", "--timeout=5"],
+                capture_output=True, timeout=8,
+            )
+        except Exception:
+            pass  # udevadm ikkje tilgjengeleg — held fram
 
         dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
         if dev is None:
@@ -448,12 +477,19 @@ class SiriusDriver:
             log.info(f"  uhubctl: port {port} power ON - ventar på enumerering (8s)...")
             time.sleep(8)  # Lenger vent: FX2 treng tid til firmware-lasting
 
-            # Tøm pyusb sin device-cache slik at neste find() får ferskt handle
+            # Trigger udev re-skanning og vent til device-noder er klare
             try:
-                import usb.backend.libusb1
-                usb.core._device_cache = {}
-            except (AttributeError, ImportError):
-                pass  # Cache-tømming er best-effort
+                subprocess.run(
+                    ["udevadm", "trigger", "--action=add", "--subsystem-match=usb"],
+                    capture_output=True, timeout=5,
+                )
+                subprocess.run(
+                    ["udevadm", "settle", "--timeout=5"],
+                    capture_output=True, timeout=8,
+                )
+                log.info("  udevadm trigger+settle fullført")
+            except Exception:
+                pass  # udevadm ikkje tilgjengeleg — held fram
 
             return True
         except subprocess.TimeoutExpired:
@@ -611,8 +647,12 @@ class SiriusDriver:
 
         log.error("=" * 60)
         log.error("ALLE EP2-strategiar feilet (4/4).")
-        log.error("Siste utveg: full straumsykling av SIRIUS (skru av/paa)")
+        log.error("Klikk Rekoble for å prøve med fersk USB-tilkopling.")
         log.error("=" * 60)
+
+        # Sørg for rein tilstand: frigjer eventuelt stale USB-handle
+        # slik at neste koble_til() / rekoble() startar friskt.
+        self._frigjer_dev()
         return False
 
     def koble_fra(self):
@@ -1048,10 +1088,20 @@ class SiriusDriver:
         )
         self._adc_traad.start()
 
-        # IKKJE start heartbeat - EP1-kommandoar (AE telemetri) kan forstyrre
-        # EP2-streaming, og vi har ikkje køyrt init uansett.
+        # Start heartbeat-traad (AE telemetri + EP4 ctrl).
+        # DewesoftX sender AE-heartbeats kontinuerleg under streaming.
+        # SIRIUS treng dette for å halde EP2 ADC-data gåande —
+        # utan heartbeat stoppar streaming etter kort tid.
+        # EP1 (cmd) og EP2 (data) er uavhengige USB-endepunkt
+        # og kan brukast samtidig utan konflikt.
+        self._heartbeat_traad = threading.Thread(
+            target=self._heartbeat_loop,
+            name="sirius-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_traad.start()
 
-        log.info("Streaming starta")
+        log.info("Streaming starta (ADC + heartbeat)")
 
     def stopp_streaming(self):
         """Stopp streaming og vent paa at traader avslutter."""

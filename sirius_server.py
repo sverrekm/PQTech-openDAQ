@@ -534,9 +534,35 @@ def gjenoppliv_ep2():
                         log.warning(f"Kunne ikkje starte streaming: {e}")
                 return True, "EP2 gjenoppliva! Streaming starta."
             else:
-                server_status["feil"] = "EP2 gjenoppliving feilet - alle strategiar prøvd"
-                return False, "Alle EP2-strategiar feilet. Instrumentet kan trenge full power-cycle."
+                # Strategi 3/4 (dev.reset, uhubctl) øydelegg USB-tilkoplinga.
+                # Nullstill _driver slik at rekoble_driver() opprettar heilt
+                # ny driver med fersk USB-enumerering i staden for å gjenbruke
+                # den korrupte instansen.
+                log.warning("EP2-gjenoppliving feilet — nullstiller driver for rein rekobling")
+                try:
+                    _driver.koble_fra()
+                except Exception:
+                    pass
+                _driver = None
+                server_status.update({
+                    "feil": "EP2 gjenoppliving feilet - klikk Rekoble",
+                    "tilkoblet": False,
+                    "streamer": False,
+                })
+                return False, "Alle EP2-strategiar feilet. Klikk Rekoble for å prøve på nytt."
         except Exception as e:
+            # Uventa feil — same opprydding
+            log.error(f"Exception under EP2-gjenoppliving: {e}")
+            try:
+                if _driver is not None:
+                    _driver.koble_fra()
+            except Exception:
+                pass
+            _driver = None
+            server_status.update({
+                "tilkoblet": False,
+                "streamer": False,
+            })
             return False, f"Feil under gjenoppliving: {e}"
 
 
