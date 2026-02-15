@@ -21,6 +21,7 @@ Bruk:
     driver.koble_fra()
 """
 
+import json
 import time
 import subprocess
 import threading
@@ -51,6 +52,102 @@ from sirius_protokoll_impl import (
 )
 
 log = logging.getLogger('sirius_driver')
+
+EP2_STRATEGI_STI = Path("/data/konfig/ep2_strategi.json")
+
+# Alle kjende strategi-namn (i standard rekkjefylgje)
+STRATEGI_NAMN = [
+    "1_start_acquisition",
+    "2_init_start",
+    "3a_reset_åleine",
+    "3b_reset_start",
+    "4a_uhubctl_åleine",
+    "4b_uhubctl_start",
+]
+
+
+class EP2StrategiLogg:
+    """Registrerer kva EP2-strategi som lukkast og kor ofte.
+
+    Lagrar til /data/konfig/ep2_strategi.json slik at data overlever restart.
+    Formatet:
+        {
+            "historikk": [
+                {"strategi": "3b_reset_start", "tid": "2026-02-15T12:34:56", "ok": true},
+                ...
+            ],
+            "teljar": {"3b_reset_start": 5, "1_start_acquisition": 1, ...},
+            "siste_suksess": "3b_reset_start",
+            "feilet_totalt": 2
+        }
+    """
+
+    def __init__(self, sti: Path = EP2_STRATEGI_STI):
+        self._sti = sti
+        self._data = self._last()
+
+    def _last(self) -> dict:
+        try:
+            if self._sti.exists():
+                return json.loads(self._sti.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.debug(f"EP2 strategi-logg: kunne ikkje lese {self._sti}: {e}")
+        return {"historikk": [], "teljar": {}, "siste_suksess": None, "feilet_totalt": 0}
+
+    def _lagre(self):
+        try:
+            self._sti.parent.mkdir(parents=True, exist_ok=True)
+            self._sti.write_text(
+                json.dumps(self._data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            log.warning(f"EP2 strategi-logg: kunne ikkje lagre: {e}")
+
+    def registrer_suksess(self, strategi: str):
+        """Registrer at ein strategi lukkast."""
+        tid = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._data["historikk"].append(
+            {"strategi": strategi, "tid": tid, "ok": True}
+        )
+        # Hald historikk rimeleg kort
+        self._data["historikk"] = self._data["historikk"][-50:]
+        self._data["teljar"][strategi] = self._data["teljar"].get(strategi, 0) + 1
+        self._data["siste_suksess"] = strategi
+        log.info(f"EP2 strategi-statistikk: '{strategi}' lukkast "
+                 f"(totalt {self._data['teljar'][strategi]}x)")
+        self._lagre()
+
+    def registrer_feil(self):
+        """Registrer at alle strategiar feilet."""
+        tid = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self._data["historikk"].append(
+            {"strategi": "ALLE_FEILET", "tid": tid, "ok": False}
+        )
+        self._data["historikk"] = self._data["historikk"][-50:]
+        self._data["feilet_totalt"] = self._data.get("feilet_totalt", 0) + 1
+        self._lagre()
+
+    @property
+    def siste_suksess(self) -> Optional[str]:
+        return self._data.get("siste_suksess")
+
+    @property
+    def teljar(self) -> dict:
+        return dict(self._data.get("teljar", {}))
+
+    @property
+    def historikk(self) -> list:
+        return list(self._data.get("historikk", []))
+
+    def samandrag(self) -> dict:
+        """Kompakt samandrag for API/web UI."""
+        return {
+            "siste_suksess": self._data.get("siste_suksess"),
+            "teljar": self._data.get("teljar", {}),
+            "feilet_totalt": self._data.get("feilet_totalt", 0),
+            "siste_10": self._data.get("historikk", [])[-10:],
+        }
 
 
 # --- Dataklasser ---
@@ -119,6 +216,7 @@ class SiriusDriver:
         self._siste_data_lock = threading.Lock()
         self._ep2_ok = False
         self._treng_heartbeat = False  # Sett True etter _start_acquisition()
+        self._strategi_logg = EP2StrategiLogg()
 
     @property
     def enhetsinfo(self) -> EnhetsInfo:
@@ -172,11 +270,13 @@ class SiriusDriver:
         if not self._ep2_ok:
             # EP2 ikkje aktiv etter USB-enumerering.  Køyr start-acquisition
             # automatisk — SIRIUS treng dette for å aktivere ADC-streaming.
+            # VIKTIG: B1-heartbeat må pumpe medan vi testar EP2, elles
+            # stoppar SIRIUS ADC-straumen umiddelbart etter trigger.
             log.info("EP2 ikkje aktiv — køyrer start-acquisition automatisk...")
             try:
                 self._start_acquisition()
-                time.sleep(0.5)
-                if self._test_ep2():
+                if self._test_ep2_med_heartbeat():
+                    self._strategi_logg.registrer_suksess("1_start_acquisition")
                     log.info("EP2 starta etter automatisk start-acquisition")
                 else:
                     log.warning("EP2 svarte ikkje etter start-acquisition — prøver init + start...")
@@ -185,8 +285,8 @@ class SiriusDriver:
                         self._initialiser()
                         time.sleep(0.5)
                         self._start_acquisition()
-                        time.sleep(0.5)
-                        if self._test_ep2():
+                        if self._test_ep2_med_heartbeat():
+                            self._strategi_logg.registrer_suksess("2_init_start")
                             log.info("EP2 starta etter init + start-acquisition")
                     except Exception as e2:
                         log.warning(f"Init + start-acquisition feilet: {e2}")
@@ -199,11 +299,21 @@ class SiriusDriver:
             )
 
     def _frigjer_dev(self):
-        """Frigjer USB-handle utan full koble_fra (unngår stopp_streaming)."""
+        """Frigjer USB-handle utan full koble_fra (unngår stopp_streaming).
+
+        Tre-stegs frigjering (same som koble_fra) for å unngå EBUSY:
+        1. release_interface(0)
+        2. attach_kernel_driver(0) — gir interface tilbake til kernel
+        3. dispose_resources()
+        """
         if self._dev is not None:
             try:
                 usb.util.release_interface(self._dev, 0)
             except Exception:
+                pass
+            try:
+                self._dev.attach_kernel_driver(0)
+            except (usb.core.USBError, NotImplementedError):
                 pass
             try:
                 usb.util.dispose_resources(self._dev)
@@ -380,6 +490,37 @@ class SiriusDriver:
             log.debug(f"  EP2 test feilet: {e}")
         return False
 
+    def _test_ep2_med_heartbeat(self, timeout=5000):
+        """Test EP2 medan B1-heartbeat pumpar i bakgrunnen.
+
+        Etter start-acquisition treng SIRIUS kontinuerlege B1-polls
+        (~150/sek) for å halde EP2 aktiv.  Utan dette stoppar EP2
+        innan millisekund etter at trigger-registeret er sett.
+
+        Returns: True viss EP2 svarte med data
+        """
+        if self._proto is None:
+            return self._test_ep2(timeout=timeout)
+
+        hb_stopp = threading.Event()
+
+        def _pumpe_b1():
+            while not hb_stopp.is_set():
+                try:
+                    self._proto.poll_b1(timeout=10)
+                except Exception:
+                    hb_stopp.wait(timeout=0.005)
+
+        hb_traad = threading.Thread(
+            target=_pumpe_b1, daemon=True, name="ep2-test-hb"
+        )
+        hb_traad.start()
+        try:
+            return self._test_ep2(timeout=timeout)
+        finally:
+            hb_stopp.set()
+            hb_traad.join(timeout=2)
+
     def _usb_bus_reset(self):
         """Send USB RESET-signal via dev.reset().
 
@@ -552,8 +693,8 @@ class SiriusDriver:
         log.info("Strategi 1/4: Start-acquisition sekvens (direkte)...")
         try:
             self._start_acquisition()
-            time.sleep(0.5)
-            if self._test_ep2():
+            if self._test_ep2_med_heartbeat():
+                self._strategi_logg.registrer_suksess("1_start_acquisition")
                 log.info("SUKSESS: Strategi 1 (start-acquisition)")
                 return True
             log.info("  Start-acquisition sendt, men EP2 svarte ikkje enno")
@@ -571,8 +712,8 @@ class SiriusDriver:
             self._initialiser()
             time.sleep(0.5)
             self._start_acquisition()
-            time.sleep(0.5)
-            if self._test_ep2():
+            if self._test_ep2_med_heartbeat():
+                self._strategi_logg.registrer_suksess("2_init_start")
                 log.info("SUKSESS: Strategi 2 (init + start-acquisition)")
                 return True
             log.info("  Init + start sendt, men EP2 svarte ikkje")
@@ -590,13 +731,14 @@ class SiriusDriver:
                 time.sleep(1)
                 self._koble_til_intern()
                 if self._ep2_ok:
+                    self._strategi_logg.registrer_suksess("3a_reset_åleine")
                     log.info("SUKSESS: Strategi 3a (dev.reset åleine)")
                     return True
                 # EP2 ikkje oppe etter reset - proev start-sekvens
                 try:
                     self._start_acquisition()
-                    time.sleep(0.5)
-                    if self._test_ep2():
+                    if self._test_ep2_med_heartbeat():
+                        self._strategi_logg.registrer_suksess("3b_reset_start")
                         log.info("SUKSESS: Strategi 3b (dev.reset + start-acquisition)")
                         return True
                 except (SiriusPollTimeout, SiriusUSBFeil) as e:
@@ -616,25 +758,36 @@ class SiriusDriver:
         try:
             self._frigjer_dev()
             if self._uhubctl_power_cycle():
-                for forsok in range(3):
+                # Etter power-cycle treng devicet tid til FX2 firmware-lasting.
+                # RPi 5 USB3-hub kan vere treg — bruk fleire forsøk med
+                # aukande ventetid og tvinga libusb-refresh mellom kvar.
+                for forsok in range(5):
+                    # Tvinga libusb til å re-skanne USB-bussen
+                    try:
+                        usb.core.find(find_all=True)
+                    except Exception:
+                        pass
                     try:
                         self._koble_til_intern()
                         break
                     except SiriusIkkeFunnet:
-                        log.info(f"  uhubctl: enhet ikkje funne enno (forsoek {forsok+1}/3)...")
+                        log.info(f"  uhubctl: enhet ikkje funne enno (forsoek {forsok+1}/5)...")
                         time.sleep(3)
                     except Exception as e:
+                        # ENODEV = stale handle frå gammal adresse — frigjer og prøv att
                         log.warning(f"  uhubctl tilkobling forsoek {forsok+1}: {e}")
-                        time.sleep(2)
+                        self._frigjer_dev()
+                        time.sleep(3)
                 if self._ep2_ok:
+                    self._strategi_logg.registrer_suksess("4a_uhubctl_åleine")
                     log.info("SUKSESS: Strategi 4a (uhubctl åleine)")
                     return True
                 # EP2 ikkje oppe - proev start-sekvens
                 if self._tilkoblet and self._proto:
                     try:
                         self._start_acquisition()
-                        time.sleep(0.5)
-                        if self._test_ep2():
+                        if self._test_ep2_med_heartbeat():
+                            self._strategi_logg.registrer_suksess("4b_uhubctl_start")
                             log.info("SUKSESS: Strategi 4b (uhubctl + start-acquisition)")
                             return True
                     except (SiriusPollTimeout, SiriusUSBFeil) as e:
@@ -646,6 +799,7 @@ class SiriusDriver:
             except Exception:
                 pass
 
+        self._strategi_logg.registrer_feil()
         log.error("=" * 60)
         log.error("ALLE EP2-strategiar feilet (4/4).")
         log.error("Klikk Rekoble for å prøve med fersk USB-tilkopling.")
@@ -705,8 +859,8 @@ class SiriusDriver:
         """Proev aa koble til paa nytt.
 
         Stoppar streaming, frigjer USB-handle, og koplar til på nytt.
-        Bruker koble_til() som inkluderer auto start-acquisition.
-        Viss EP2 framleis feilar, prøver USB reset + koble_til() som fallback.
+        Bruker koble_til() som inkluderer auto start-acquisition viss
+        EP2 ikkje svarer etter tilkobling.
         """
         log.info("Rekoble: stoppar streaming og frigjer USB...")
         try:
@@ -720,20 +874,6 @@ class SiriusDriver:
 
             # 3. Koble til att (inkl. auto start-acquisition viss EP2 feilar)
             self.koble_til()
-
-            # 4. Viss EP2 framleis ikkje fungerer: prøv USB reset som fallback
-            if not self._ep2_ok:
-                log.info("Rekoble: EP2 framleis nede — prøver USB reset...")
-                if self._dev is not None:
-                    try:
-                        self._dev.reset()
-                        log.info("  USB RESET sendt — ventar på FX2 reboot...")
-                    except Exception as e:
-                        log.warning(f"  USB reset feilet: {e}")
-                    self.koble_fra()
-                    time.sleep(3)  # FX2 treng tid etter reset
-                    self.koble_til()
-
             return True
         except SiriusFeil as e:
             self._rekoble_forsok += 1
@@ -1348,6 +1488,7 @@ class SiriusDriver:
             "sample_rate": self._konfig.sample_rate,
             "data_rate_kbs": round(self._data_rate_kbs, 1),
             "ep2_ok": self._ep2_ok,
+            "ep2_strategi": self._strategi_logg.samandrag(),
         }
 
     def __repr__(self):

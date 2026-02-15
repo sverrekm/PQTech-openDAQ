@@ -461,6 +461,18 @@ def api_sirius_gjenoppliv_ep2():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/sirius/ep2-strategi")
+def api_ep2_strategi():
+    """EP2-strategi historikk og statistikk."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"feil": "Driver ikke lastet"}), 503
+    try:
+        status = _sirius_hent_status()
+        return jsonify(status.get("ep2_strategi", {}))
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
 # --- Logg og Debug API ---
 
 @app.route("/api/logg")

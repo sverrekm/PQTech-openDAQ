@@ -418,6 +418,7 @@ def hent_driver_status():
                 "serienummer": drv_status.get("serienummer", ""),
                 "enhet_navn": drv_status.get("enhetsstreng", "") or server_status.get("enhet_navn", ""),
                 "ep2_ok": drv_status.get("ep2_ok", False),
+                "ep2_strategi": drv_status.get("ep2_strategi", {}),
             })
         else:
             server_status["tilkoblet"] = False
