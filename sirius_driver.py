@@ -353,6 +353,20 @@ class SiriusDriver:
             except Exception:
                 pass
         if dev is None:
+            # Siste utveg: etter uhubctl i Docker kan /dev/bus/usb/-noden
+            # mangle sjølv om sysfs ser devicet.  Opprett noden frå sysfs-info.
+            if SiriusDriver._sikre_dev_node():
+                log.info("  /dev node sikra — prøver fersk libusb-kontekst på nytt...")
+                try:
+                    from usb.backend import libusb1 as _libusb1
+                    fresh_be = _libusb1.get_backend()
+                    dev = usb.core.find(
+                        idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
+                        backend=fresh_be,
+                    )
+                except Exception:
+                    pass
+        if dev is None:
             raise SiriusIkkeFunnet(
                 f"SIRIUS ikkje funnet paa USB "
                 f"(VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})"
@@ -389,6 +403,14 @@ class SiriusDriver:
                         idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
                         backend=fresh_be,
                     )
+                    if dev is None:
+                        # Docker: /dev node kan mangle etter uhubctl
+                        if SiriusDriver._sikre_dev_node():
+                            fresh_be = _libusb1.get_backend()
+                            dev = usb.core.find(
+                                idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
+                                backend=fresh_be,
+                            )
                     if dev is None:
                         raise SiriusIkkeFunnet(
                             f"SIRIUS forsvann etter ENODEV "
@@ -465,6 +487,53 @@ class SiriusDriver:
             log.debug(f"  Kunne ikkje lese USB-strengar: {e}")
             self._enhetsinfo.enhetsstreng = "SIRIUS"
             self._enhetsinfo.serienummer = ""
+
+    @staticmethod
+    def _sikre_dev_node():
+        """Sjekk at /dev/bus/usb/ device-noden eksisterer for SIRIUS.
+
+        Etter uhubctl power-cycle inne i Docker kan /dev/bus/usb/-noden
+        mangle fordi bind-mount ikkje alltid propagerer nye device-nodar
+        fraa hosten.  Les busnum/devnum fraa sysfs og opprett noden med
+        mknod viss den manglar.
+
+        Returns: True viss noden vart oppretta eller allereie fanst
+        """
+        dev_dir = SiriusDriver._finn_sysfs_sti()
+        if dev_dir is None:
+            return False
+
+        try:
+            busnum = int((dev_dir / "busnum").read_text().strip())
+            devnum = int((dev_dir / "devnum").read_text().strip())
+        except (OSError, ValueError) as e:
+            log.debug(f"  Kan ikkje lese busnum/devnum fraa sysfs: {e}")
+            return False
+
+        dev_path = Path(f"/dev/bus/usb/{busnum:03d}/{devnum:03d}")
+        if dev_path.exists():
+            log.debug(f"  /dev node eksisterer: {dev_path}")
+            return True
+
+        # Opprett katalog og device-node
+        log.info(f"  /dev/bus/usb/{busnum:03d}/{devnum:03d} manglar — opprettar med mknod...")
+        try:
+            dev_path.parent.mkdir(parents=True, exist_ok=True)
+            # USB device nodes: major=189, minor=(bus-1)*128+(dev-1)
+            minor = (busnum - 1) * 128 + (devnum - 1)
+            subprocess.run(
+                ["mknod", str(dev_path), "c", "189", str(minor)],
+                check=True, capture_output=True, timeout=5,
+            )
+            subprocess.run(
+                ["chmod", "666", str(dev_path)],
+                capture_output=True, timeout=5,
+            )
+            log.info(f"  Device-node oppretta: {dev_path} (major=189, minor={minor})")
+            return True
+        except Exception as e:
+            log.warning(f"  Kan ikkje opprette /dev node: {e}")
+            return False
 
     @staticmethod
     def _finn_sysfs_sti():
