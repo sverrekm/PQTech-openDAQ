@@ -95,6 +95,10 @@ _opendaq_bro: OpenDAQBro = None
 _args = None
 _lock = threading.Lock()
 
+# Stopp-event frå førre driver — brukast til å stoppe foreldrelause
+# ADC/heartbeat-trådar når _driver vert sett til None uforventa.
+_siste_stopp_event: threading.Event = None
+
 
 class SiriusAutonomMaaler:
     """
@@ -497,7 +501,7 @@ def gjenoppliv_ep2():
 
     Stoppar streaming fyrst for å frigjere EP2, deretter prøver recovery.
     """
-    global _driver
+    global _driver, _siste_stopp_event
 
     # Guard: USB/IP og lokal driver er gjensidig ekskluderande
     if usbip_manager.usbip_status.get("deling_aktiv"):
@@ -528,6 +532,7 @@ def gjenoppliv_ep2():
                 if not _driver.streamer:
                     try:
                         _driver.start_streaming(callback=_global_data_callback)
+                        _siste_stopp_event = _driver._stopp_event
                         server_status["streamer"] = True
                         log.info("Streaming starta etter EP2 gjenoppliving")
                     except SiriusFeil as e:
@@ -629,12 +634,14 @@ def hent_siste_data():
 
 
 def rekoble_driver():
-    """Proev rekobling fra web API. Oppretter driver hvis den ikke finnes.
+    """Proev rekobling fra web API.  Inkluderer automatisk EP2-recovery.
 
-    VIKTIG: Stoppar streaming FYRST for å frigjere EP2, deretter rekoble.
-    Viss _driver er None (t.d. etter frigjor_usb), opprettar ny driver.
+    1. Stoppar streaming og orphaned trådar
+    2. Rekoble (eller opprett ny driver)
+    3. Viss EP2 ikkje fungerer: køyr start-acquisition automatisk
+    4. Start streaming
     """
-    global _driver
+    global _driver, _siste_stopp_event
 
     # Guard: USB/IP og lokal driver er gjensidig ekskluderande
     if usbip_manager.usbip_status.get("deling_aktiv"):
@@ -642,6 +649,14 @@ def rekoble_driver():
 
     with _lock:
         try:
+            # Stopp foreldrelause trådar frå tidlegare driver
+            # (kan skje viss _driver vart sett til None utan stopp_streaming)
+            if _siste_stopp_event is not None and _driver is None:
+                log.info("Rekoble: stoppar foreldrelause trådar frå tidlegare driver...")
+                _siste_stopp_event.set()
+                time.sleep(2)  # Gi trådane tid til å avslutte og frigjere USB
+                _siste_stopp_event = None
+
             if _driver is not None:
                 # Stopp streaming eksplisitt FYRST (frigjer EP2)
                 if _driver.streamer:
@@ -663,36 +678,38 @@ def rekoble_driver():
                     log.error(f"Ny tilkobling feilet: {e}")
                     ok = False
 
-            # (rekoble resultat handtert nedanfor)
-            if ok:
-                info = _driver.hent_status()
-                server_status.update({
-                    "kjorer": True,
-                    "tilkoblet": True,
-                    "enhet_navn": info.get("enhetsstreng", ""),
-                    "serienummer": info.get("serienummer", ""),
-                    "slot_info": info.get("slotter", []),
-                    "kanaler": [
-                        f"Kanal {s['kanal']}" for s in info.get("slotter", []) if s.get("aktiv")
-                    ],
-                    "feil": None,
-                })
-                # Restart kontinuerleg streaming etter rekonnektering
-                if _driver.ep2_ok and not _driver.streamer:
-                    try:
-                        _driver.start_streaming(callback=_global_data_callback)
-                        server_status["streamer"] = True
-                        log.info("Streaming restarta etter rekobling")
-                    except SiriusFeil as e:
-                        log.warning(f"Kunne ikkje starte streaming etter rekobling: {e}")
-                elif not _driver.ep2_ok:
-                    server_status["feil"] = "EP2 timeout - klikk Gjenoppliv EP2"
-                    log.warning("EP2 svarte ikkje etter rekobling - prøv Gjenoppliv EP2 i web UI")
-
-                return True, "Rekoblet"
-            else:
+            if not ok:
                 server_status["feil"] = "Rekobling feilet"
                 return False, "Rekobling feilet"
+
+            # Oppdater status
+            info = _driver.hent_status()
+            server_status.update({
+                "kjorer": True,
+                "tilkoblet": True,
+                "enhet_navn": info.get("enhetsstreng", ""),
+                "serienummer": info.get("serienummer", ""),
+                "slot_info": info.get("slotter", []),
+                "kanaler": [
+                    f"Kanal {s['kanal']}" for s in info.get("slotter", []) if s.get("aktiv")
+                ],
+                "feil": None,
+            })
+
+            # Start streaming (EP2 recovery skjer automatisk i koble_til)
+            if _driver.ep2_ok and not _driver.streamer:
+                try:
+                    _driver.start_streaming(callback=_global_data_callback)
+                    _siste_stopp_event = _driver._stopp_event
+                    server_status["streamer"] = True
+                    log.info("Streaming restarta etter rekobling")
+                except SiriusFeil as e:
+                    log.warning(f"Kunne ikkje starte streaming etter rekobling: {e}")
+            elif not _driver.ep2_ok:
+                server_status["feil"] = "EP2 ikkje klar - prøv igjen om litt"
+                log.warning("EP2 svarte ikkje etter rekobling")
+
+            return True, "Rekoblet" + (" + streaming" if _driver.streamer else "")
         except SiriusFeil as e:
             server_status["feil"] = str(e)
             return False, str(e)
@@ -700,7 +717,7 @@ def rekoble_driver():
 
 def start_server(args):
     """Start SIRIUS server med direkte USB-tilkobling."""
-    global server_status, _driver, _maaler, _args
+    global server_status, _driver, _maaler, _args, _siste_stopp_event
 
     log.info("=" * 60)
     log.info("  SIRIUS Server - Direkte USB")
@@ -797,6 +814,7 @@ def start_server(args):
         # Aldri stopp/start-syklus - det skapar EBUSY ved rekonnektering.
         try:
             _driver.start_streaming(callback=_global_data_callback)
+            _siste_stopp_event = _driver._stopp_event  # For orphan-cleanup
             server_status["streamer"] = True
             log.info("Kontinuerleg streaming starta (EP2 → openDAQ + web UI)")
         except SiriusFeil as e:

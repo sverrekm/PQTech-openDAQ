@@ -118,6 +118,7 @@ class SiriusDriver:
         self._siste_data = {}
         self._siste_data_lock = threading.Lock()
         self._ep2_ok = False
+        self._treng_heartbeat = False  # Sett True etter _start_acquisition()
 
     @property
     def enhetsinfo(self) -> EnhetsInfo:
@@ -747,6 +748,7 @@ class SiriusDriver:
             SiriusUSBFeil: Ved USB-feil
         """
         proto = self._proto
+        self._treng_heartbeat = True  # Etter start-acquisition treng SIRIUS heartbeat
         log.info("Start-acquisition sekvens (35 steg)...")
 
         # Steg 1: A4 00 (pre-start modus)
@@ -1088,20 +1090,21 @@ class SiriusDriver:
         )
         self._adc_traad.start()
 
-        # Start heartbeat-traad (AE telemetri + EP4 ctrl).
-        # DewesoftX sender AE-heartbeats kontinuerleg under streaming.
-        # SIRIUS treng dette for å halde EP2 ADC-data gåande —
-        # utan heartbeat stoppar streaming etter kort tid.
-        # EP1 (cmd) og EP2 (data) er uavhengige USB-endepunkt
-        # og kan brukast samtidig utan konflikt.
-        self._heartbeat_traad = threading.Thread(
-            target=self._heartbeat_loop,
-            name="sirius-heartbeat",
-            daemon=True,
-        )
-        self._heartbeat_traad.start()
-
-        log.info("Streaming starta (ADC + heartbeat)")
+        # Heartbeat (AE telemetri) berre etter start-acquisition.
+        # I factory-default modus streamer EP2 av seg sjølv — heartbeat
+        # på EP1 DREP EP2 ved å forstyrre SIRIUS sin idle-tilstand.
+        # Etter start-acquisition treng SIRIUS heartbeat for å halde
+        # EP2 gåande (DewesoftX sender AE kontinuerleg).
+        if self._treng_heartbeat:
+            self._heartbeat_traad = threading.Thread(
+                target=self._heartbeat_loop,
+                name="sirius-heartbeat",
+                daemon=True,
+            )
+            self._heartbeat_traad.start()
+            log.info("Streaming starta (ADC + heartbeat)")
+        else:
+            log.info("Streaming starta (ADC, heartbeat av — factory-default EP2)")
 
     def stopp_streaming(self):
         """Stopp streaming og vent paa at traader avslutter."""
