@@ -340,6 +340,19 @@ class SiriusDriver:
 
         dev = usb.core.find(idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID)
         if dev is None:
+            # pyusb brukar ein global libusb-kontekst som kan ha stale cache
+            # etter USB reset/power-cycle.  Prøv fersk kontekst.
+            log.info("  Standard pyusb finn ikkje — prøver fersk libusb-kontekst...")
+            try:
+                import usb.backend.libusb1
+                fresh_be = usb.backend.libusb1.get_backend()
+                dev = usb.core.find(
+                    idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
+                    backend=fresh_be,
+                )
+            except Exception:
+                pass
+        if dev is None:
             raise SiriusIkkeFunnet(
                 f"SIRIUS ikkje funnet paa USB "
                 f"(VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})"
@@ -360,7 +373,42 @@ class SiriusDriver:
             dev.set_configuration()
             log.info("  set_configuration() OK")
         except usb.core.USBError as e:
-            if "Resource busy" in str(e) or "errno 16" in str(e).lower():
+            feil_str = str(e).lower()
+            if "errno 19" in feil_str or "no such device" in feil_str:
+                # Stale handle — devicet har ny adresse etter reset/power-cycle.
+                # Forkast stale handle og finn eininga på nytt med fersk kontekst.
+                log.warning("  set_configuration ENODEV — stale handle, prøver fersk kontekst...")
+                try:
+                    usb.util.dispose_resources(dev)
+                except Exception:
+                    pass
+                try:
+                    import usb.backend.libusb1
+                    fresh_be = usb.backend.libusb1.get_backend()
+                    dev = usb.core.find(
+                        idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
+                        backend=fresh_be,
+                    )
+                    if dev is None:
+                        raise SiriusIkkeFunnet(
+                            f"SIRIUS forsvann etter ENODEV "
+                            f"(VID=0x{DEWESOFT_VID:04X}, PID=0x{SIRIUS_PID:04X})"
+                        )
+                    log.info(f"  Fann SIRIUS på nytt: Bus {dev.bus}, Adresse {dev.address}")
+                    try:
+                        if dev.is_kernel_driver_active(0):
+                            dev.detach_kernel_driver(0)
+                    except (usb.core.USBError, NotImplementedError):
+                        pass
+                    dev.set_configuration()
+                    log.info("  set_configuration() OK (fersk kontekst)")
+                except (SiriusIkkeFunnet, SiriusUSBFeil):
+                    raise
+                except Exception as e2:
+                    raise SiriusUSBFeil(
+                        f"set_configuration feilet etter fersk kontekst: {e2}"
+                    ) from e2
+            elif "resource busy" in feil_str or "errno 16" in feil_str:
                 log.info("  set_configuration EBUSY - frigjor interface og prøver igjen")
                 try:
                     usb.util.release_interface(dev, 0)

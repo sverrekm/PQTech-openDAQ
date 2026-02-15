@@ -659,7 +659,6 @@ def rekoble_driver():
                     _siste_stopp_event = None
 
                 # Vent til eventuelle orphan sirius-trådar er ferdige.
-                # Med ENODEV-fix stoppar dei nesten umiddelbart når eininga er borte.
                 sirius_threads = [
                     t for t in threading.enumerate()
                     if t.name in ("sirius-adc", "sirius-heartbeat") and t.is_alive()
@@ -671,7 +670,36 @@ def rekoble_driver():
                         t.join(timeout=3)
                     framleis = [t for t in sirius_threads if t.is_alive()]
                     if framleis:
-                        log.warning(f"Rekoble: {len(framleis)} tråd(ar) lever framleis!")
+                        # Orphan-trådar blokkerer på USB I/O og kan ikkje sjekke
+                        # stopp-event.  Finn eininga og send USB reset for å tvinge
+                        # ENODEV på alle blokkerande operasjonar.
+                        log.warning(
+                            f"Rekoble: {len(framleis)} tråd(ar) lever framleis — "
+                            "tvingar avslutning med USB reset..."
+                        )
+                        try:
+                            import usb.core as _usb
+                            import usb.util as _usb_util
+                            _tmp_dev = _usb.find(idVendor=0x1CED, idProduct=0x1002)
+                            if _tmp_dev is not None:
+                                _tmp_dev.reset()
+                                log.info("USB reset sendt — ventar på orphan-trådar...")
+                                try:
+                                    _usb_util.dispose_resources(_tmp_dev)
+                                except Exception:
+                                    pass
+                                time.sleep(1)
+                                for t in framleis:
+                                    t.join(timeout=3)
+                                framleis2 = [t for t in framleis if t.is_alive()]
+                                if framleis2:
+                                    log.error(f"Rekoble: {len(framleis2)} tråd(ar) nektar å dø!")
+                                else:
+                                    log.info("Rekoble: orphan-trådar avslutta etter USB reset")
+                            else:
+                                log.warning("Rekoble: USB-enhet ikkje funnen for reset")
+                        except Exception as e:
+                            log.error(f"Rekoble: USB reset feilet: {e}")
                     else:
                         log.info("Rekoble: alle orphan-trådar avslutta")
 
