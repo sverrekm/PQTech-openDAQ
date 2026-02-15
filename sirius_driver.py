@@ -822,6 +822,20 @@ class SiriusDriver:
         except SiriusPollTimeout:
             log.warning("  Reg 0x02 trigger: poll timeout (EP2 kan likevel starte)")
 
+        # Steg 36: Register 0x03 — "streaming confirmed" signal
+        # DewesoftX sender dette 0.22s etter reg 0x02, etter at EP2-data
+        # allereie har begynt å strøyme. Handshake som fortel SIRIUS at
+        # hosten mottek data og er klar.
+        time.sleep(0.2)
+        log.info("  Steg 36: reg 0x03 (streaming confirmed)...")
+        confirm_cmd = bytes.fromhex('ad3f0c00000003ffffffffffffffff')
+        try:
+            proto.send_ad_raa_og_poll(confirm_cmd, maks_forsok=100,
+                                      er_skriving=True)
+            log.info("  Reg 0x03 confirm FULLFOERT")
+        except SiriusPollTimeout:
+            log.warning("  Reg 0x03 confirm: poll timeout (held fram)")
+
         log.info("Start-acquisition sekvens sendt")
 
     # ---- Initialisering (repliserer DewesoftX-sekvensen) ----
@@ -1232,27 +1246,46 @@ class SiriusDriver:
                 self._stopp_event.wait(timeout=1.0)
 
     def _heartbeat_loop(self):
-        """Bakgrunnstraad: send AE telemetri + les EP4 periodisk."""
+        """Bakgrunnstraad: send B1 poll (heartbeat) kontinuerleg + AE telemetri.
+
+        pcapng-analyse av DewesoftX viser to parallelle EP1-operasjonar:
+          - 0xB1 poll: ~120-200/sek (held EP2 ADC-straumen aktiv)
+          - 0xAE 1F 0C telemetri: ~9.5 Hz (instrument-helse/temperatur)
+
+        Tidlegare brukte vi KUN 0xAE kvart 2. sek — feil opcode, feil rate.
+        """
+        feil_teller = 0
+        poll_teller = 0
+        ae_intervall = 10  # Send AE kvar 10. B1-poll (~10 Hz ved ~100 polls/sek)
         while not self._stopp_event.is_set():
             try:
-                self._proto.send_telemetri()
+                # Hovud-heartbeat: B1 poll med kort timeout
+                self._proto.poll_b1(timeout=10)
+                feil_teller = 0
+                poll_teller += 1
+
+                # Periodisk AE telemetri (~10 Hz, som DewesoftX)
+                if poll_teller % ae_intervall == 0:
+                    try:
+                        self._proto.send_telemetri()
+                    except SiriusUSBFeil:
+                        pass  # AE-feil er ikkje kritisk
+
+                # Logg rate kvart 5. sekund
+                if poll_teller % 500 == 0:
+                    log.debug(f"Heartbeat: {poll_teller} B1-polls sendt")
+
             except SiriusUSBFeil as e:
                 feil_str = str(e).lower()
                 if "errno 19" in feil_str or "no such device" in feil_str:
                     log.error(f"Heartbeat: Eining borte (ENODEV) — stoppar: {e}")
                     break
-                log.debug(f"Heartbeat telemetri feilet: {e}")
-
-            try:
-                self._proto.les_ctrl_data(timeout=500)
-            except SiriusUSBFeil as e:
-                feil_str = str(e).lower()
-                if "errno 19" in feil_str or "no such device" in feil_str:
-                    log.error(f"Heartbeat ctrl: Eining borte (ENODEV) — stoppar: {e}")
+                feil_teller += 1
+                if feil_teller >= 5:
+                    log.error(f"Heartbeat: {feil_teller} feil på rad — stoppar: {e}")
                     break
-
-            # Vent 2 sekunder mellom heartbeats
-            self._stopp_event.wait(timeout=2.0)
+                log.debug(f"Heartbeat B1-feil ({feil_teller}): {e}")
+                self._stopp_event.wait(timeout=0.1)
 
     @staticmethod
     def _deinterlev_data(raa_bytes, antall_kanaler=ADC_KANALER):

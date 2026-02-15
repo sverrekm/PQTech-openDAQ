@@ -240,8 +240,33 @@ class SiriusProtokoll:
         return svar
 
     def send_telemetri(self):
-        """Send AE telemetri-kommando (heartbeat) og les svar."""
+        """Send AE telemetri-kommando (heartbeat) og les svar.
+
+        MERK: DewesoftX bruker IKKJE 0xAE for heartbeat under streaming.
+        DewesoftX sender 0xB1 (poll) kontinuerleg (~120-200/sek).
+        Denne metoden brukast berre under init/diagnostikk.
+        """
         return self.send_raa_kommando(bytes([OPCODE_TELEMETRI, 0x1F, 0x0C]))
+
+    def poll_b1(self, timeout=10):
+        """Send B1 poll-kommando (heartbeat) med kort timeout.
+
+        DewesoftX sender dette ~120-200 gonger/sek under streaming.
+        Returnerer svar-bytes eller None viss timeout/ingen data.
+        """
+        with self._cmd_lock:
+            try:
+                self._dev.write(EP_CMD_OUT, bytes([OPCODE_POLL]), timeout=100)
+            except Exception as e:
+                raise SiriusUSBFeil(f"B1 poll write feilet: {e}") from e
+            try:
+                svar = self._dev.read(EP_CMD_IN, 64, timeout=timeout)
+                return bytes(svar)
+            except Exception as e:
+                feil_str = str(e).lower()
+                if "timeout" in feil_str or "timed out" in feil_str:
+                    return None  # Ingen data — normalt
+                raise SiriusUSBFeil(f"B1 poll read feilet: {e}") from e
 
     def send_prestart(self):
         """Send A4 00 pre-start kommando (foer start-sekvens)."""
