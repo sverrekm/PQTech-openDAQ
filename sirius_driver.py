@@ -616,8 +616,8 @@ class SiriusDriver:
                 ["uhubctl", "-l", bus, "-p", port, "-a", "on"],
                 capture_output=True, timeout=10
             )
-            log.info(f"  uhubctl: port {port} power ON - ventar på enumerering (8s)...")
-            time.sleep(8)  # Lenger vent: FX2 treng tid til firmware-lasting
+            log.info(f"  uhubctl: port {port} power ON - ventar på enumerering...")
+            time.sleep(2)  # Kort basisvent — kallaren handterer sysfs-polling
 
             # Trigger udev re-skanning og vent til device-noder er klare
             try:
@@ -678,17 +678,21 @@ class SiriusDriver:
         log.info("  (reverse-engineered fraa DewesoftX pcapng 2026-02-14)")
         log.info("=" * 60)
 
+        # Frigjer eksisterande USB-handle for rein start.
+        # Utan dette får strategi 1-2 EBUSY fordi det gamle handlet
+        # framleis held interfacet klaimet etter stopp_streaming().
+        self._frigjer_dev()
+        try:
+            self._koble_til_intern()
+        except Exception as e:
+            log.error(f"Kan ikkje koble til: {e}")
+            return False
+
         # ============================================================
         # STRATEGI 1: Start-acquisition sekvens direkte
         # Sender dei 35 register-kommandoane som DewesoftX brukar
         # for aa starte EP2 ADC-streaming (reg 0x02 trigger).
         # ============================================================
-        if not self._tilkoblet or self._proto is None:
-            try:
-                self._koble_til_intern()
-            except Exception as e:
-                log.error(f"Kan ikkje koble til: {e}")
-                return False
 
         log.info("Strategi 1/4: Start-acquisition sekvens (direkte)...")
         try:
@@ -758,26 +762,36 @@ class SiriusDriver:
         try:
             self._frigjer_dev()
             if self._uhubctl_power_cycle():
-                # Etter power-cycle treng devicet tid til FX2 firmware-lasting.
-                # RPi 5 USB3-hub kan vere treg — bruk fleire forsøk med
-                # aukande ventetid og tvinga libusb-refresh mellom kvar.
+                # Etter power-cycle treng FX2 tid til firmware-lasting.
+                # Vent til devicet dukkar opp i sysfs FØRST — dette unngår
+                # at pyusb finn eit stale handle som gjev ENODEV og
+                # øydelegg libusb sin interne device-liste.
+                sysfs_ok = False
+                for vent in range(8):
+                    if self._finn_sysfs_sti() is not None:
+                        log.info(f"  uhubctl: enhet synleg i sysfs (etter {vent}s)")
+                        sysfs_ok = True
+                        break
+                    time.sleep(1)
+                if not sysfs_ok:
+                    log.warning("  uhubctl: enhet dukka ikkje opp i sysfs")
+
+                # Ekstra ventetid etter sysfs — FX2 firmware treng tid
+                # til å fullføre init før set_configuration() fungerer.
+                time.sleep(3)
+
                 for forsok in range(5):
-                    # Tvinga libusb til å re-skanne USB-bussen
-                    try:
-                        usb.core.find(find_all=True)
-                    except Exception:
-                        pass
                     try:
                         self._koble_til_intern()
                         break
                     except SiriusIkkeFunnet:
-                        log.info(f"  uhubctl: enhet ikkje funne enno (forsoek {forsok+1}/5)...")
+                        log.info(f"  uhubctl: pyusb finn ikkje enno (forsoek {forsok+1}/5)...")
                         time.sleep(3)
                     except Exception as e:
-                        # ENODEV = stale handle frå gammal adresse — frigjer og prøv att
+                        # ENODEV = FX2 ikkje klar enno — frigjer stale handle og vent
                         log.warning(f"  uhubctl tilkobling forsoek {forsok+1}: {e}")
                         self._frigjer_dev()
-                        time.sleep(3)
+                        time.sleep(4)
                 if self._ep2_ok:
                     self._strategi_logg.registrer_suksess("4a_uhubctl_åleine")
                     log.info("SUKSESS: Strategi 4a (uhubctl åleine)")
