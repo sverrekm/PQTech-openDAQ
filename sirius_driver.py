@@ -364,8 +364,21 @@ class SiriusDriver:
                         idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
                         backend=fresh_be,
                     )
-                except Exception:
-                    pass
+                    if dev is None:
+                        # Diagnostikk: list ALLE USB-einingar libusb kan sjå
+                        alle = list(usb.core.find(
+                            find_all=True, backend=fresh_be,
+                        ) or [])
+                        log.warning(
+                            f"  libusb ser {len(alle)} einingar, "
+                            f"ingen med VID=0x{DEWESOFT_VID:04X}: "
+                            + ", ".join(
+                                f"{d.idVendor:04x}:{d.idProduct:04x}"
+                                for d in alle[:10]
+                            )
+                        )
+                except Exception as e:
+                    log.warning(f"  Fersk libusb-kontekst feilet: {e}")
         if dev is None:
             raise SiriusIkkeFunnet(
                 f"SIRIUS ikkje funnet paa USB "
@@ -441,10 +454,47 @@ class SiriusDriver:
                     dev.set_configuration()
                     log.info("  set_configuration() OK (etter release)")
                 except usb.core.USBError as e2:
-                    if "Resource busy" in str(e2) or "errno 16" in str(e2).lower():
-                        log.info("  set_configuration: framleis busy, held fram likevel")
-                    else:
+                    if "Resource busy" not in str(e2) and "errno 16" not in str(e2).lower():
                         raise SiriusUSBFeil(f"set_configuration feilet: {e2}") from e2
+                    # EBUSY vedvarer — ein annan prosess/tråd held interfacet.
+                    # dev.reset() tvingar kernel til å frigjere ALLE interface-claims.
+                    log.warning("  EBUSY vedvarer — tvingar frigjering med dev.reset()...")
+                    try:
+                        dev.reset()
+                        time.sleep(2)
+                        try:
+                            usb.util.dispose_resources(dev)
+                        except Exception:
+                            pass
+                        from usb.backend import libusb1 as _libusb1
+                        fresh_be = _libusb1.get_backend()
+                        dev = usb.core.find(
+                            idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
+                            backend=fresh_be,
+                        )
+                        if dev is None:
+                            if SiriusDriver._sikre_dev_node():
+                                fresh_be = _libusb1.get_backend()
+                                dev = usb.core.find(
+                                    idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
+                                    backend=fresh_be,
+                                )
+                        if dev is None:
+                            raise SiriusIkkeFunnet(
+                                "SIRIUS forsvann etter EBUSY-reset"
+                            )
+                        try:
+                            if dev.is_kernel_driver_active(0):
+                                dev.detach_kernel_driver(0)
+                        except (usb.core.USBError, NotImplementedError):
+                            pass
+                        dev.set_configuration()
+                        log.info(f"  set_configuration() OK (etter dev.reset, "
+                                 f"Bus {dev.bus} Adr {dev.address})")
+                    except (SiriusIkkeFunnet, SiriusUSBFeil):
+                        raise
+                    except Exception as e3:
+                        log.warning(f"  dev.reset EBUSY-recovery feilet: {e3} — held fram likevel")
             else:
                 raise SiriusUSBFeil(f"set_configuration feilet: {e}") from e
 
@@ -501,6 +551,7 @@ class SiriusDriver:
         """
         dev_dir = SiriusDriver._finn_sysfs_sti()
         if dev_dir is None:
+            log.info("  _sikre_dev_node: SIRIUS ikkje i sysfs")
             return False
 
         try:
@@ -510,15 +561,35 @@ class SiriusDriver:
             log.debug(f"  Kan ikkje lese busnum/devnum fraa sysfs: {e}")
             return False
 
+        log.info(f"  sysfs: {dev_dir.name} → bus={busnum} dev={devnum}")
+
         dev_path = Path(f"/dev/bus/usb/{busnum:03d}/{devnum:03d}")
+        bus_dir = dev_path.parent
+
+        # List kva som finst i /dev/bus/usb/BBB/ for diagnostikk
+        if bus_dir.exists():
+            try:
+                nodar = sorted(bus_dir.iterdir())
+                log.info(f"  /dev/bus/usb/{busnum:03d}/: "
+                         f"{', '.join(n.name for n in nodar) or '(tom)'}")
+            except Exception:
+                pass
+
         if dev_path.exists():
-            log.debug(f"  /dev node eksisterer: {dev_path}")
+            # Verifiser at vi kan opne fila (ikkje stale/ubrukeleg)
+            import os
+            try:
+                fd = os.open(str(dev_path), os.O_RDWR)
+                os.close(fd)
+                log.info(f"  /dev node OK: {dev_path} (open+close OK)")
+            except OSError as e:
+                log.warning(f"  /dev node finst men kan ikkje opnast: {dev_path}: {e}")
             return True
 
         # Opprett katalog og device-node
         log.info(f"  /dev/bus/usb/{busnum:03d}/{devnum:03d} manglar — opprettar med mknod...")
         try:
-            dev_path.parent.mkdir(parents=True, exist_ok=True)
+            bus_dir.mkdir(parents=True, exist_ok=True)
             # USB device nodes: major=189, minor=(bus-1)*128+(dev-1)
             minor = (busnum - 1) * 128 + (devnum - 1)
             subprocess.run(
