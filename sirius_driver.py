@@ -344,8 +344,8 @@ class SiriusDriver:
             # etter USB reset/power-cycle.  Prøv fersk kontekst.
             log.info("  Standard pyusb finn ikkje — prøver fersk libusb-kontekst...")
             try:
-                import usb.backend.libusb1
-                fresh_be = usb.backend.libusb1.get_backend()
+                from usb.backend import libusb1 as _libusb1
+                fresh_be = _libusb1.get_backend()
                 dev = usb.core.find(
                     idVendor=DEWESOFT_VID, idProduct=SIRIUS_PID,
                     backend=fresh_be,
