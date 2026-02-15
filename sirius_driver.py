@@ -705,8 +705,8 @@ class SiriusDriver:
         """Proev aa koble til paa nytt.
 
         Stoppar streaming, frigjer USB-handle, og koplar til på nytt.
-        Bruker koble_til() som inkluderer auto start-acquisition viss
-        EP2 ikkje svarer etter tilkobling.
+        Bruker koble_til() som inkluderer auto start-acquisition.
+        Viss EP2 framleis feilar, prøver USB reset + koble_til() som fallback.
         """
         log.info("Rekoble: stoppar streaming og frigjer USB...")
         try:
@@ -720,6 +720,20 @@ class SiriusDriver:
 
             # 3. Koble til att (inkl. auto start-acquisition viss EP2 feilar)
             self.koble_til()
+
+            # 4. Viss EP2 framleis ikkje fungerer: prøv USB reset som fallback
+            if not self._ep2_ok:
+                log.info("Rekoble: EP2 framleis nede — prøver USB reset...")
+                if self._dev is not None:
+                    try:
+                        self._dev.reset()
+                        log.info("  USB RESET sendt — ventar på FX2 reboot...")
+                    except Exception as e:
+                        log.warning(f"  USB reset feilet: {e}")
+                    self.koble_fra()
+                    time.sleep(3)  # FX2 treng tid etter reset
+                    self.koble_til()
+
             return True
         except SiriusFeil as e:
             self._rekoble_forsok += 1
