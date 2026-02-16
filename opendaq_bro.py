@@ -50,13 +50,15 @@ class OpenDAQBro:
     DewesoftX finn eininga via openDAQ mDNS-oppdaging.
     """
 
-    def __init__(self, module_path=None):
+    def __init__(self, module_path=None, serienummer="", enhetsnamn=""):
         self._instance = None
         self._device = None
         self._tilgjengelig = False
         self._module_path = module_path or os.environ.get(
             "OPENDAQ_MODULE_PATH", "/usr/local/lib"
         )
+        self._serienummer = serienummer
+        self._enhetsnamn = enhetsnamn
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
         self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
@@ -113,6 +115,26 @@ class OpenDAQBro:
             # og referanse-eininga er ei sub-eining under den.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
+
+            # Sett enhetsinfo (serienummer, MAC, produsent) paa root instance.
+            # MÅ gjerast FØR build() — etterpaa er DeviceInfo frozen/umuterleg.
+            try:
+                mac = self._hent_mac()
+                dev_info = _daq.DeviceInfoConfig(
+                    self._enhetsnamn or "PQTech SIRIUS Bridge",
+                    "daqref://device0"
+                )
+                if self._serienummer:
+                    dev_info.serial_number = self._serienummer
+                dev_info.manufacturer = "Dewesoft / PQTech"
+                dev_info.model = "SIRIUSi-HS"
+                dev_info.mac_address = mac
+                dev_info.platform = "RaspberryPi"
+                builder.default_root_device_info = dev_info
+                log.info(f"  DeviceInfo: sn={self._serienummer}, mac={mac}")
+            except Exception as e:
+                log.warning(f"  DeviceInfo-konfig feilet (ikkje kritisk): {e}")
+
             self._instance = builder.build()
             log.info("  Instance oppretta")
 
@@ -240,6 +262,24 @@ class OpenDAQBro:
             with self._lock:
                 self._status["feil"] = feil_msg
             return False
+
+    def oppdater_enhetsinfo(self, serienummer="", enhetsnamn=""):
+        """Oppdater serienummer/enhetsnamn etter oppstart (t.d. naar driver koplar til).
+
+        Prøver set_property_value paa instance.info — fungerer berre viss
+        DeviceInfo ikkje er fullstendig frozen.
+        """
+        if not self._instance:
+            return
+        try:
+            info = self._instance.info
+            if serienummer:
+                info.set_property_value("serialNumber", serienummer)
+                log.info(f"  DeviceInfo oppdatert: serialNumber={serienummer}")
+            if enhetsnamn:
+                info.set_property_value("name", enhetsnamn)
+        except Exception as e:
+            log.debug(f"  oppdater_enhetsinfo: set_property_value feilet (forventa viss frozen): {e}")
 
     def oppdater_data(self, kanal_data):
         """
@@ -377,20 +417,21 @@ class OpenDAQBro:
         self._device = None
         log.info("openDAQ nettverksbro stoppa")
 
-    # Kanalopsett (SIRIUSi-HS, 8xAI — alle kanalar er spenning)
-    # AI 1-3: Spenning 230V RMS (325V topp), 50 Hz
-    # AI 4:   Ikkje tilkobla
-    # AI 5-7: Spenning 230V RMS (325V topp), 50 Hz
-    # AI 8:   Ikkje tilkobla
+    # Kanalopsett (SIRIUSi-HS, 4×Hi-LV + 4×Lo-LV)
+    # AI 1-3: Hi-LV, spenning 230V RMS (325V topp), 50 Hz
+    # AI 4:   Hi-LV, ikkje tilkobla
+    # AI 5-7: Lo-LV, integrator 0-3V → 0-6000A (5V-driven)
+    #         Lo-LV ADC ±5V, faktor 2000 A/V → range ±10000A
+    # AI 8:   Lo-LV, ikkje tilkobla
     SUNDET_KANALAR = [
-        {"namn": "AI 1", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 2", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 3", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 4", "amplitude": 0.0,   "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 5", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 6", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 7", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 8", "amplitude": 0.0,   "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 1", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
+        {"namn": "AI 2", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
+        {"namn": "AI 3", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
+        {"namn": "AI 4", "amplitude": 0.0,   "freq": 50.0, "range": (-1600, 1600)},
+        {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
+        {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
+        {"namn": "AI 7", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
+        {"namn": "AI 8", "amplitude": 0.0,   "freq": 50.0, "range": (-10000, 10000)},
     ]
 
     def _konfig_kanalar(self):
@@ -607,3 +648,26 @@ class OpenDAQBro:
             return ip
         except Exception:
             return "127.0.0.1"
+
+    @staticmethod
+    def _hent_mac():
+        """Finn MAC-adresse for fyrste ikkje-loopback nettverksinterface.
+
+        Fungerer paa Linux (Raspberry Pi) via /sys/class/net/.
+        Fallback til uuid.getnode() på andre plattformer.
+        """
+        import pathlib
+        net_dir = pathlib.Path("/sys/class/net")
+        if net_dir.exists():
+            for iface in sorted(net_dir.iterdir()):
+                if iface.name == "lo":
+                    continue
+                addr_file = iface / "address"
+                if addr_file.exists():
+                    mac = addr_file.read_text().strip()
+                    if mac and mac != "00:00:00:00:00:00":
+                        return mac
+        # Fallback
+        import uuid
+        raw = uuid.getnode()
+        return ':'.join(f'{(raw >> (8 * i)) & 0xFF:02x}' for i in range(5, -1, -1))

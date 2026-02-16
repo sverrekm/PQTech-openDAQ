@@ -467,7 +467,9 @@ def restart_opendaq_bro():
     time.sleep(2)
 
     try:
-        _opendaq_bro = OpenDAQBro()
+        sn = server_status.get("serienummer", "")
+        enamn = server_status.get("enhet_navn", "")
+        _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn)
         ok = _opendaq_bro.start()
         if ok:
             _opendaq_feil = None
@@ -769,6 +771,13 @@ def rekoble_driver():
                 "feil": None,
             })
 
+            # Oppdater openDAQ bridge med nytt serienummer
+            if _opendaq_bro and info.get("serienummer"):
+                _opendaq_bro.oppdater_enhetsinfo(
+                    serienummer=info.get("serienummer", ""),
+                    enhetsnamn=info.get("enhetsstreng", ""),
+                )
+
             # Start streaming (EP2 recovery skjer automatisk i koble_til)
             if _driver.ep2_ok and not _driver.streamer:
                 try:
@@ -867,7 +876,11 @@ def start_server(args):
     global _opendaq_bro, _opendaq_feil
     try:
         log.info("Startar openDAQ nettverksbro...")
-        _opendaq_bro = OpenDAQBro()
+        # Send SIRIUS serienummer og enhetsnamn til openDAQ bridge
+        # slik at DewesoftX kan sjaa dei via OPC-UA device info.
+        sn = server_status.get("serienummer", "")
+        enamn = server_status.get("enhet_namn", "")
+        _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn)
         ok = _opendaq_bro.start()
         if ok:
             log.info("openDAQ bridge starta OK")

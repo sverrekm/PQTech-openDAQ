@@ -52,34 +52,69 @@ class KanalKonfig:
         )
 
 
-# Standard-konfigurasjon (SIRIUSi-HS, 8xAI — alle kanalar er spenning)
-# ADC-konfig (reg 0x82) er identisk for alle 8 kanalar, og int16
-# full-skala (32768) tilsvarer range_max ved BNC-inngangen.
-# Juster range_min/range_max til aa matche SIRIUS-modulens faktiske
-# maskinvarerange (t.d. HV ±500V, LV ±5V).
+# Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
+# Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
+KONFIG_VERSJON = 3  # v3: kanal 1-4 HV ±1600V, kanal 5-7 LV integrator 0-6000A
+
+# Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
+#
+# Kanal 1-4: Hi-LV (høgspenning) — direkte spenningsmåling
+#   ADC int16 full-skala = ±1600V (verifisert: RMS 4596 × 1600/32768 ≈ 224V)
+#
+# Kanal 5-7: Lo-LV (lågspenning) — integrator for straummåling
+#   Integrator: 5V-driven, 0-3V utgang → 0-6000A
+#   Lo-LV ADC-range: ±5V (anteke)
+#   Skalering: faktor = 6000A / 3V = 2000 A/V
+#   Kombinert range_max: 5V × 2000 = 10000A
+#   Formel: straum_A = raw_int16 × (10000 / 32768)
+#
+# Kanal 8: Lo-LV, ikkje tilkobla
 STANDARD_KONFIG: List[KanalKonfig] = [
-    KanalKonfig(0, "AI 1", True,  "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(1, "AI 2", True,  "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(2, "AI 3", True,  "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(3, "AI 4", False, "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(4, "AI 5", True,  "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(5, "AI 6", True,  "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(6, "AI 7", True,  "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(7, "AI 8", False, "voltage", -500.0, 500.0, "V", 1000),
+    KanalKonfig(0, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(1, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(2, "AI 3", True,  "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(3, "AI 4", False, "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(4, "AI 5", True,  "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(5, "AI 6", True,  "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(6, "AI 7", True,  "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(7, "AI 8", False, "current", -10000.0, 10000.0, "A", 1000),
 ]
 
 
 def les_konfig() -> List[KanalKonfig]:
-    """Les kanal-konfigurasjon frå JSON-fil. Returnerer standard viss fila ikkje finst."""
+    """Les kanal-konfigurasjon frå JSON-fil. Returnerer standard viss fila ikkje finst.
+
+    Sjekkar konfig-versjon: viss lagra konfig har lågare versjon enn
+    KONFIG_VERSJON, vert den erstatta med ny standard og lagra.
+    """
     try:
         if KONFIG_STI.exists():
-            data = json.loads(KONFIG_STI.read_text(encoding='utf-8'))
-            if isinstance(data, list):
+            raa = json.loads(KONFIG_STI.read_text(encoding='utf-8'))
+
+            # Støtt både gamalt format (liste) og nytt format (dict med versjon)
+            if isinstance(raa, dict):
+                lagra_versjon = raa.get("versjon", 0)
+                data = raa.get("kanalar", [])
+            elif isinstance(raa, list):
+                lagra_versjon = 0
+                data = raa
+            else:
+                lagra_versjon = 0
+                data = []
+
+            # Viss lagra versjon er utdatert, bruk ny standard
+            if lagra_versjon < KONFIG_VERSJON:
+                log.info(f"Konfig-versjon {lagra_versjon} < {KONFIG_VERSJON}, "
+                         f"oppgraderer til ny standard")
+                ny = [KanalKonfig(**asdict(k)) for k in STANDARD_KONFIG]
+                lagre_konfig(ny)
+                return ny
+
+            if isinstance(data, list) and len(data) == 8:
                 konfig = [KanalKonfig.fraa_dict(d) for d in data]
-                if len(konfig) == 8:
-                    log.info(f"Lasta kanal-konfig fraa {KONFIG_STI}")
-                    return konfig
-                log.warning(f"Konfig har {len(konfig)} kanalar (forventa 8), brukar standard")
+                log.info(f"Lasta kanal-konfig v{lagra_versjon} fraa {KONFIG_STI}")
+                return konfig
+            log.warning(f"Konfig har {len(data)} kanalar (forventa 8), brukar standard")
     except Exception as e:
         log.warning(f"Kunne ikkje lese kanal-konfig: {e}")
 
@@ -87,15 +122,18 @@ def les_konfig() -> List[KanalKonfig]:
 
 
 def lagre_konfig(konfig: List[KanalKonfig]) -> bool:
-    """Lagre kanal-konfigurasjon til JSON-fil."""
+    """Lagre kanal-konfigurasjon til JSON-fil (med versjonsnummer)."""
     try:
         KONFIG_STI.parent.mkdir(parents=True, exist_ok=True)
-        data = [k.til_dict() for k in konfig]
+        data = {
+            "versjon": KONFIG_VERSJON,
+            "kanalar": [k.til_dict() for k in konfig],
+        }
         KONFIG_STI.write_text(
             json.dumps(data, indent=2, ensure_ascii=False),
             encoding='utf-8'
         )
-        log.info(f"Lagra kanal-konfig til {KONFIG_STI}")
+        log.info(f"Lagra kanal-konfig v{KONFIG_VERSJON} til {KONFIG_STI}")
         return True
     except Exception as e:
         log.error(f"Kunne ikkje lagre kanal-konfig: {e}")
