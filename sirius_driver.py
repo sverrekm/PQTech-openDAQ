@@ -193,6 +193,12 @@ class SiriusDriver:
     Initialiserings-sekvensen repliserer DewesoftX sin protokoll.
     """
 
+    # Klasse-nivå event for å drepe orphan-trådar frå tidlegare driver-instansar.
+    # Når rekoble_driver() finn orphan sirius-trådar utan stopp-event-referanse,
+    # set den dette eventet.  Alle heartbeat/ADC-løkker sjekkar det i tillegg
+    # til instansens eigen _stopp_event.
+    _orphan_kill = threading.Event()
+
     def __init__(self):
         self._proto: Optional[SiriusProtokoll] = None
         self._dev = None
@@ -1595,6 +1601,7 @@ class SiriusDriver:
         self._data_callback = callback
         self._buffer_storrelse = buffer_storrelse
         self._stopp_event.clear()
+        SiriusDriver._orphan_kill.clear()  # Nullstill i tilfelle førre rekoble sette det
         self._streamer = True
         self._data_rate_bytes = 0
         self._data_rate_ts = time.time()
@@ -1670,7 +1677,7 @@ class SiriusDriver:
         timeout_teller = 0
         pkt_teller = 0
 
-        while not self._stopp_event.is_set():
+        while not self._stopp_event.is_set() and not SiriusDriver._orphan_kill.is_set():
             try:
                 raa = self._proto.les_adc_data(
                     storrelse=16384,
@@ -1794,7 +1801,7 @@ class SiriusDriver:
         poll_teller = 0
         ae_intervall = 10  # Send AE kvar 10. B1-poll (~10 Hz ved ~100 polls/sek)
         log.info("Heartbeat-tråd starta")
-        while not self._stopp_event.is_set():
+        while not self._stopp_event.is_set() and not SiriusDriver._orphan_kill.is_set():
             try:
                 # Hovud-heartbeat: B1 poll med kort timeout
                 self._proto.poll_b1(timeout=10)

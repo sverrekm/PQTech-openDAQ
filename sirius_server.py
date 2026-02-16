@@ -665,10 +665,13 @@ def rekoble_driver():
     with _lock:
         try:
             if _driver is None:
-                # Stopp foreldrelause trådar frå tidlegare driver
-                # (kan skje viss _driver vart sett til None utan stopp_streaming)
+                # Stopp foreldrelause trådar frå tidlegare driver.
+                # Bruk BÅDE instans-event (_siste_stopp_event) og klasse-event
+                # (_orphan_kill).  Klasse-eventet fungerer ALLTID, sjølv når
+                # instans-eventet gjekk tapt (t.d. _driver sett til None utan
+                # at _siste_stopp_event vart lagra).
                 if _siste_stopp_event is not None:
-                    log.info("Rekoble: stoppar foreldrelause trådar frå tidlegare driver...")
+                    log.info("Rekoble: set instans-stopp-event for orphan-trådar")
                     _siste_stopp_event.set()
                     _siste_stopp_event = None
 
@@ -678,15 +681,16 @@ def rekoble_driver():
                     if t.name in ("sirius-adc", "sirius-heartbeat") and t.is_alive()
                 ]
                 if sirius_threads:
-                    log.info(f"Rekoble: ventar på {len(sirius_threads)} orphan-tråd(ar) "
-                             f"({', '.join(t.name for t in sirius_threads)})...")
+                    # Set klasse-nivå orphan-kill — alle SiriusDriver-løkker
+                    # sjekkar dette i tillegg til instansens _stopp_event.
+                    SiriusDriver._orphan_kill.set()
+                    log.info(f"Rekoble: orphan-kill sett, ventar på {len(sirius_threads)} "
+                             f"tråd(ar) ({', '.join(t.name for t in sirius_threads)})...")
                     for t in sirius_threads:
                         t.join(timeout=3)
                     framleis = [t for t in sirius_threads if t.is_alive()]
                     if framleis:
-                        # Orphan-trådar blokkerer på USB I/O og kan ikkje sjekke
-                        # stopp-event.  Finn eininga og send USB reset for å tvinge
-                        # ENODEV på alle blokkerande operasjonar.
+                        # Trådar blokkerer på USB I/O — send USB reset for ENODEV.
                         log.warning(
                             f"Rekoble: {len(framleis)} tråd(ar) lever framleis — "
                             "tvingar avslutning med USB reset..."
@@ -695,8 +699,6 @@ def rekoble_driver():
                             import usb.core as _usb
                             import usb.util as _usb_util
                             from usb.backend import libusb1 as _libusb1
-                            # Bruk fersk backend — default kontekst kan ha stale
-                            # handle etter dev.reset/uhubctl i gjenoppliv_ep2()
                             _fresh_be = _libusb1.get_backend()
                             _tmp_dev = _usb.find(
                                 idVendor=0x1CED, idProduct=0x1002,
@@ -723,6 +725,8 @@ def rekoble_driver():
                             log.error(f"Rekoble: USB reset feilet: {e}")
                     else:
                         log.info("Rekoble: alle orphan-trådar avslutta")
+                    # Nullstill orphan-kill slik at nye trådar ikkje vert drepne.
+                    SiriusDriver._orphan_kill.clear()
 
             if _driver is not None:
                 # Stopp streaming eksplisitt FYRST.
