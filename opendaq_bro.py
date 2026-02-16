@@ -118,11 +118,15 @@ class OpenDAQBro:
 
             # Sett enhetsinfo (serienummer, MAC, produsent) paa root instance.
             # MÅ gjerast FØR build() — etterpaa er DeviceInfo frozen/umuterleg.
+            # connection_string MÅ vere OPC-UA-adressa (ikkje daqref://) slik
+            # at DewesoftX kan koble til over nettverket.
             try:
                 mac = self._hent_mac()
+                ip = self._hent_ip()
+                conn_str = f"daq.opcua://{ip}:4840/"
                 dev_info = _daq.DeviceInfoConfig(
                     self._enhetsnamn or "PQTech SIRIUS Bridge",
-                    "daqref://device0"
+                    conn_str
                 )
                 if self._serienummer:
                     dev_info.serial_number = self._serienummer
@@ -131,7 +135,7 @@ class OpenDAQBro:
                 dev_info.mac_address = mac
                 dev_info.platform = "RaspberryPi"
                 builder.default_root_device_info = dev_info
-                log.info(f"  DeviceInfo: sn={self._serienummer}, mac={mac}")
+                log.info(f"  DeviceInfo: sn={self._serienummer}, mac={mac}, conn={conn_str}")
             except Exception as e:
                 log.warning(f"  DeviceInfo-konfig feilet (ikkje kritisk): {e}")
 
