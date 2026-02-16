@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback } from 'react'
+import { useState } from 'react'
 import { fetchStatus } from './api/status'
 import { fetchKanalar, fetchKanalLive } from './api/kanalar'
 import { usePolling } from './hooks/usePolling'
-import type { KanalKonfig } from './api/types'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import type { View } from './components/Sidebar'
@@ -12,7 +12,6 @@ import ChannelPage from './pages/ChannelPage'
 
 export default function App() {
   const [view, setView] = useState<View>({ page: 'dashboard' })
-  const [kanalar, setKanalar] = useState<KanalKonfig[] | null>(null)
 
   const statusFetcher = useCallback(() => fetchStatus(), [])
   const { data: status } = usePolling(statusFetcher, 5000)
@@ -20,9 +19,8 @@ export default function App() {
   const liveFetcher = useCallback(() => fetchKanalLive(), [])
   const { data: liveData } = usePolling(liveFetcher, 2000)
 
-  useEffect(() => {
-    fetchKanalar().then(setKanalar).catch(() => {})
-  }, [])
+  const kanalFetcher = useCallback(() => fetchKanalar(), [])
+  const { data: kanalar } = usePolling(kanalFetcher, 5000)
 
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
