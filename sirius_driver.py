@@ -1546,7 +1546,10 @@ class SiriusDriver:
         Med 512B-lesingar trengst 620+ lesingar/sek for aa halde tritt med
         20 kHz straumen (317 KB/s), noko som overvalder USB-stakken paa Pi.
         """
+        log.info("ADC-tråd starta")
         io_feil_teller = 0
+        timeout_teller = 0
+        pkt_teller = 0
 
         while not self._stopp_event.is_set():
             try:
@@ -1556,6 +1559,7 @@ class SiriusDriver:
                 )
 
                 if raa:
+                    pkt_teller += 1
                     self._data_rate_bytes += len(raa)
                     naa = time.time()
                     dt = naa - self._data_rate_ts
@@ -1584,6 +1588,11 @@ class SiriusDriver:
                         while len(self._data_buffer) > self._buffer_storrelse:
                             self._data_buffer.pop(0)
 
+                    if timeout_teller > 0:
+                        log.info(f"ADC: data att etter {timeout_teller} timeouts "
+                                 f"({len(raa)}B, pkt #{pkt_teller})")
+                    timeout_teller = 0
+
                 io_feil_teller = 0
 
             except SiriusUSBFeil as e:
@@ -1592,8 +1601,14 @@ class SiriusDriver:
 
                 feil_str = str(e).lower()
                 if "timeout" in feil_str or "timed out" in feil_str:
-                    # Timeout er normalt naar ADC ikkje er aktiv
-                    log.debug("ADC timeout (ventar paa data)")
+                    timeout_teller += 1
+                    # Logg fyrste timeout og deretter kvar 10.
+                    if timeout_teller == 1:
+                        log.info(f"ADC: EP2 timeout (pkt #{pkt_teller} hittil)")
+                    elif timeout_teller % 10 == 0:
+                        log.warning(f"ADC: {timeout_teller} EP2 timeouts på rad "
+                                    f"— heartbeat-tråd lever: "
+                                    f"{self._heartbeat_traad.is_alive() if self._heartbeat_traad else 'N/A'}")
                     self._stopp_event.wait(timeout=0.5)
                     continue
 
@@ -1633,6 +1648,9 @@ class SiriusDriver:
                 log.error(f"Uventa feil i ADC-loop: {e}")
                 self._stopp_event.wait(timeout=1.0)
 
+        log.info(f"ADC-tråd avslutta (pakkar={pkt_teller}, "
+                 f"io_feil={io_feil_teller}, timeouts={timeout_teller})")
+
     def _heartbeat_loop(self):
         """Bakgrunnstraad: send B1 poll (heartbeat) kontinuerleg + AE telemetri.
 
@@ -1645,6 +1663,7 @@ class SiriusDriver:
         feil_teller = 0
         poll_teller = 0
         ae_intervall = 10  # Send AE kvar 10. B1-poll (~10 Hz ved ~100 polls/sek)
+        log.info("Heartbeat-tråd starta")
         while not self._stopp_event.is_set():
             try:
                 # Hovud-heartbeat: B1 poll med kort timeout
@@ -1659,9 +1678,9 @@ class SiriusDriver:
                     except SiriusUSBFeil:
                         pass  # AE-feil er ikkje kritisk
 
-                # Logg rate kvart 5. sekund
+                # Logg rate kvart 5. sekund (~500 polls)
                 if poll_teller % 500 == 0:
-                    log.debug(f"Heartbeat: {poll_teller} B1-polls sendt")
+                    log.info(f"Heartbeat: {poll_teller} B1-polls sendt (~{poll_teller//5}s)")
 
             except SiriusUSBFeil as e:
                 feil_str = str(e).lower()
@@ -1672,8 +1691,9 @@ class SiriusDriver:
                 if feil_teller >= 5:
                     log.error(f"Heartbeat: {feil_teller} feil på rad — stoppar: {e}")
                     break
-                log.debug(f"Heartbeat B1-feil ({feil_teller}): {e}")
+                log.warning(f"Heartbeat B1-feil ({feil_teller}): {e}")
                 self._stopp_event.wait(timeout=0.1)
+        log.info(f"Heartbeat-tråd avslutta (polls={poll_teller}, feil={feil_teller})")
 
     @staticmethod
     def _deinterlev_data(raa_bytes, antall_kanaler=ADC_KANALER):
