@@ -1,20 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchKanalar, fetchKanalLive } from '../api/kanalar'
-import { usePolling } from '../hooks/usePolling'
-import type { KanalKonfig } from '../api/types'
+import { useRef } from 'react'
+import type { KanalKonfig, KanalLive } from '../api/types'
 import SparklineChart from './SparklineChart'
 
-export default function ChannelLiveCard() {
-  const [kanalar, setKanalar] = useState<KanalKonfig[] | null>(null)
-  const liveFetcher = useCallback(() => fetchKanalLive(), [])
-  const { data: live } = usePolling(liveFetcher, 2000)
+interface Props {
+  kanalar: KanalKonfig[] | null
+  liveData: KanalLive | null
+  onChannelClick: (index: number) => void
+}
 
+export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClick }: Props) {
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
-
-  // Fetch channel config once on mount
-  useEffect(() => {
-    fetchKanalar().then(setKanalar).catch(() => {})
-  }, [])
 
   if (!kanalar) return null
 
@@ -64,7 +59,11 @@ export default function ChannelLiveCard() {
             const sparkArr = sparkDataRef.current.get(i) || []
 
             return (
-              <tr key={i} className={k.aktiv ? '' : 'inaktiv'}>
+              <tr
+                key={i}
+                className={`${k.aktiv ? '' : 'inaktiv'} ${k.aktiv ? 'kanal-rad-klikkbar' : ''}`}
+                onClick={k.aktiv ? () => onChannelClick(i) : undefined}
+              >
                 <td style={{ color: '#6b6b6b', fontWeight: 600 }}>{i + 1}</td>
                 <td>{k.namn}</td>
                 <td>{k.enhet}</td>

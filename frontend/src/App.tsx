@@ -1,27 +1,52 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { fetchStatus } from './api/status'
+import { fetchKanalar, fetchKanalLive } from './api/kanalar'
 import { usePolling } from './hooks/usePolling'
-import type { ServerStatus } from './api/types'
+import type { KanalKonfig } from './api/types'
 import Header from './components/Header'
-import TabBar from './components/TabBar'
+import Sidebar from './components/Sidebar'
+import type { View } from './components/Sidebar'
 import DashboardPage from './pages/DashboardPage'
 import SettingsPage from './pages/SettingsPage'
-
-type Tab = 'dashboard' | 'settings'
+import ChannelPage from './pages/ChannelPage'
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('dashboard')
-  const fetcher = useCallback(() => fetchStatus(), [])
-  const { data: status } = usePolling(fetcher, 5000)
+  const [view, setView] = useState<View>({ page: 'dashboard' })
+  const [kanalar, setKanalar] = useState<KanalKonfig[] | null>(null)
+
+  const statusFetcher = useCallback(() => fetchStatus(), [])
+  const { data: status } = usePolling(statusFetcher, 5000)
+
+  const liveFetcher = useCallback(() => fetchKanalLive(), [])
+  const { data: liveData } = usePolling(liveFetcher, 2000)
+
+  useEffect(() => {
+    fetchKanalar().then(setKanalar).catch(() => {})
+  }, [])
+
+  const handleChannelClick = (index: number) => {
+    setView({ page: 'channel', index })
+  }
+
+  let content: React.ReactNode
+  if (view.page === 'dashboard') {
+    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} onChannelClick={handleChannelClick} />
+  } else if (view.page === 'settings') {
+    content = <SettingsPage />
+  } else {
+    content = <ChannelPage index={view.index} kanalar={kanalar ?? []} liveData={liveData} />
+  }
 
   return (
     <>
       <Header serverOk={status?.server_kjorer ?? false} />
-      <div className="main">
-        <TabBar active={tab} onChange={setTab} />
-        {tab === 'dashboard'
-          ? <DashboardPage status={status} />
-          : <SettingsPage status={status} />}
+      <div className="app-layout">
+        <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} />
+        <div className="innhald">
+          <div className="innhald-inner">
+            {content}
+          </div>
+        </div>
       </div>
     </>
   )
