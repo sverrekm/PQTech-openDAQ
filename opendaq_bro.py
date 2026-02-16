@@ -556,7 +556,7 @@ class OpenDAQBro:
                         v = min(v, float(prop.max_value))
                     except Exception:
                         pass
-                    obj.set_property_value(namn, _daq.Float(v))
+                    obj.set_property_value(namn, v)
                     return True
 
                 if vtype == ct.ctInt:
@@ -569,15 +569,15 @@ class OpenDAQBro:
                         v = min(v, int(prop.max_value))
                     except Exception:
                         pass
-                    obj.set_property_value(namn, _daq.Integer(v))
+                    obj.set_property_value(namn, v)
                     return True
 
                 if vtype == ct.ctBool:
-                    obj.set_property_value(namn, _daq.Boolean(bool(verdi)))
+                    obj.set_property_value(namn, bool(verdi))
                     return True
 
                 if vtype == ct.ctString:
-                    obj.set_property_value(namn, _daq.String(str(verdi)))
+                    obj.set_property_value(namn, str(verdi))
                     return True
 
             # Fallback: set direkte (ingen CoreType tilgjengeleg)
