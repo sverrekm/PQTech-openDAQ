@@ -12,27 +12,41 @@ export default function ChannelPage({ index, kanalar, liveData }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sparkBuf = useRef<number[]>([])
 
-  const getChannelValue = () => {
+  const getChannelData = () => {
     if (!liveData) return null
     const key = `kanal_${index}`
-    const odaq = liveData.opendaq?.[key] as { siste?: number; kjelde?: string } | undefined
-    const drv = liveData.driver?.[key] as { siste?: number | null; antall?: number } | undefined
+    const odaq = liveData.opendaq?.[key]
+    const drv = liveData.driver?.[key]
 
     if (odaq && odaq.kjelde === 'sirius' && odaq.siste !== undefined) {
-      return { value: odaq.siste, source: 'Sirius', color: '#10b981' }
+      return {
+        value: odaq.siste,
+        source: 'Sirius',
+        color: '#10b981',
+        rms: odaq.rms,
+        topp: odaq.topp,
+        snitt: odaq.snitt,
+      }
+    }
+    if (odaq && odaq.siste !== undefined) {
+      return {
+        value: odaq.siste,
+        source: 'OpenDAQ',
+        color: '#D76428',
+        rms: odaq.rms,
+        topp: odaq.topp,
+        snitt: odaq.snitt,
+      }
     }
     if (drv && drv.siste !== null && drv.siste !== undefined) {
       return { value: drv.siste, source: 'Driver', color: '#3b82f6' }
     }
-    if (odaq && odaq.siste !== undefined) {
-      return { value: odaq.siste, source: 'OpenDAQ', color: '#D76428' }
-    }
     return null
   }
 
-  const cv = getChannelValue()
+  const cv = getChannelData()
 
-  // Update sparkline buffer
+  // Update sparkline buffer with instantaneous values (for trend visualization)
   useEffect(() => {
     if (cv !== null) {
       const numVal = typeof cv.value === 'number' ? cv.value : parseFloat(String(cv.value))
@@ -79,17 +93,13 @@ export default function ChannelPage({ index, kanalar, liveData }: Props) {
     return <div className="kort">Kanal ikkje funnen.</div>
   }
 
-  // Compute stats from sparkline buffer
-  const buf = sparkBuf.current
-  const stats = buf.length > 0
-    ? {
-        rms: Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length),
-        topp: Math.max(...buf.map(Math.abs)),
-        snitt: buf.reduce((s, v) => s + v, 0) / buf.length,
-      }
-    : null
-
   const typeLabel = kanal.type === 'voltage' ? 'Spenning' : kanal.type === 'current' ? 'Straum' : kanal.type
+
+  // Use backend-computed stats (from full 20kHz ADC batches), not sparkline buffer
+  const hasBackendStats = cv && 'rms' in cv && cv.rms !== undefined
+  const stats = hasBackendStats
+    ? { rms: cv.rms!, topp: cv.topp!, snitt: cv.snitt! }
+    : null
 
   return (
     <>

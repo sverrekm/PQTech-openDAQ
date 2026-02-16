@@ -83,6 +83,10 @@ export interface KanalLive {
   opendaq?: {
     [key: string]: {
       siste: number
+      rms?: number
+      topp?: number
+      snitt?: number
+      antall?: number
       kjelde?: string
     }
   }
