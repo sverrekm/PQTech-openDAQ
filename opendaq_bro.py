@@ -59,6 +59,7 @@ class OpenDAQBro:
         )
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
+        self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
@@ -249,26 +250,29 @@ class OpenDAQBro:
                 if data is None or len(data) == 0:
                     continue
 
-                # Konverter int16 ADC-verdiar til float
-                fdata = data.astype(np.float64)
+                # Skaler int16 ADC-verdiar til fysiske einingar (V/A)
+                skala = (self._kanal_skala[kanal_idx]
+                         if kanal_idx < len(self._kanal_skala) else 1.0)
+                fdata = data.astype(np.float64) * skala
 
-                # Berekn statistikk
+                # Berekn statistikk i fysiske einingar
                 snitt = float(np.mean(fdata))
                 rms = float(np.sqrt(np.mean(fdata ** 2)))
                 topp = float(np.max(np.abs(fdata)))
 
                 # Lagre siste verdiar for web UI
                 self._siste_verdiar[key] = {
-                    "snitt": round(snitt, 2),
-                    "rms": round(rms, 2),
-                    "topp": round(topp, 2),
-                    "siste": int(data[-1]),
+                    "snitt": round(snitt, 4),
+                    "rms": round(rms, 4),
+                    "topp": round(topp, 4),
+                    "siste": round(float(data[-1]) * skala, 4),
                     "antall": len(data),
                     "kjelde": "sirius",
                 }
 
                 # Oppdater referanse-eininga sine kanal-eigenskapar
-                # slik at genererte signal matchar reelle verdiar
+                # slik at genererte signal matchar reelle verdiar.
+                # Verdiane er no i fysiske einingar og innanfor CustomRange.
                 try:
                     ch.set_property_value("Amplitude", topp)
                     ch.set_property_value("Offset", snitt)
@@ -381,6 +385,11 @@ class OpenDAQBro:
         # Les persistert konfig (fallback til standard)
         kanal_konfig = les_konfig()
 
+        # Bygg skaleringsfaktorar: SIRIUS ADC leverer int16 (-32768..32767)
+        # som representerer full skala av input-rangen.
+        # physical_value = raw_int16 * (range_max / 32768)
+        self._kanal_skala = []
+
         channels = list(self._device.channels)
         for i, ch in enumerate(channels):
             if i >= len(kanal_konfig):
@@ -401,6 +410,10 @@ class OpenDAQBro:
                          f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
             except Exception as e:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
+
+            # Skaleringsfaktor: int16 → fysisk eining
+            skala = kk.range_max / 32768.0 if kk.range_max > 0 else 1.0
+            self._kanal_skala.append(skala)
 
     def _fiks_server_capabilities(self, ip):
         """Sett server capability-adresser manuelt for Docker-miljoe.
