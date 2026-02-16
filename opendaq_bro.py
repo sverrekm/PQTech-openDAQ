@@ -127,27 +127,40 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
-            # DewesoftX NewSetup krev "Configuration"-eigenskap på devicen.
-            # Referanse-eininga har ikkje denne — legg til manuelt.
-            try:
-                self._device.add_property(
-                    _daq.StringProperty(
-                        _daq.String("Configuration"),
-                        _daq.String(""),
-                        _daq.Boolean(True),
-                    )
-                )
-                log.info("  'Configuration'-eigenskap lagt til på device")
-            except Exception as e:
-                log.warning(f"  Kunne ikkje legge til Configuration-eigenskap: {e}")
+            # DewesoftX NewSetup krev "Configuration"-eigenskap.
+            # Prøv på ALLE nivå — instance (root), device (sub-device),
+            # og kvar kanal — sidan vi ikkje veit kvar DewesoftX leitar.
+            config_prop = _daq.StringProperty(
+                _daq.String("Configuration"),
+                _daq.String(""),
+                _daq.Boolean(True),
+            )
+            for label, obj in [("instance", self._instance), ("device", self._device)]:
+                try:
+                    obj.add_property(config_prop)
+                    log.info(f"  'Configuration' lagt til på {label}")
+                except Exception as e:
+                    log.warning(f"  'Configuration' på {label} feilet: {e}")
 
-            # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
+            # Legg til på kanalar også
             try:
-                props = self._device.visible_properties
-                prop_names = [p.name for p in props]
-                log.info(f"  Device-eigenskapar: {prop_names}")
+                for ch in self._device.channels:
+                    try:
+                        ch.add_property(config_prop)
+                    except Exception:
+                        pass
+                log.info("  'Configuration' lagt til på kanalar")
             except Exception as e:
-                log.warning(f"  Kunne ikkje liste eigenskapar: {e}")
+                log.warning(f"  'Configuration' på kanalar feilet: {e}")
+
+            # Diagnostikk: List eigenskapar på instance og device
+            for label, obj in [("Instance", self._instance), ("Device", self._device)]:
+                try:
+                    props = obj.visible_properties
+                    prop_names = [p.name for p in props]
+                    log.info(f"  {label}-eigenskapar: {prop_names}")
+                except Exception as e:
+                    log.warning(f"  Kunne ikkje liste {label}-eigenskapar: {e}")
 
             # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
