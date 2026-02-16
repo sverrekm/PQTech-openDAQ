@@ -291,6 +291,14 @@ class SiriusDriver:
                         hb_teller[0] += 1
                     except Exception:
                         hb_stopp.wait(timeout=0.005)
+                    # Drain EP4/EP6 — SIRIUS krev at ALLE data-endepunkt
+                    # vert lesne samstundes, elles fylst FIFO og EP2 stoppar.
+                    # EP6 er 15872B/pkt (same som EP2), EP4 er 20B/pkt.
+                    for ep, sz in [(EP_CTRL_IN, 64), (EP_SYNC_IN, 16384)]:
+                        try:
+                            self._dev.read(ep, sz, timeout=1)
+                        except Exception:
+                            pass
 
             hb_traad = threading.Thread(
                 target=_b1_pumpe_koble, daemon=True, name="koble-til-hb"
@@ -718,11 +726,14 @@ class SiriusDriver:
 
         Returns: True viss EP2 svarte med data
         """
-        # Fjern eventuell stall/halt-tilstand på EP2
-        try:
-            self._dev.clear_halt(EP_ADC_IN)
-        except Exception:
-            pass
+        # Fjern eventuell stall/halt-tilstand på EP2, EP4 og EP6.
+        # DewesoftX les ALLE tre endepunkt samstundes — viss EP4/EP6
+        # ikkje vert drenert, fylst FIFO-ane og blokkerer EP2.
+        for ep in [EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN]:
+            try:
+                self._dev.clear_halt(ep)
+            except Exception:
+                pass
 
         start = time.time()
         timeout_sek = timeout / 1000.0
@@ -953,6 +964,13 @@ class SiriusDriver:
                     hb_teller[0] += 1
                 except Exception:
                     hb_stopp.wait(timeout=0.005)
+                # Drain EP4/EP6 — SIRIUS krev at ALLE data-endepunkt
+                # vert lesne samstundes, elles fylst FIFO og EP2 stoppar.
+                for ep in [EP_CTRL_IN, EP_SYNC_IN]:
+                    try:
+                        self._dev.read(ep, 512, timeout=1)
+                    except Exception:
+                        pass
 
         hb_traad = threading.Thread(
             target=_b1_pumpe_gjenoppliv, daemon=True, name="gjenoppliv-hb"
@@ -1782,6 +1800,16 @@ class SiriusDriver:
                 self._proto.poll_b1(timeout=10)
                 feil_teller = 0
                 poll_teller += 1
+
+                # Drain EP4/EP6 — SIRIUS krev at ALLE data-endepunkt vert
+                # lesne samstundes.  Utan dette fylst EP4/EP6-FIFO og EP2
+                # stoppar.  pcapng viser at DewesoftX les EP2+EP4+EP6 parallelt.
+                # EP6 er 15872B/pkt (same som EP2), EP4 er 20B/pkt.
+                for ep, sz in [(EP_CTRL_IN, 64), (EP_SYNC_IN, 16384)]:
+                    try:
+                        self._dev.read(ep, sz, timeout=1)
+                    except Exception:
+                        pass
 
                 # Periodisk AE telemetri (~10 Hz, som DewesoftX)
                 if poll_teller % ae_intervall == 0:
