@@ -544,9 +544,16 @@ def gjenoppliv_ep2():
                 # Nullstill _driver slik at rekoble_driver() opprettar heilt
                 # ny driver med fersk USB-enumerering i staden for å gjenbruke
                 # den korrupte instansen.
+                #
+                # VIKTIG: Ikkje kall koble_fra() her — den gjer dev.reset()
+                # som er meiningslaust (og skadeleg) etter at strategi 3/4
+                # allereie har resetta/power-cycla eininga.  Bruk _frigjer_dev()
+                # som berre gjer release_interface + dispose_resources.
                 log.warning("EP2-gjenoppliving feilet — nullstiller driver for rein rekobling")
+                _siste_stopp_event = _driver._stopp_event
                 try:
-                    _driver.koble_fra()
+                    _driver._stopp_event.set()  # Signal orphan-trådar
+                    _driver._frigjer_dev()
                 except Exception:
                     pass
                 _driver = None
@@ -557,13 +564,15 @@ def gjenoppliv_ep2():
                 })
                 return False, "Alle EP2-strategiar feilet. Klikk Rekoble for å prøve på nytt."
         except Exception as e:
-            # Uventa feil — same opprydding
+            # Uventa feil — same opprydding (utan dev.reset)
             log.error(f"Exception under EP2-gjenoppliving: {e}")
-            try:
-                if _driver is not None:
-                    _driver.koble_fra()
-            except Exception:
-                pass
+            if _driver is not None:
+                _siste_stopp_event = _driver._stopp_event
+                try:
+                    _driver._stopp_event.set()
+                    _driver._frigjer_dev()
+                except Exception:
+                    pass
             _driver = None
             server_status.update({
                 "tilkoblet": False,
@@ -680,7 +689,14 @@ def rekoble_driver():
                         try:
                             import usb.core as _usb
                             import usb.util as _usb_util
-                            _tmp_dev = _usb.find(idVendor=0x1CED, idProduct=0x1002)
+                            from usb.backend import libusb1 as _libusb1
+                            # Bruk fersk backend — default kontekst kan ha stale
+                            # handle etter dev.reset/uhubctl i gjenoppliv_ep2()
+                            _fresh_be = _libusb1.get_backend()
+                            _tmp_dev = _usb.find(
+                                idVendor=0x1CED, idProduct=0x1002,
+                                backend=_fresh_be,
+                            )
                             if _tmp_dev is not None:
                                 _tmp_dev.reset()
                                 log.info("USB reset sendt — ventar på orphan-trådar...")
