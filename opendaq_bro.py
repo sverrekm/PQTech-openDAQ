@@ -127,40 +127,13 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
-            # DewesoftX NewSetup krev "Configuration"-eigenskap.
-            # Prøv på ALLE nivå — instance (root), device (sub-device),
-            # og kvar kanal — sidan vi ikkje veit kvar DewesoftX leitar.
-            config_prop = _daq.StringProperty(
-                _daq.String("Configuration"),
-                _daq.String(""),
-                _daq.Boolean(True),
-            )
-            for label, obj in [("instance", self._instance), ("device", self._device)]:
-                try:
-                    obj.add_property(config_prop)
-                    log.info(f"  'Configuration' lagt til på {label}")
-                except Exception as e:
-                    log.warning(f"  'Configuration' på {label} feilet: {e}")
-
-            # Legg til på kanalar også
+            # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
-                for ch in self._device.channels:
-                    try:
-                        ch.add_property(config_prop)
-                    except Exception:
-                        pass
-                log.info("  'Configuration' lagt til på kanalar")
+                props = self._device.visible_properties
+                prop_names = [p.name for p in props]
+                log.info(f"  Device-eigenskapar: {prop_names}")
             except Exception as e:
-                log.warning(f"  'Configuration' på kanalar feilet: {e}")
-
-            # Diagnostikk: List eigenskapar på instance og device
-            for label, obj in [("Instance", self._instance), ("Device", self._device)]:
-                try:
-                    props = obj.visible_properties
-                    prop_names = [p.name for p in props]
-                    log.info(f"  {label}-eigenskapar: {prop_names}")
-                except Exception as e:
-                    log.warning(f"  Kunne ikkje liste {label}-eigenskapar: {e}")
+                log.warning(f"  Kunne ikkje liste eigenskapar: {e}")
 
             # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
@@ -423,14 +396,14 @@ class OpenDAQBro:
     #         Lo-LV ADC ±5V, faktor 2000 A/V → range ±10000A
     # AI 8:   Lo-LV, ikkje tilkobla
     SUNDET_KANALAR = [
+        {"namn": "AI 0", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
         {"namn": "AI 1", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
         {"namn": "AI 2", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
-        {"namn": "AI 3", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
-        {"namn": "AI 4", "amplitude": 0.0,   "freq": 50.0, "range": (-1600, 1600)},
+        {"namn": "AI 3", "amplitude": 0.0,   "freq": 50.0, "range": (-1600, 1600)},
+        {"namn": "AI 4", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
         {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
         {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
-        {"namn": "AI 7", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
-        {"namn": "AI 8", "amplitude": 0.0,   "freq": 50.0, "range": (-10000, 10000)},
+        {"namn": "AI 7", "amplitude": 0.0,   "freq": 50.0, "range": (-10000, 10000)},
     ]
 
     def _konfig_kanalar(self):

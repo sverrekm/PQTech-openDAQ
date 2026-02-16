@@ -54,7 +54,7 @@ class KanalKonfig:
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 3  # v3: kanal 1-4 HV ±1600V, kanal 5-7 LV integrator 0-6000A
+KONFIG_VERSJON = 4  # v4: 0-indeksert (AI 0-7) for samsvar med openDAQ referanse-eining
 
 # Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
 #
@@ -70,14 +70,14 @@ KONFIG_VERSJON = 3  # v3: kanal 1-4 HV ±1600V, kanal 5-7 LV integrator 0-6000A
 #
 # Kanal 8: Lo-LV, ikkje tilkobla
 STANDARD_KONFIG: List[KanalKonfig] = [
-    KanalKonfig(0, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(1, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(2, "AI 3", True,  "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(3, "AI 4", False, "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(4, "AI 5", True,  "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(5, "AI 6", True,  "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(6, "AI 7", True,  "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(7, "AI 8", False, "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(0, "AI 0", True,  "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(1, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(2, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(3, "AI 3", False, "voltage", -1600.0, 1600.0, "V", 1000),
+    KanalKonfig(4, "AI 4", True,  "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(5, "AI 5", True,  "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(6, "AI 6", True,  "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(7, "AI 7", False, "current", -10000.0, 10000.0, "A", 1000),
 ]
 
 
