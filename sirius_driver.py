@@ -217,6 +217,10 @@ class SiriusDriver:
         self._ep2_ok = False
         self._treng_heartbeat = False  # Sett True etter _start_acquisition()
         self._strategi_logg = EP2StrategiLogg()
+        # Midlertidig B1-pumpe som held EP2 i live mellom koble_til() og
+        # start_streaming().  _heartbeat_loop() stoppar den når den tek over.
+        self._temp_hb_stopp: Optional[threading.Event] = None
+        self._temp_hb_traad: Optional[threading.Thread] = None
 
     @property
     def enhetsinfo(self) -> EnhetsInfo:
@@ -293,6 +297,7 @@ class SiriusDriver:
             )
             hb_traad.start()
 
+            behald_pumpe = False
             try:
                 try:
                     self._start_acquisition()
@@ -300,6 +305,7 @@ class SiriusDriver:
                     if self._test_ep2():
                         self._strategi_logg.registrer_suksess("1_start_acquisition")
                         log.info("EP2 starta etter automatisk start-acquisition")
+                        behald_pumpe = True
                     else:
                         log.warning("EP2 svarte ikkje — prøver init + start...")
                         # Strategi 2: init + start-acquisition
@@ -311,13 +317,21 @@ class SiriusDriver:
                             if self._test_ep2():
                                 self._strategi_logg.registrer_suksess("2_init_start")
                                 log.info("EP2 starta etter init + start-acquisition")
+                                behald_pumpe = True
                         except Exception as e2:
                             log.warning(f"Init + start-acquisition feilet: {e2}")
                 except Exception as e:
                     log.warning(f"Automatisk start-acquisition feilet: {e}")
             finally:
-                hb_stopp.set()
-                hb_traad.join(timeout=2)
+                if behald_pumpe:
+                    # IKKJE stopp pumpa!  EP2 treng kontinuerleg B1 heartbeat.
+                    # _heartbeat_loop() tek over og stoppar temp-pumpa.
+                    self._temp_hb_stopp = hb_stopp
+                    self._temp_hb_traad = hb_traad
+                    log.info("  B1-pumpe held i live til heartbeat-tråd tek over")
+                else:
+                    hb_stopp.set()
+                    hb_traad.join(timeout=2)
 
         if not self._ep2_ok:
             log.warning(
@@ -332,6 +346,12 @@ class SiriusDriver:
         2. attach_kernel_driver(0) — gir interface tilbake til kernel
         3. dispose_resources()
         """
+        # Stopp temp B1-pumpe fyrst
+        if self._temp_hb_stopp is not None:
+            self._temp_hb_stopp.set()
+            self._temp_hb_stopp = None
+            self._temp_hb_traad = None
+
         if self._dev is not None:
             try:
                 usb.util.release_interface(self._dev, 0)
@@ -939,6 +959,7 @@ class SiriusDriver:
         )
         hb_traad.start()
 
+        behald_pumpe = False
         try:
             # ============================================================
             # STRATEGI 1: Start-acquisition sekvens direkte
@@ -954,6 +975,7 @@ class SiriusDriver:
                 if self._test_ep2():
                     self._strategi_logg.registrer_suksess("1_start_acquisition")
                     log.info("SUKSESS: Strategi 1 (start-acquisition)")
+                    behald_pumpe = True
                     return True
                 log.info("  Start-acquisition sendt, men EP2 svarte ikkje enno")
             except (SiriusPollTimeout, SiriusUSBFeil) as e:
@@ -974,13 +996,19 @@ class SiriusDriver:
                 if self._test_ep2():
                     self._strategi_logg.registrer_suksess("2_init_start")
                     log.info("SUKSESS: Strategi 2 (init + start-acquisition)")
+                    behald_pumpe = True
                     return True
                 log.info("  Init + start sendt, men EP2 svarte ikkje")
             except (SiriusPollTimeout, SiriusUSBFeil) as e:
                 log.warning(f"  Strategi 2 feilet: {e}")
         finally:
-            hb_stopp.set()
-            hb_traad.join(timeout=2)
+            if behald_pumpe:
+                self._temp_hb_stopp = hb_stopp
+                self._temp_hb_traad = hb_traad
+                log.info("  B1-pumpe held i live til heartbeat-tråd tek over")
+            else:
+                hb_stopp.set()
+                hb_traad.join(timeout=2)
 
         # ============================================================
         # STRATEGI 3: dev.reset() (USB bus reset) + start-acquisition
@@ -1091,6 +1119,12 @@ class SiriusDriver:
         2. attach_kernel_driver(0) - gir interface tilbake til kernel
         3. dispose_resources() - frigjer backend-ressursar
         """
+        # Stopp temp B1-pumpe viss den framleis køyrer
+        if self._temp_hb_stopp is not None:
+            self._temp_hb_stopp.set()
+            self._temp_hb_stopp = None
+            self._temp_hb_traad = None
+
         if self._streamer:
             self.stopp_streaming()
 
@@ -1727,6 +1761,17 @@ class SiriusDriver:
 
         Tidlegare brukte vi KUN 0xAE kvart 2. sek — feil opcode, feil rate.
         """
+        # Stopp midlertidig B1-pumpe frå koble_til() viss den framleis køyrer.
+        # Pumpa heldt EP2 i live mellom koble_til() og start_streaming().
+        # No tek heartbeat-tråden over — det MÅ ikkje vere gap.
+        if self._temp_hb_stopp is not None:
+            self._temp_hb_stopp.set()
+            if self._temp_hb_traad and self._temp_hb_traad.is_alive():
+                self._temp_hb_traad.join(timeout=2)
+            self._temp_hb_stopp = None
+            self._temp_hb_traad = None
+            log.info("Heartbeat-tråd tok over frå temp B1-pumpe")
+
         feil_teller = 0
         poll_teller = 0
         ae_intervall = 10  # Send AE kvar 10. B1-poll (~10 Hz ved ~100 polls/sek)
