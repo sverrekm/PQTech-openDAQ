@@ -290,12 +290,14 @@ class OpenDAQBro:
 
                 # Oppdater referanse-eininga sine kanal-eigenskapar
                 # slik at genererte signal matchar reelle verdiar.
-                # Verdiane er no i fysiske einingar og innanfor CustomRange.
+                # Amplitude: FloatProperty [0, 10] — klampa av _safe_set
+                # DC:        FloatProperty [-10, 10] — brukt for DC-offset
+                #            (ikkje "Offset" som er IntProperty for sample-offset)
                 try:
-                    ch.set_property_value("Amplitude", topp)
-                    ch.set_property_value("Offset", snitt)
+                    self._safe_set(ch, "Amplitude", topp)
+                    self._safe_set(ch, "DC", snitt)
                 except Exception:
-                    pass  # Eigenskapane finst kanskje ikkje
+                    pass
 
             self._data_teller += 1
 
@@ -392,22 +394,29 @@ class OpenDAQBro:
     ]
 
     def _konfig_kanalar(self):
-        """Sett 8 kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET)."""
-        try:
-            self._device.set_property_value("NumberOfChannels", 8)
-            log.info("  NumberOfChannels sett til 8")
-        except Exception as e:
-            log.warning(f"  Kunne ikkje sette NumberOfChannels: {e}")
-            return
+        """Sett 8 kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET).
 
-        # GlobalSampleRate styrer kor fort referanse-eininga genererer
-        # samples.  Utan denne kan eininga stå i tomgang og DewesoftX
-        # ser kanalar utan data.
-        try:
-            self._device.set_property_value("GlobalSampleRate", 1000)
-            log.info("  GlobalSampleRate sett til 1000 Hz")
-        except Exception as e:
-            log.warning(f"  GlobalSampleRate feilet (kan vere annleis namn): {e}")
+        openDAQ referanse-eininga har faste grenser for eigenskapar:
+          - Amplitude: Float, [0, 10]
+          - Frequency: Float, [0.1, 10000]
+          - DC:        Float, [-10, 10]
+          - Waveform:  Int (Selection), 0=Sine
+          - Offset:    Int, min=0 (sample-offset, ikkje DC)
+          - GlobalSampleRate: Float, [1, 1000000]
+        Verdiar vert klampa automatisk av _safe_set().
+        """
+        # NumberOfChannels er IntProperty — int er korrekt
+        if not self._safe_set(self._device, "NumberOfChannels", 8):
+            log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
+            return
+        log.info("  NumberOfChannels sett til 8")
+
+        # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
+        if self._safe_set(self._device, "GlobalSampleRate", 1000.0):
+            log.info("  GlobalSampleRate sett til 1000.0 Hz")
+
+        # Logg device-eigenskapar for feilsøking
+        self._logg_eigenskapar(self._device, "Dev.")
 
         # Les persistert konfig (fallback til standard)
         kanal_konfig = les_konfig()
@@ -426,13 +435,21 @@ class OpenDAQBro:
             sundet = self.SUNDET_KANALAR[i] if i < len(self.SUNDET_KANALAR) else None
             try:
                 ch.name = kk.namn
+
                 amp = sundet["amplitude"] if sundet else 0.0
                 freq = sundet["freq"] if sundet else 50.0
-                ch.set_property_value("Amplitude", amp if kk.aktiv else 0.0)
-                ch.set_property_value("Frequency", freq)
-                ch.set_property_value("CustomRange", _daq.Range(kk.range_min, kk.range_max))
-                # Sinus-boelgje for simulering
-                ch.set_property_value("Waveform", 0)
+
+                # Amplitude er FloatProperty [0, 10] — _safe_set klampar
+                self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
+                # Frequency er FloatProperty [0.1, 10000]
+                self._safe_set(ch, "Frequency", freq)
+                # DC er FloatProperty [-10, 10]
+                self._safe_set(ch, "DC", 0.0)
+                # Waveform er SelectionProperty (int): 0=Sine
+                self._safe_set(ch, "Waveform", 0)
+                # CustomRange er StructProperty (Range)
+                ch.set_property_value("CustomRange",
+                                      _daq.Range(kk.range_min, kk.range_max))
                 log.info(f"  {kk.namn}: aktiv={kk.aktiv}, "
                          f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
             except Exception as e:
@@ -442,12 +459,19 @@ class OpenDAQBro:
             skala = kk.range_max / 32768.0 if kk.range_max > 0 else 1.0
             self._kanal_skala.append(skala)
 
+        # Logg fyrste kanal sine eigenskapar for å verifisere type-matching
+        if channels:
+            self._logg_eigenskapar(channels[0], "Ch0.")
+
     def _fiks_server_capabilities(self, ip):
         """Sett server capability-adresser manuelt for Docker-miljoe.
 
         Overskriver ALLTID, ogsaa pre-populerte verdiar. openDAQ sin
         mDNS-oppdaging kan sette feil IP (Docker bridge 172.17.x.x)
         som DewesoftX ikkje kan naa.
+
+        Addresses og ConnectionStrings er ListProperty<IString> — krev
+        openDAQ List-objekt, ikkje Python-liste.
         """
         try:
             # Server capabilities er på instance (root), ikkje sub-device
@@ -460,24 +484,117 @@ class OpenDAQBro:
 
                 # Bygg connection string: daq.ns://ip:port/
                 ny_conn = f"{prefix}://{ip}:{port}/"
-                try:
-                    cap.set_property_value("PrimaryConnectionString", ny_conn)
-                    log.info(f"  Cap {proto_id}: PrimaryConnectionString = {ny_conn}")
-                except Exception as e:
-                    log.warning(f"  Cap {proto_id}: set PrimaryConnectionString feilet: {e}")
 
+                # PrimaryConnectionString er StringProperty
+                self._safe_set(cap, "PrimaryConnectionString", ny_conn)
+                log.info(f"  Cap {proto_id}: PrimaryConnectionString = {ny_conn}")
+
+                # Addresses og ConnectionStrings er ListProperty<IString>.
+                # Bygg openDAQ List-objekt i staden for Python-liste.
                 try:
-                    cap.set_property_value("Addresses", [ip])
+                    addr_list = _daq.List()
+                    addr_list.push_back(ip)
+                    cap.set_property_value("Addresses", addr_list)
                     log.info(f"  Cap {proto_id}: Addresses = [{ip}]")
                 except Exception as e:
+                    # Fallback: prøv Python-liste
+                    try:
+                        cap.set_property_value("Addresses", [ip])
+                    except Exception:
+                        pass
                     log.warning(f"  Cap {proto_id}: set Addresses feilet: {e}")
 
                 try:
-                    cap.set_property_value("ConnectionStrings", [ny_conn])
+                    conn_list = _daq.List()
+                    conn_list.push_back(ny_conn)
+                    cap.set_property_value("ConnectionStrings", conn_list)
                 except Exception as e:
+                    try:
+                        cap.set_property_value("ConnectionStrings", [ny_conn])
+                    except Exception:
+                        pass
                     log.warning(f"  Cap {proto_id}: set ConnectionStrings feilet: {e}")
+
         except Exception as e:
             log.warning(f"  Fiks server capabilities feilet: {e}")
+
+    def _safe_set(self, obj, namn, verdi):
+        """Sett eigenskap med automatisk type-konvertering og range-klamping.
+
+        openDAQ 3.20.6 sitt OPC-UA-lag er strikt på typar:
+          - FloatProperty krev Python float (ikkje int)
+          - IntProperty krev Python int (ikkje float)
+          - Verdiar utanfor [min, max] vert avvist
+        Denne metoden les eigenskapen sin deklarerte type og konverterer.
+        """
+        try:
+            prop = obj.get_property(namn)
+            vtype = prop.value_type
+
+            ct = getattr(_daq, 'CoreType', None)
+            if ct is not None:
+                if vtype == ct.ctFloat:
+                    v = float(verdi)
+                    try:
+                        v = max(v, float(prop.min_value))
+                    except Exception:
+                        pass
+                    try:
+                        v = min(v, float(prop.max_value))
+                    except Exception:
+                        pass
+                    obj.set_property_value(namn, v)
+                    return True
+
+                if vtype == ct.ctInt:
+                    v = int(round(verdi)) if isinstance(verdi, float) else int(verdi)
+                    try:
+                        v = max(v, int(prop.min_value))
+                    except Exception:
+                        pass
+                    try:
+                        v = min(v, int(prop.max_value))
+                    except Exception:
+                        pass
+                    obj.set_property_value(namn, v)
+                    return True
+
+                if vtype == ct.ctBool:
+                    obj.set_property_value(namn, bool(verdi))
+                    return True
+
+                if vtype == ct.ctString:
+                    obj.set_property_value(namn, str(verdi))
+                    return True
+
+            # Fallback: set direkte (ingen CoreType tilgjengeleg)
+            obj.set_property_value(namn, verdi)
+            return True
+        except Exception as e:
+            log.warning(f"  _safe_set({namn}, {verdi!r}): {e}")
+            return False
+
+    def _logg_eigenskapar(self, obj, label=""):
+        """Logg alle synlege eigenskapar med type og verdi (for feilsøking)."""
+        try:
+            ct = getattr(_daq, 'CoreType', None)
+            ct_namn = {getattr(ct, a): a for a in dir(ct)
+                       if a.startswith('ct')} if ct else {}
+            for prop in obj.visible_properties:
+                try:
+                    vt = prop.value_type
+                    vt_str = ct_namn.get(vt, str(vt))
+                    val = obj.get_property_value(prop.name)
+                    extra = ""
+                    try:
+                        extra = f" [{prop.min_value}..{prop.max_value}]"
+                    except Exception:
+                        pass
+                    log.info(f"  {label}{prop.name}: {vt_str} = {val!r}{extra}")
+                except Exception as e2:
+                    log.info(f"  {label}{prop.name}: (feil: {e2})")
+        except Exception as e:
+            log.warning(f"  _logg_eigenskapar({label}): {e}")
 
     @staticmethod
     def _hent_ip():
