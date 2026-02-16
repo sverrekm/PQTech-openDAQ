@@ -377,20 +377,20 @@ class OpenDAQBro:
         self._device = None
         log.info("openDAQ nettverksbro stoppa")
 
-    # Kanalopsett fraa Sundet-prosjektet (SIRIUSi-HS, 8xAI)
-    # AI 1-3: Spenning (HV, 1600V range, ±500V brukarskala, 50 Hz sinus)
-    # AI 4:   Spenning (HV, inaktiv)
-    # AI 5-7: Straum via CT (LV, 5V range, skaleringsfaktor 2000, ±100A)
-    # AI 8:   Spenning (LV, inaktiv)
+    # Kanalopsett (SIRIUSi-HS, 8xAI — alle kanalar er spenning)
+    # AI 1-3: Spenning 230V RMS (325V topp), 50 Hz
+    # AI 4:   Ikkje tilkobla
+    # AI 5-7: Spenning 230V RMS (325V topp), 50 Hz
+    # AI 8:   Ikkje tilkobla
     SUNDET_KANALAR = [
         {"namn": "AI 1", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
         {"namn": "AI 2", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
         {"namn": "AI 3", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
         {"namn": "AI 4", "amplitude": 0.0,   "freq": 50.0, "range": (-500, 500)},
-        {"namn": "AI 5", "amplitude": 70.0,  "freq": 50.0, "range": (-100, 100)},
-        {"namn": "AI 6", "amplitude": 70.0,  "freq": 50.0, "range": (-100, 100)},
-        {"namn": "AI 7", "amplitude": 70.0,  "freq": 50.0, "range": (-100, 100)},
-        {"namn": "AI 8", "amplitude": 0.0,   "freq": 50.0, "range": (-100, 100)},
+        {"namn": "AI 5", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 6", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 7", "amplitude": 325.0, "freq": 50.0, "range": (-500, 500)},
+        {"namn": "AI 8", "amplitude": 0.0,   "freq": 50.0, "range": (-500, 500)},
     ]
 
     def _konfig_kanalar(self):

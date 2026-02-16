@@ -52,16 +52,20 @@ class KanalKonfig:
         )
 
 
-# Standard-konfigurasjon som matchar Sundet-oppsettet (SIRIUSi-HS, 8xAI)
+# Standard-konfigurasjon (SIRIUSi-HS, 8xAI — alle kanalar er spenning)
+# ADC-konfig (reg 0x82) er identisk for alle 8 kanalar, og int16
+# full-skala (32768) tilsvarer range_max ved BNC-inngangen.
+# Juster range_min/range_max til aa matche SIRIUS-modulens faktiske
+# maskinvarerange (t.d. HV ±500V, LV ±5V).
 STANDARD_KONFIG: List[KanalKonfig] = [
     KanalKonfig(0, "AI 1", True,  "voltage", -500.0, 500.0, "V", 1000),
     KanalKonfig(1, "AI 2", True,  "voltage", -500.0, 500.0, "V", 1000),
     KanalKonfig(2, "AI 3", True,  "voltage", -500.0, 500.0, "V", 1000),
     KanalKonfig(3, "AI 4", False, "voltage", -500.0, 500.0, "V", 1000),
-    KanalKonfig(4, "AI 5", True,  "current", -100.0, 100.0, "A", 1000),
-    KanalKonfig(5, "AI 6", True,  "current", -100.0, 100.0, "A", 1000),
-    KanalKonfig(6, "AI 7", True,  "current", -100.0, 100.0, "A", 1000),
-    KanalKonfig(7, "AI 8", False, "current", -100.0, 100.0, "A", 1000),
+    KanalKonfig(4, "AI 5", True,  "voltage", -500.0, 500.0, "V", 1000),
+    KanalKonfig(5, "AI 6", True,  "voltage", -500.0, 500.0, "V", 1000),
+    KanalKonfig(6, "AI 7", True,  "voltage", -500.0, 500.0, "V", 1000),
+    KanalKonfig(7, "AI 8", False, "voltage", -500.0, 500.0, "V", 1000),
 ]
 
 
