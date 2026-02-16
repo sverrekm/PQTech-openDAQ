@@ -151,6 +151,12 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
+            # Sett enhetsinfo på sub-devicen (RefDev0).
+            # DewesoftX les device info frå sub-device (Devices > RefDev0 > Info),
+            # ikkje frå root instance. Prøv set_property_value — fungerer viss
+            # referanse-eininga sin DeviceInfo ikkje er fullstendig frozen.
+            self._sett_device_info()
+
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
                 props = self._device.visible_properties
@@ -267,23 +273,64 @@ class OpenDAQBro:
                 self._status["feil"] = feil_msg
             return False
 
+    def _sett_device_info(self):
+        """Sett enhetsinfo på sub-devicen (RefDev0) slik at DewesoftX ser den.
+
+        Prøver set_property_value på device.info med camelCase eigenskapnamn.
+        """
+        if not self._device:
+            return
+        try:
+            info = self._device.info
+            mac = self._hent_mac()
+            ip = self._hent_ip()
+
+            eigenskapar = {
+                "manufacturer": "Dewesoft / PQTech",
+                "model": "SIRIUSi-HS",
+                "macAddress": mac,
+                "platform": "RaspberryPi",
+            }
+            if self._serienummer:
+                eigenskapar["serialNumber"] = self._serienummer
+            if self._enhetsnamn:
+                eigenskapar["name"] = self._enhetsnamn
+
+            sett = 0
+            for namn, verdi in eigenskapar.items():
+                try:
+                    info.set_property_value(namn, verdi)
+                    sett += 1
+                except Exception as e:
+                    log.debug(f"  DeviceInfo.{namn}: {e}")
+
+            log.info(f"  Sub-device info: {sett}/{len(eigenskapar)} eigenskapar sett "
+                     f"(sn={self._serienummer}, mac={mac})")
+        except Exception as e:
+            log.warning(f"  _sett_device_info feilet: {e}")
+
     def oppdater_enhetsinfo(self, serienummer="", enhetsnamn=""):
         """Oppdater serienummer/enhetsnamn etter oppstart (t.d. naar driver koplar til).
 
-        Prøver set_property_value paa instance.info — fungerer berre viss
-        DeviceInfo ikkje er fullstendig frozen.
+        Prøver set_property_value på både instance.info og device.info.
         """
         if not self._instance:
             return
-        try:
-            info = self._instance.info
-            if serienummer:
-                info.set_property_value("serialNumber", serienummer)
-                log.info(f"  DeviceInfo oppdatert: serialNumber={serienummer}")
-            if enhetsnamn:
-                info.set_property_value("name", enhetsnamn)
-        except Exception as e:
-            log.debug(f"  oppdater_enhetsinfo: set_property_value feilet (forventa viss frozen): {e}")
+        self._serienummer = serienummer or self._serienummer
+        self._enhetsnamn = enhetsnamn or self._enhetsnamn
+
+        for label, obj in [("instance", self._instance), ("device", self._device)]:
+            if obj is None:
+                continue
+            try:
+                info = obj.info
+                if serienummer:
+                    info.set_property_value("serialNumber", serienummer)
+                if enhetsnamn:
+                    info.set_property_value("name", enhetsnamn)
+                log.info(f"  {label}.info oppdatert: sn={serienummer}")
+            except Exception as e:
+                log.debug(f"  oppdater_enhetsinfo({label}): {e}")
 
     def oppdater_data(self, kanal_data):
         """
