@@ -657,6 +657,11 @@ def rekoble_driver():
     if usbip_manager.usbip_status.get("deling_aktiv"):
         return False, "USB/IP deling er aktiv - stopp deling fyrst"
 
+    # Guard: Ikkje drep aktiv, fungerande streaming.
+    # Brukaren MÅ eksplisitt stoppe streaming fyrst.
+    if _driver is not None and _driver.streamer and _driver.ep2_ok:
+        return True, "Streaming er aktiv — stopp streaming fyrst viss du vil rekoble"
+
     with _lock:
         try:
             if _driver is None:
