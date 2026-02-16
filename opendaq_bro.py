@@ -125,6 +125,14 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
+            # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
+            try:
+                props = self._device.visible_properties
+                prop_names = [p.name for p in props]
+                log.info(f"  Device-eigenskapar: {prop_names}")
+            except Exception as e:
+                log.warning(f"  Kunne ikkje liste eigenskapar: {e}")
+
             # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
 
@@ -135,6 +143,16 @@ class OpenDAQBro:
                     sigs = list(ch.signals)
                     if sigs:
                         self._kanal_signal.append((ch, sigs[0]))
+                        # Diagnostikk: logg signal-info for fyrste kanal
+                        if len(self._kanal_signal) == 1:
+                            sig = sigs[0]
+                            try:
+                                desc = sig.descriptor
+                                log.info(f"  Signal[0] namn={sig.name}, "
+                                         f"descriptor.name={desc.name if desc else 'None'}, "
+                                         f"sample_type={desc.sample_type if desc else 'None'}")
+                            except Exception:
+                                log.info(f"  Signal[0] namn={sig.name} (ingen descriptor)")
                     else:
                         self._kanal_signal.append((ch, None))
                 log.info(f"  Signal-referansar: {len(self._kanal_signal)} kanalar, "
@@ -381,6 +399,15 @@ class OpenDAQBro:
         except Exception as e:
             log.warning(f"  Kunne ikkje sette NumberOfChannels: {e}")
             return
+
+        # GlobalSampleRate styrer kor fort referanse-eininga genererer
+        # samples.  Utan denne kan eininga stå i tomgang og DewesoftX
+        # ser kanalar utan data.
+        try:
+            self._device.set_property_value("GlobalSampleRate", 1000)
+            log.info("  GlobalSampleRate sett til 1000 Hz")
+        except Exception as e:
+            log.warning(f"  GlobalSampleRate feilet (kan vere annleis namn): {e}")
 
         # Les persistert konfig (fallback til standard)
         kanal_konfig = les_konfig()
