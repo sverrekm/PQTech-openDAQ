@@ -269,29 +269,55 @@ class SiriusDriver:
 
         if not self._ep2_ok:
             # EP2 ikkje aktiv etter USB-enumerering.  Køyr start-acquisition
-            # automatisk — SIRIUS treng dette for å aktivere ADC-streaming.
-            # VIKTIG: B1-heartbeat må pumpe medan vi testar EP2, elles
-            # stoppar SIRIUS ADC-straumen umiddelbart etter trigger.
-            log.info("EP2 ikkje aktiv — køyrer start-acquisition automatisk...")
-            try:
-                self._start_acquisition()
-                if self._test_ep2_med_heartbeat():
-                    self._strategi_logg.registrer_suksess("1_start_acquisition")
-                    log.info("EP2 starta etter automatisk start-acquisition")
-                else:
-                    log.warning("EP2 svarte ikkje etter start-acquisition — prøver init + start...")
-                    # Strategi 2: full init + start-acquisition
+            # med B1-heartbeat pumpande FRÅ STARTEN.
+            #
+            # KRITISK: B1-pumpa startar FØR _start_acquisition() slik at
+            # det IKKJE er nokon heartbeat-gap mellom trigger-poll-KLAR
+            # og fyrste eksterne B1.  Pumpa er allereie parkert på
+            # _cmd_lock og tek over med ein gong trigger returnerer.
+            # I pcapng sender DewesoftX B1 kontinuerleg utan gap.
+            log.info("EP2 ikkje aktiv — køyrer start-acquisition med B1-pumpe...")
+            hb_stopp = threading.Event()
+            hb_teller = [0]
+
+            def _b1_pumpe_koble():
+                while not hb_stopp.is_set():
                     try:
-                        self._initialiser()
-                        time.sleep(0.5)
-                        self._start_acquisition()
-                        if self._test_ep2_med_heartbeat():
-                            self._strategi_logg.registrer_suksess("2_init_start")
-                            log.info("EP2 starta etter init + start-acquisition")
-                    except Exception as e2:
-                        log.warning(f"Init + start-acquisition feilet: {e2}")
-            except Exception as e:
-                log.warning(f"Automatisk start-acquisition feilet: {e}")
+                        self._proto.poll_b1(timeout=10)
+                        hb_teller[0] += 1
+                    except Exception:
+                        hb_stopp.wait(timeout=0.005)
+
+            hb_traad = threading.Thread(
+                target=_b1_pumpe_koble, daemon=True, name="koble-til-hb"
+            )
+            hb_traad.start()
+
+            try:
+                try:
+                    self._start_acquisition()
+                    log.info(f"  B1-pumpe: {hb_teller[0]} polls under start-acquisition")
+                    if self._test_ep2():
+                        self._strategi_logg.registrer_suksess("1_start_acquisition")
+                        log.info("EP2 starta etter automatisk start-acquisition")
+                    else:
+                        log.warning("EP2 svarte ikkje — prøver init + start...")
+                        # Strategi 2: init + start-acquisition
+                        # INGA time.sleep() — B1-pumpa held hjarta bankande
+                        try:
+                            self._initialiser()
+                            self._start_acquisition()
+                            log.info(f"  B1-pumpe: {hb_teller[0]} polls totalt")
+                            if self._test_ep2():
+                                self._strategi_logg.registrer_suksess("2_init_start")
+                                log.info("EP2 starta etter init + start-acquisition")
+                        except Exception as e2:
+                            log.warning(f"Init + start-acquisition feilet: {e2}")
+                except Exception as e:
+                    log.warning(f"Automatisk start-acquisition feilet: {e}")
+            finally:
+                hb_stopp.set()
+                hb_traad.join(timeout=2)
 
         if not self._ep2_ok:
             log.warning(
@@ -506,11 +532,11 @@ class SiriusDriver:
         # Hent device-metadata frå USB string descriptors
         self._les_usb_metadata(dev)
 
-        # 3. Test EP2 direkte (5s timeout for trege device)
+        # 3. Test EP2 direkte (3s timeout — forventa å feile på fyrste boot)
         log.info("Testar EP2 (ADC-data)...")
         self._ep2_ok = False
         try:
-            test_ep2 = dev.read(EP_ADC_IN, 512, timeout=5000)
+            test_ep2 = dev.read(EP_ADC_IN, 16384, timeout=3000)
             log.info(f"  EP2 OK: {len(test_ep2)} bytes lest")
             self._ep2_ok = True
         except usb.core.USBError as e:
@@ -663,19 +689,37 @@ class SiriusDriver:
             log.error(f"sysfs USB reset feilet: {e}")
             return False
 
-    def _test_ep2(self, timeout=3000):
-        """Rask test om EP2 leverer data.
+    def _test_ep2(self, timeout=5000):
+        """Test om EP2 leverer data (fleire forsøk med stor buffer).
+
+        Brukar 16384-byte buffer (matchande EP2 pakkestorleik 15872B)
+        og prøver fleire korte lesingar opp til total timeout.
+        Kallar clear_halt fyrst i tilfelle EP2 er stalla.
 
         Returns: True viss EP2 svarte med data
         """
+        # Fjern eventuell stall/halt-tilstand på EP2
         try:
-            data = self._dev.read(EP_ADC_IN, 512, timeout=timeout)
-            if data and len(data) > 0:
-                log.info(f"  EP2 test OK: {len(data)} bytes")
-                self._ep2_ok = True
-                return True
-        except Exception as e:
-            log.debug(f"  EP2 test feilet: {e}")
+            self._dev.clear_halt(EP_ADC_IN)
+        except Exception:
+            pass
+
+        start = time.time()
+        timeout_sek = timeout / 1000.0
+        forsok = 0
+        while time.time() - start < timeout_sek:
+            forsok += 1
+            try:
+                data = self._dev.read(EP_ADC_IN, 16384, timeout=500)
+                if data and len(data) > 0:
+                    log.info(f"  EP2 test OK: {len(data)} bytes "
+                             f"(forsøk #{forsok}, {time.time()-start:.1f}s)")
+                    self._ep2_ok = True
+                    return True
+            except usb.core.USBError:
+                pass  # timeout — prøv att
+        log.warning(f"  EP2 test: ingen data etter {forsok} forsøk "
+                    f"({timeout_sek:.0f}s)")
         return False
 
     def _test_ep2_med_heartbeat(self, timeout=5000):
@@ -876,41 +920,67 @@ class SiriusDriver:
             log.error(f"Kan ikkje koble til: {e}")
             return False
 
-        # ============================================================
-        # STRATEGI 1: Start-acquisition sekvens direkte
-        # Sender dei 35 register-kommandoane som DewesoftX brukar
-        # for aa starte EP2 ADC-streaming (reg 0x02 trigger).
-        # ============================================================
+        # B1-pumpe for strategiar 1-2 (same USB-handle).
+        # Startar FØR trigger slik at pumpa allereie ventar på _cmd_lock
+        # og tek over med ein gong send_ad_raa_og_poll returnerer.
+        hb_stopp = threading.Event()
+        hb_teller = [0]
 
-        log.info("Strategi 1/4: Start-acquisition sekvens (direkte)...")
-        try:
-            self._start_acquisition()
-            if self._test_ep2_med_heartbeat():
-                self._strategi_logg.registrer_suksess("1_start_acquisition")
-                log.info("SUKSESS: Strategi 1 (start-acquisition)")
-                return True
-            log.info("  Start-acquisition sendt, men EP2 svarte ikkje enno")
-        except (SiriusPollTimeout, SiriusUSBFeil) as e:
-            log.warning(f"  Strategi 1 feilet: {e}")
+        def _b1_pumpe_gjenoppliv():
+            while not hb_stopp.is_set():
+                try:
+                    self._proto.poll_b1(timeout=10)
+                    hb_teller[0] += 1
+                except Exception:
+                    hb_stopp.wait(timeout=0.005)
 
-        # ============================================================
-        # STRATEGI 2: Init-sekvens + start-acquisition
-        # Kjoer full DewesoftX-syklus: init fyrst (A0/A1/A8/B0/AD),
-        # deretter start-acquisition. Init drep EP2, men start-
-        # acquisition bringer den tilbake.
-        # ============================================================
-        log.info("Strategi 2/4: Init + start-acquisition (full DewesoftX-syklus)...")
+        hb_traad = threading.Thread(
+            target=_b1_pumpe_gjenoppliv, daemon=True, name="gjenoppliv-hb"
+        )
+        hb_traad.start()
+
         try:
-            self._initialiser()
-            time.sleep(0.5)
-            self._start_acquisition()
-            if self._test_ep2_med_heartbeat():
-                self._strategi_logg.registrer_suksess("2_init_start")
-                log.info("SUKSESS: Strategi 2 (init + start-acquisition)")
-                return True
-            log.info("  Init + start sendt, men EP2 svarte ikkje")
-        except (SiriusPollTimeout, SiriusUSBFeil) as e:
-            log.warning(f"  Strategi 2 feilet: {e}")
+            # ============================================================
+            # STRATEGI 1: Start-acquisition sekvens direkte
+            # Sender dei 35 register-kommandoane som DewesoftX brukar
+            # for aa starte EP2 ADC-streaming (reg 0x02 trigger).
+            # B1-pumpa køyrer parallelt og held heartbeat utan gap.
+            # ============================================================
+
+            log.info("Strategi 1/4: Start-acquisition sekvens (direkte)...")
+            try:
+                self._start_acquisition()
+                log.info(f"  B1-pumpe: {hb_teller[0]} polls under start-acquisition")
+                if self._test_ep2():
+                    self._strategi_logg.registrer_suksess("1_start_acquisition")
+                    log.info("SUKSESS: Strategi 1 (start-acquisition)")
+                    return True
+                log.info("  Start-acquisition sendt, men EP2 svarte ikkje enno")
+            except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                log.warning(f"  Strategi 1 feilet: {e}")
+
+            # ============================================================
+            # STRATEGI 2: Init-sekvens + start-acquisition
+            # Kjoer full DewesoftX-syklus: init fyrst (A0/A1/A8/B0/AD),
+            # deretter start-acquisition. INGA pause — B1-pumpa held
+            # hjarta bankande mellom init og start.
+            # ============================================================
+            log.info("Strategi 2/4: Init + start-acquisition (full DewesoftX-syklus)...")
+            try:
+                self._initialiser()
+                # INGA time.sleep() — B1-pumpa held heartbeat gåande
+                self._start_acquisition()
+                log.info(f"  B1-pumpe: {hb_teller[0]} polls totalt")
+                if self._test_ep2():
+                    self._strategi_logg.registrer_suksess("2_init_start")
+                    log.info("SUKSESS: Strategi 2 (init + start-acquisition)")
+                    return True
+                log.info("  Init + start sendt, men EP2 svarte ikkje")
+            except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                log.warning(f"  Strategi 2 feilet: {e}")
+        finally:
+            hb_stopp.set()
+            hb_traad.join(timeout=2)
 
         # ============================================================
         # STRATEGI 3: dev.reset() (USB bus reset) + start-acquisition
