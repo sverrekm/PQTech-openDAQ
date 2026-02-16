@@ -127,6 +127,20 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
+            # DewesoftX NewSetup krev "Configuration"-eigenskap på devicen.
+            # Referanse-eininga har ikkje denne — legg til manuelt.
+            try:
+                self._device.add_property(
+                    _daq.StringProperty(
+                        _daq.String("Configuration"),
+                        _daq.String(""),
+                        _daq.Boolean(True),
+                    )
+                )
+                log.info("  'Configuration'-eigenskap lagt til på device")
+            except Exception as e:
+                log.warning(f"  Kunne ikkje legge til Configuration-eigenskap: {e}")
+
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
                 props = self._device.visible_properties
