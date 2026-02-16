@@ -1127,6 +1127,11 @@ class SiriusDriver:
           3-34. Globale register-skrivingar via AD-kommando
           35. Register 0x02 trigger (startar EP2, ~137ms ventetid)
 
+        VIKTIG: Reg 0x03 ("streaming confirmed") vert IKKJE sendt.
+        pcapng-analyse (sirius2.pcapng) viser at DewesoftX ikkje alltid
+        sender den, og time.sleep() mellom 0x02 og 0x03 drap EP2 fordi
+        B1-heartbeat stoppa i 200ms.
+
         Raises:
             SiriusPollTimeout: Viss trigger-registeret ikkje responderer
             SiriusUSBFeil: Ved USB-feil
@@ -1197,6 +1202,12 @@ class SiriusDriver:
         # Steg 35: TRIGGER - Register 0x02 (startar EP2 ADC-streaming)
         # Denne tek ~137ms og krev mange B1-poll-syklusar.
         # er_skriving=False fordi vi MÅ vente på POLL_KLAR (0x01)
+        #
+        # KRITISK: Etter at trigger returnerer, MÅ B1-heartbeat halde fram
+        # utan opphald.  Kvar pause >5-10ms utan B1 kan få SIRIUS til å
+        # stoppe EP2-straumen.  Difor sender vi IKKJE reg 0x03 her —
+        # pcapng-analyse (sirius2.pcapng) viser at DewesoftX ikkje alltid
+        # sender reg 0x03, og EP2 strøymer fint utan den.
         log.info("  Steg 35/35: reg 0x02 TRIGGER (startar streaming)...")
         trigger_cmd = bytes.fromhex('ad3f0c00000002ffffffffffffffff')
         try:
@@ -1205,20 +1216,6 @@ class SiriusDriver:
             log.info("  Reg 0x02 trigger FULLFOERT (status=klar)")
         except SiriusPollTimeout:
             log.warning("  Reg 0x02 trigger: poll timeout (EP2 kan likevel starte)")
-
-        # Steg 36: Register 0x03 — "streaming confirmed" signal
-        # DewesoftX sender dette 0.22s etter reg 0x02, etter at EP2-data
-        # allereie har begynt å strøyme. Handshake som fortel SIRIUS at
-        # hosten mottek data og er klar.
-        time.sleep(0.2)
-        log.info("  Steg 36: reg 0x03 (streaming confirmed)...")
-        confirm_cmd = bytes.fromhex('ad3f0c00000003ffffffffffffffff')
-        try:
-            proto.send_ad_raa_og_poll(confirm_cmd, maks_forsok=100,
-                                      er_skriving=True)
-            log.info("  Reg 0x03 confirm FULLFOERT")
-        except SiriusPollTimeout:
-            log.warning("  Reg 0x03 confirm: poll timeout (held fram)")
 
         log.info("Start-acquisition sekvens sendt")
 
