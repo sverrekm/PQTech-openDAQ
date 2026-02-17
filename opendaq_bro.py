@@ -107,25 +107,24 @@ class OpenDAQBro:
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
 
-            # Bruk add_device() i staden for set_root_device().
-            # Med set_root_device er referanse-eininga rota, og getDomain()
-            # på den kastar C++ exception som krasjar DewesoftX:
-            #   "External exception E06D7363 at GetDomain"
-            # Med add_device er openDAQ Instance rota (gyldig domain),
-            # og referanse-eininga er ei sub-eining under den.
+            # Bruk set_root_device() slik at referanse-eininga ER rota.
+            # Med add_device() vert referanse-eininga ei sub-eining, og
+            # DewesoftX kallar GetDomain() på den → nil → krasj.
+            # Med set_root_device() er det INGEN sub-eining. DewesoftX
+            # ser berre rot-eininga, og rot-einingar treng ikkje domain.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
+            builder.set_root_device("daqref://device0")
             self._instance = builder.build()
-            log.info("  Instance oppretta")
+            self._device = self._instance  # Instance ER eininga
+            log.info("  Instance oppretta med referanse-eining som rot")
 
-            # Legg til referanse-eining som sub-device
-            self._device = self._instance.add_device("daqref://device0")
             enhet_namn = ""
             try:
                 enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
             except Exception:
                 enhet_namn = "RefDevice0"
-            log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
+            log.info(f"  Referanse-enhet (rot): {enhet_namn}")
 
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
@@ -172,7 +171,7 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanallisting feilet: {e}")
 
-            # Start servere på instance (som er rota).
+            # Start servere på instance (som no ER referanse-eininga).
             # Inkluderer Native Streaming som DewesoftX treng for full
             # NewSetup-forhandling.
             servere = []
