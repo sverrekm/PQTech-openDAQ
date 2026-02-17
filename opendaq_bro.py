@@ -350,11 +350,23 @@ class OpenDAQBro:
                 (time.time() - self._sirius_ts) < 5.0
             )
 
+            # Oppdater tidskanal (kanal 8) uansett — Counter waveform køyrer alltid
+            t = time.time() - t0
+            self._siste_verdiar["kanal_8"] = {
+                "snitt": round(t, 2),
+                "rms": round(t, 2),
+                "topp": round(t, 2),
+                "siste": round(t, 2),
+                "antall": 1000,
+                "kjelde": "counter",
+            }
+
             if not sirius_nyleg:
                 self._sirius_aktiv = False
-                t = time.time() - t0
-                # Generer simulerte verdiar frå SUNDET_KANALAR
+                # Generer simulerte verdiar frå SUNDET_KANALAR (berre ADC-kanalar)
                 for i, cfg in enumerate(self.SUNDET_KANALAR):
+                    if i == 8:  # Tidskanal handtert over
+                        continue
                     key = f"kanal_{i}"
                     amp = cfg["amplitude"]
                     freq = cfg["freq"]
@@ -408,7 +420,7 @@ class OpenDAQBro:
         {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
         {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
         {"namn": "AI 7", "amplitude": 0.0,   "freq": 50.0, "range": (-10000, 10000)},
-        {"namn": "Tid",  "amplitude": 0.0,   "freq": 1.0,  "range": (0, 1000000)},
+        {"namn": "Tid",  "amplitude": 0.0,   "freq": 1.0,  "range": (0, 3600)},
     ]
 
     def _konfig_kanalar(self):

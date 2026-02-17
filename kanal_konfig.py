@@ -54,7 +54,7 @@ class KanalKonfig:
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 5  # v5: 9 kanalar (AI 0-7 + Tid) med tidskanal for DewesoftX
+KONFIG_VERSJON = 6  # v6: Tid-kanal range fiksa (0-3600s, ikkje 0-1M)
 
 # Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
 #
@@ -78,7 +78,7 @@ STANDARD_KONFIG: List[KanalKonfig] = [
     KanalKonfig(5, "AI 5", True,  "current", -10000.0, 10000.0, "A", 1000),
     KanalKonfig(6, "AI 6", True,  "current", -10000.0, 10000.0, "A", 1000),
     KanalKonfig(7, "AI 7", False, "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(8, "Tid",  True,  "generic", 0.0, 1000000.0, "s", 1000),
+    KanalKonfig(8, "Tid",  True,  "generic", 0.0, 3600.0, "s", 1000),
 ]
 
 
