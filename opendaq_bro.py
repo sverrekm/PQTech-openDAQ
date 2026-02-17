@@ -107,24 +107,23 @@ class OpenDAQBro:
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
 
-            # Bruk set_root_device() slik at referanse-eininga ER rota.
-            # Med add_device() vert referanse-eininga ei sub-eining, og
-            # DewesoftX kallar GetDomain() på den → nil → krasj.
-            # Med set_root_device() er det INGEN sub-eining. DewesoftX
-            # ser berre rot-eininga, og rot-einingar treng ikkje domain.
+            # Bruk add_device() med referanse-eininga som sub-device.
+            # GetDomain()-krasjen er fiksa med C++ patch i Dockerfile
+            # som returnerer fallback DeviceDomain i staden for nullptr.
+            # add_device() gir betre DeviceInfo enn set_root_device()
+            # fordi referanse-eininga har komplett info frå modulen.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
-            builder.set_root_device("daqref://device0")
             self._instance = builder.build()
-            self._device = self._instance  # Instance ER eininga
-            log.info("  Instance oppretta med referanse-eining som rot")
+            log.info("  Instance oppretta")
 
+            self._device = self._instance.add_device("daqref://device0")
             enhet_namn = ""
             try:
                 enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
             except Exception:
                 enhet_namn = "RefDevice0"
-            log.info(f"  Referanse-enhet (rot): {enhet_namn}")
+            log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
 
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
@@ -136,6 +135,9 @@ class OpenDAQBro:
 
             # Konfigurer 9 kanalar (8 ADC + 1 tid) som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
+
+            # Fiks nil string-eigenskapar som krasjar DewesoftX
+            self._fiks_alle_nil_strings()
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
             self._kanal_signal = []
@@ -171,7 +173,7 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanallisting feilet: {e}")
 
-            # Start servere på instance (som no ER referanse-eininga).
+            # Start servere på instance (som er rota).
             # Inkluderer Native Streaming som DewesoftX treng for full
             # NewSetup-forhandling.
             servere = []
@@ -613,6 +615,64 @@ class OpenDAQBro:
         except Exception as e:
             log.warning(f"  _safe_set({namn}, {verdi!r}): {e}")
             return False
+
+    def _fiks_nil_strings(self, obj, label=""):
+        """Sett nil string-eigenskapar til tom streng.
+
+        DewesoftX krasjar med 'Interface object is nil' i InitStringProperty
+        når ein string-eigenskap har nil-verdi (nullptr) i staden for "".
+        Denne metoden itererer alle synlege eigenskapar og fiksar nil-strings.
+        """
+        ct = getattr(_daq, 'CoreType', None)
+        if ct is None:
+            return
+        try:
+            for prop in obj.visible_properties:
+                try:
+                    if prop.value_type == ct.ctString:
+                        val = obj.get_property_value(prop.name)
+                        if val is None:
+                            try:
+                                obj.set_property_value(prop.name, "")
+                                log.info(f"  {label}{prop.name}: nil → ''")
+                            except Exception:
+                                pass  # Read-only property
+                except Exception:
+                    pass
+        except Exception as e:
+            log.warning(f"  _fiks_nil_strings({label}): {e}")
+
+    def _fiks_alle_nil_strings(self):
+        """Fiks nil string-eigenskapar på device, device info og alle kanalar."""
+        # Device-eigenskapar
+        self._fiks_nil_strings(self._device, "Dev.")
+
+        # DeviceInfo-eigenskapar
+        try:
+            info = self._device.info
+            if info:
+                self._fiks_nil_strings(info, "Info.")
+        except Exception as e:
+            log.warning(f"  DeviceInfo nil-fiks: {e}")
+
+        # Instance-eigenskapar (viss ulik device)
+        if self._instance is not self._device:
+            self._fiks_nil_strings(self._instance, "Inst.")
+            try:
+                info = self._instance.info
+                if info:
+                    self._fiks_nil_strings(info, "InstInfo.")
+            except Exception as e:
+                pass
+
+        # Kanal-eigenskapar
+        try:
+            for i, ch in enumerate(self._device.channels):
+                self._fiks_nil_strings(ch, f"Ch{i}.")
+        except Exception as e:
+            log.warning(f"  Kanal nil-fiks: {e}")
+
+        log.info("  Nil string-eigenskapar fiksa")
 
     def _logg_eigenskapar(self, obj, label=""):
         """Logg alle synlege eigenskapar med type og verdi (for feilsøking)."""
