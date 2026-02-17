@@ -107,23 +107,22 @@ class OpenDAQBro:
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
 
-            # Bruk add_device() med referanse-eininga som sub-device.
-            # GetDomain()-krasjen er fiksa med C++ patch i Dockerfile
-            # som returnerer fallback DeviceDomain i staden for nullptr.
-            # add_device() gir betre DeviceInfo enn set_root_device()
-            # fordi referanse-eininga har komplett info frå modulen.
+            # Bruk set_root_device() slik at referanse-eininga ER rota.
+            # DewesoftX får direkte tilgang utan sub-device-wrapping.
+            # getDomain() nil-krasj fiksa med C++ patch i Dockerfile.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
+            builder.set_root_device("daqref://device0")
             self._instance = builder.build()
-            log.info("  Instance oppretta")
+            self._device = self._instance  # Instance wraps root device
+            log.info("  Instance oppretta med root device (daqref://device0)")
 
-            self._device = self._instance.add_device("daqref://device0")
             enhet_namn = ""
             try:
                 enhet_namn = self._device.name if hasattr(self._device, 'name') else str(self._device)
             except Exception:
                 enhet_namn = "RefDevice0"
-            log.info(f"  Referanse-enhet (sub-device): {enhet_namn}")
+            log.info(f"  Root device: {enhet_namn}")
 
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
@@ -138,6 +137,20 @@ class OpenDAQBro:
 
             # Fiks nil string-eigenskapar som krasjar DewesoftX
             self._fiks_alle_nil_strings()
+
+            # Logg DeviceInfo for feilsøking
+            try:
+                info = self._device.info
+                log.info(f"  DeviceInfo:")
+                log.info(f"    name={info.name}")
+                for attr in ['model', 'manufacturer', 'serial_number']:
+                    try:
+                        val = getattr(info, attr, '?')
+                        log.info(f"    {attr}={val}")
+                    except Exception:
+                        log.info(f"    {attr}=(feil)")
+            except Exception as e:
+                log.warning(f"  DeviceInfo tilgang feilet: {e}")
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
             self._kanal_signal = []
@@ -193,6 +206,17 @@ class OpenDAQBro:
             # paalidelig i Docker (fleire bridge-interface). Sett adresser
             # manuelt slik at DewesoftX-klienten finn streaming-endepunkta.
             self._fiks_server_capabilities(ip)
+
+            # Logg server capabilities etter fiks
+            try:
+                for cap in self._instance.info.server_capabilities:
+                    try:
+                        pcs = cap.get_property_value("PrimaryConnectionString")
+                        log.info(f"  Cap {cap.protocol_id}: {pcs}")
+                    except Exception:
+                        log.info(f"  Cap {cap.protocol_id}: port={cap.port}")
+            except Exception as e:
+                log.warning(f"  Listing server capabilities feilet: {e}")
 
             with self._lock:
                 self._status.update({
@@ -645,7 +669,7 @@ class OpenDAQBro:
 
     def _fiks_alle_nil_strings(self):
         """Fiks nil string-eigenskapar på device, device info og alle kanalar."""
-        # Device-eigenskapar
+        # Device-eigenskapar (med set_root_device er instance = device)
         self._fiks_nil_strings(self._device, "Dev.")
 
         # DeviceInfo-eigenskapar
@@ -655,16 +679,6 @@ class OpenDAQBro:
                 self._fiks_nil_strings(info, "Info.")
         except Exception as e:
             log.warning(f"  DeviceInfo nil-fiks: {e}")
-
-        # Instance-eigenskapar (viss ulik device)
-        if self._instance is not self._device:
-            self._fiks_nil_strings(self._instance, "Inst.")
-            try:
-                info = self._instance.info
-                if info:
-                    self._fiks_nil_strings(info, "InstInfo.")
-            except Exception as e:
-                pass
 
         # Kanal-eigenskapar
         try:
