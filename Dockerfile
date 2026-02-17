@@ -52,6 +52,63 @@ WORKDIR /src
 RUN git clone --depth 1 --branch ${OPENDAQ_BRANCH} \
     https://github.com/openDAQ/openDAQ.git .
 
+# ---- Patch: getDomain() skal aldri returnere nil ----
+# DewesoftX krasjar med "External exception E06D7363" når
+# getDomain() returnerer nullptr. Instance-wrapperen vidaresender
+# ikkje getDomain() til rot-eininga, so den returnerer nil sjølv
+# om referanse-eininga har ein gyldig DeviceDomain frå initClock().
+# Fix: Returner ein standard DeviceDomain når ingen er sett.
+RUN python3 << 'PYEOF'
+import re, sys
+
+path = "/src/core/opendaq/device/include/opendaq/device_impl.h"
+with open(path, "r") as f:
+    content = f.read()
+
+# 1) Legg til naudsynte includes for DeviceDomain-fabrikken
+anchor = "#include <opendaq/device_info_internal_ptr.h>"
+extra_includes = """
+#include <opendaq/device_domain_factory.h>
+#include <coreobjects/unit_factory.h>
+#include <coretypes/ratio_factory.h>"""
+if anchor in content:
+    content = content.replace(anchor, anchor + extra_includes, 1)
+    print(f"OK: La til DeviceDomain-includes etter {anchor}")
+else:
+    print(f"ADVARSEL: Fann ikkje anchor-include, prøver alternativ", file=sys.stderr)
+    # Fallback: legg til etter fyrste opendaq-include
+    content = content.replace(
+        "#include <opendaq/device_ptr.h>",
+        "#include <opendaq/device_ptr.h>" + extra_includes, 1)
+
+# 2) Patch getDomain(): returner standard-domain viss ikkje sett
+old_line = "    *deviceDomain = this->deviceDomain.addRefAndReturn();"
+new_block = """    if (this->deviceDomain.assigned())
+    {
+        *deviceDomain = this->deviceDomain.addRefAndReturn();
+    }
+    else
+    {
+        // Fallback: standard DeviceDomain for å unngaa nil-krasj i DewesoftX
+        auto fallbackDomain = DeviceDomain(
+            Ratio(1, 1000000),
+            String(""),
+            UnitBuilder().setName("second").setSymbol("s").setQuantity("time").build());
+        *deviceDomain = fallbackDomain.addRefAndReturn();
+    }"""
+
+if old_line in content:
+    content = content.replace(old_line, new_block, 1)
+    print("OK: Patcha getDomain() med fallback DeviceDomain")
+else:
+    print("FEIL: Fann ikkje getDomain-linja å patche!", file=sys.stderr)
+    sys.exit(1)
+
+with open(path, "w") as f:
+    f.write(content)
+print("Patch komplett")
+PYEOF
+
 RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
