@@ -135,7 +135,7 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kunne ikkje liste eigenskapar: {e}")
 
-            # Konfigurer 8 kanalar som matchar SIRIUS Sundet-oppsett
+            # Konfigurer 9 kanalar (8 ADC + 1 tid) som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
@@ -276,6 +276,10 @@ class OpenDAQBro:
                 if kanal_idx >= len(self._kanal_signal):
                     break
 
+                # Hopp over tidskanalen (kanal 8) — Counter waveform genererer eigne verdiar
+                if kanal_idx == 8:
+                    continue
+
                 ch, sig = self._kanal_signal[kanal_idx]
                 if data is None or len(data) == 0:
                     continue
@@ -404,25 +408,29 @@ class OpenDAQBro:
         {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
         {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
         {"namn": "AI 7", "amplitude": 0.0,   "freq": 50.0, "range": (-10000, 10000)},
+        {"namn": "Tid",  "amplitude": 0.0,   "freq": 1.0,  "range": (0, 1000000)},
     ]
 
     def _konfig_kanalar(self):
-        """Sett 8 kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET).
+        """Sett 9 kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET).
+
+        Kanal 0-7: ADC-kanalar (Sine waveform, data frå SIRIUS)
+        Kanal 8:   Tidskanal (Counter waveform, value = globalSampleIndex)
 
         openDAQ referanse-eininga har faste grenser for eigenskapar:
           - Amplitude: Float, [0, 10]
           - Frequency: Float, [0.1, 10000]
           - DC:        Float, [-10, 10]
-          - Waveform:  Int (Selection), 0=Sine
+          - Waveform:  Int (Selection), 0=Sine, 3=Counter
           - Offset:    Int, min=0 (sample-offset, ikkje DC)
           - GlobalSampleRate: Float, [1, 1000000]
         Verdiar vert klampa automatisk av _safe_set().
         """
         # NumberOfChannels er IntProperty — int er korrekt
-        if not self._safe_set(self._device, "NumberOfChannels", 8):
+        if not self._safe_set(self._device, "NumberOfChannels", 9):
             log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
             return
-        log.info("  NumberOfChannels sett til 8")
+        log.info("  NumberOfChannels sett til 9")
 
         # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
         if self._safe_set(self._device, "GlobalSampleRate", 1000.0):
@@ -452,14 +460,22 @@ class OpenDAQBro:
                 amp = sundet["amplitude"] if sundet else 0.0
                 freq = sundet["freq"] if sundet else 50.0
 
-                # Amplitude er FloatProperty [0, 10] — _safe_set klampar
-                self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
-                # Frequency er FloatProperty [0.1, 10000]
-                self._safe_set(ch, "Frequency", freq)
-                # DC er FloatProperty [-10, 10]
-                self._safe_set(ch, "DC", 0.0)
-                # Waveform er SelectionProperty (int): 0=Sine
-                self._safe_set(ch, "Waveform", 0)
+                # Tidskanal (siste kanal) brukar Counter waveform
+                if kk.type == "generic" and kk.namn == "Tid":
+                    # Waveform 3 = Counter: value = globalSampleIndex
+                    self._safe_set(ch, "Waveform", 3)
+                    self._safe_set(ch, "Amplitude", 1.0)
+                    self._safe_set(ch, "Frequency", 1.0)
+                    self._safe_set(ch, "DC", 0.0)
+                else:
+                    # Amplitude er FloatProperty [0, 10] — _safe_set klampar
+                    self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
+                    # Frequency er FloatProperty [0.1, 10000]
+                    self._safe_set(ch, "Frequency", freq)
+                    # DC er FloatProperty [-10, 10]
+                    self._safe_set(ch, "DC", 0.0)
+                    # Waveform er SelectionProperty (int): 0=Sine
+                    self._safe_set(ch, "Waveform", 0)
                 # CustomRange er StructProperty (Range)
                 ch.set_property_value("CustomRange",
                                       _daq.Range(kk.range_min, kk.range_max))

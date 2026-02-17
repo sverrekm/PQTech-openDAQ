@@ -54,7 +54,7 @@ class KanalKonfig:
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 4  # v4: 0-indeksert (AI 0-7) for samsvar med openDAQ referanse-eining
+KONFIG_VERSJON = 5  # v5: 9 kanalar (AI 0-7 + Tid) med tidskanal for DewesoftX
 
 # Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
 #
@@ -78,6 +78,7 @@ STANDARD_KONFIG: List[KanalKonfig] = [
     KanalKonfig(5, "AI 5", True,  "current", -10000.0, 10000.0, "A", 1000),
     KanalKonfig(6, "AI 6", True,  "current", -10000.0, 10000.0, "A", 1000),
     KanalKonfig(7, "AI 7", False, "current", -10000.0, 10000.0, "A", 1000),
+    KanalKonfig(8, "Tid",  True,  "generic", 0.0, 1000000.0, "s", 1000),
 ]
 
 
@@ -110,7 +111,7 @@ def les_konfig() -> List[KanalKonfig]:
                 lagre_konfig(ny)
                 return ny
 
-            if isinstance(data, list) and len(data) == 8:
+            if isinstance(data, list) and len(data) in (8, 9):
                 konfig = [KanalKonfig.fraa_dict(d) for d in data]
                 log.info(f"Lasta kanal-konfig v{lagra_versjon} fraa {KONFIG_STI}")
                 return konfig
