@@ -489,9 +489,9 @@ class OpenDAQBro:
                     self._safe_set(ch, "DC", 0.0)
                     # Waveform er SelectionProperty (int): 0=Sine
                     self._safe_set(ch, "Waveform", 0)
-                # CustomRange er StructProperty (Range)
-                ch.set_property_value("CustomRange",
-                                      _daq.Range(kk.range_min, kk.range_max))
+                # CustomRange: Skip — StructProperty (Range) kan forårsake
+                # OPC-UA serialiseringsfeil som krasjar DewesoftX.
+                # Skalering vert handtert av _kanal_skala i oppdater_data().
                 log.info(f"  {kk.namn}: aktiv={kk.aktiv}, "
                          f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
             except Exception as e:
@@ -501,9 +501,10 @@ class OpenDAQBro:
             skala = kk.range_max / 32768.0 if kk.range_max > 0 else 1.0
             self._kanal_skala.append(skala)
 
-        # Logg fyrste kanal sine eigenskapar for å verifisere type-matching
-        if channels:
-            self._logg_eigenskapar(channels[0], "Ch0.")
+        # Logg alle kanalar sine eigenskapar for å finne nil-verdiar
+        for idx, ch in enumerate(channels):
+            if idx < len(kanal_konfig):
+                self._logg_eigenskapar(ch, f"Ch{idx}.")
 
     def _fiks_server_capabilities(self, ip):
         """Sett server capability-adresser manuelt for Docker-miljoe.
