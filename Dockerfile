@@ -106,7 +106,97 @@ else:
 
 with open(path, "w") as f:
     f.write(content)
-print("Patch komplett")
+print("Patch 1/2 komplett: getDomain")
+
+# ---- Patch 2: OPC-UA nil string → tom streng ----
+# VariantConverter<IString>::ToVariant krasjar når input er nullptr.
+# VariantConverter<IBaseObject>::ToVariant returnerer tom variant for nil,
+# som DewesoftX les som null string → krasj i InitStringProperty.
+# Fix: Legg til nullptr-sjekk i IString-konverteren.
+
+path2 = "/src/shared/libraries/opcuatms/opcuatms/src/converters/core_types_converter.cpp"
+with open(path2, "r") as f:
+    content2 = f.read()
+
+# Patch IString ToVariant: legg til nullptr-sjekk
+old_str_conv = """VariantConverter<IString>::ToVariant(const StringPtr& object, const UA_DataType* targetType, const ContextPtr& /*context*/)
+{
+    auto variant = OpcUaVariant();"""
+
+# Prøv med ulike whitespace-variantar
+found = False
+for ws_variant in [old_str_conv,
+    old_str_conv.replace("const ContextPtr& /*context*/", "const ContextPtr&  /*context*/"),
+    ]:
+    if ws_variant in content2:
+        new_str_conv = ws_variant.replace(
+            "auto variant = OpcUaVariant();",
+            """auto variant = OpcUaVariant();
+
+    // Patch: nil string → tom streng for å unngaa DewesoftX-krasj
+    if (!object.assigned())
+    {
+        auto emptyStr = String("");
+        if (targetType == nullptr || targetType == &UA_TYPES[UA_TYPES_STRING])
+            variant.setScalar(*StructConverter<IString, UA_String>::ToTmsType(emptyStr));
+        else if (targetType == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
+            variant.setScalar(*StructConverter<IString, UA_LocalizedText>::ToTmsType(emptyStr));
+        else if (targetType == &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
+            variant.setScalar(*StructConverter<IString, UA_QualifiedName>::ToTmsType(emptyStr));
+        return variant;
+    }""")
+        content2 = content2.replace(ws_variant, new_str_conv, 1)
+        found = True
+        break
+
+if not found:
+    # Generisk fallback: søk etter mønsteret med regex
+    import re
+    pattern = r'(VariantConverter<IString>::ToVariant\(const StringPtr& object.*?\{)\s*\n(\s*auto variant = OpcUaVariant\(\);)'
+    match = re.search(pattern, content2, re.DOTALL)
+    if match:
+        indent = "    "
+        nil_check = f"""\n{indent}// Patch: nil string → tom streng
+{indent}if (!object.assigned())
+{indent}{{
+{indent}    auto emptyStr = String("");
+{indent}    if (targetType == nullptr || targetType == &UA_TYPES[UA_TYPES_STRING])
+{indent}        variant.setScalar(*StructConverter<IString, UA_String>::ToTmsType(emptyStr));
+{indent}    else if (targetType == &UA_TYPES[UA_TYPES_LOCALIZEDTEXT])
+{indent}        variant.setScalar(*StructConverter<IString, UA_LocalizedText>::ToTmsType(emptyStr));
+{indent}    else if (targetType == &UA_TYPES[UA_TYPES_QUALIFIEDNAME])
+{indent}        variant.setScalar(*StructConverter<IString, UA_QualifiedName>::ToTmsType(emptyStr));
+{indent}    return variant;
+{indent}}}"""
+        replacement = match.group(1) + "\n" + match.group(2) + nil_check
+        content2 = content2[:match.start()] + replacement + content2[match.end():]
+        found = True
+
+if not found:
+    print("FEIL: Fann ikkje IString ToVariant å patche!", file=sys.stderr)
+    sys.exit(1)
+
+# Patch OGSAA IBaseObject ToVariant: nil → tom streng for string-kontekst
+old_base = """if (!object.assigned())
+        return {};"""
+new_base = """if (!object.assigned())
+    {
+        // Patch: returner tom streng i staden for null variant
+        auto variant = OpcUaVariant();
+        UA_String empty = UA_STRING_ALLOC("");
+        variant.setScalar(empty);
+        UA_String_clear(&empty);
+        return variant;
+    }"""
+if old_base in content2:
+    content2 = content2.replace(old_base, new_base, 1)
+    print("OK: Patcha IBaseObject nil → tom streng")
+else:
+    print("INFO: IBaseObject nil-sjekk ikkje funnen (kanskje anna format)")
+
+with open(path2, "w") as f:
+    f.write(content2)
+print("Patch 2/2 komplett: nil string")
 PYEOF
 
 RUN cmake -S /src -B /src/build -G Ninja \
