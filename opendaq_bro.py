@@ -185,12 +185,26 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Signal-henting feilet: {e}")
 
-            # List kanalar
+            # List kanalar og sjekk domain-signal (nil → DewesoftX krasj)
             kanalar = []
             try:
-                for ch in self._device.channels:
+                for idx, ch in enumerate(self._device.channels):
                     namn = ch.name if hasattr(ch, 'name') else str(ch)
                     kanalar.append(namn)
+                    # Sjekk at kvart signal har domain-signal (kritisk for DewesoftX)
+                    try:
+                        for sig in ch.signals:
+                            dom = sig.domain_signal
+                            if dom is None:
+                                log.warning(f"  ADVARSEL: Ch{idx}/{sig.name} "
+                                            f"har INGEN domain-signal!")
+                            else:
+                                dom_desc = dom.descriptor
+                                if dom_desc is None:
+                                    log.warning(f"  ADVARSEL: Ch{idx}/{sig.name} "
+                                                f"domain-signal manglar descriptor!")
+                    except Exception as e2:
+                        log.warning(f"  Ch{idx} domain-sjekk feilet: {e2}")
                 log.info(f"  Kanalar: {len(kanalar)}")
             except Exception as e:
                 log.warning(f"  Kanallisting feilet: {e}")
@@ -321,9 +335,9 @@ class OpenDAQBro:
                 if kanal_idx >= len(self._kanal_signal):
                     break
 
-                # Hopp over tidskanalen (kanal 8) — Counter waveform genererer eigne verdiar
-                if kanal_idx == 8:
-                    continue
+                # Hopp over tidskanalen (kanal 8) — ikkje eksponert via openDAQ
+                if kanal_idx >= 8:
+                    break
 
                 ch, sig = self._kanal_signal[kanal_idx]
                 if data is None or len(data) == 0:
@@ -395,23 +409,13 @@ class OpenDAQBro:
                 (time.time() - self._sirius_ts) < 5.0
             )
 
-            # Oppdater tidskanal (kanal 8) uansett — Counter waveform køyrer alltid
-            t = time.time() - t0
-            self._siste_verdiar["kanal_8"] = {
-                "snitt": round(t, 2),
-                "rms": round(t, 2),
-                "topp": round(t, 2),
-                "siste": round(t, 2),
-                "antall": 1000,
-                "kjelde": "counter",
-            }
-
             if not sirius_nyleg:
                 self._sirius_aktiv = False
                 # Generer simulerte verdiar frå SUNDET_KANALAR (berre ADC-kanalar)
+                t = time.time() - t0
                 for i, cfg in enumerate(self.SUNDET_KANALAR):
-                    if i == 8:  # Tidskanal handtert over
-                        continue
+                    if i >= 8:  # Berre 8 ADC-kanalar
+                        break
                     key = f"kanal_{i}"
                     amp = cfg["amplitude"]
                     freq = cfg["freq"]
@@ -505,11 +509,13 @@ class OpenDAQBro:
           - GlobalSampleRate: Float, [1, 1000000]
         Verdiar vert klampa automatisk av _safe_set().
         """
-        # NumberOfChannels er IntProperty — int er korrekt
-        if not self._safe_set(self._device, "NumberOfChannels", 9):
+        # Berre 8 ADC-kanalar (ikkje 9).
+        # Counter waveform (Waveform=3) for tidskanal manglar domain-signal,
+        # som krasjar DewesoftX i TryGetSampleRate med "Interface object is nil".
+        if not self._safe_set(self._device, "NumberOfChannels", 8):
             log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
             return
-        log.info("  NumberOfChannels sett til 9")
+        log.info("  NumberOfChannels sett til 8 (utan tidskanal)")
 
         # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
         if self._safe_set(self._device, "GlobalSampleRate", 1000.0):
@@ -539,14 +545,11 @@ class OpenDAQBro:
                 amp = sundet["amplitude"] if sundet else 0.0
                 freq = sundet["freq"] if sundet else 50.0
 
-                # Tidskanal (siste kanal) brukar Counter waveform
+                # Hopp over tidskanalen (indeks 8) — ikkje brukt med 8 kanalar
                 if kk.type == "generic" and kk.namn == "Tid":
-                    # Waveform 3 = Counter: value = globalSampleIndex
-                    self._safe_set(ch, "Waveform", 3)
-                    self._safe_set(ch, "Amplitude", 1.0)
-                    self._safe_set(ch, "Frequency", 1.0)
-                    self._safe_set(ch, "DC", 0.0)
-                else:
+                    continue
+                if i >= 8:
+                    break
                     # Amplitude er FloatProperty [0, 10] — _safe_set klampar
                     self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
                     # Frequency er FloatProperty [0.1, 10000]
