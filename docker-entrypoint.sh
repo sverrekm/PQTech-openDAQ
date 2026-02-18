@@ -96,15 +96,41 @@ FELLES_ARGS=(
 # open62541 bruker gethostname() for endpoint-URL. Docker mapper hostname
 # til 127.0.x.x i /etc/hosts, saa OPC-UA annonserer localhost.
 # Fiks: erstatt med faktisk IP slik at DewesoftX kan koble til.
-export OPENDAQ_IP="${OPENDAQ_IP:-$(hostname -I | awk '{print $1}')}"
+#
+# IP-prioritet: eth0/LAN fyrst (DewesoftX koplar til via kabel),
+# deretter wlan0, til slutt hostname -I.
+if [ -z "${OPENDAQ_IP}" ]; then
+    # Prøv eth0 (LAN) fyrst — DewesoftX brukar kabla tilkopling
+    for IFACE in eth0 end0 lan0; do
+        ETH_IP=$(ip -4 addr show "$IFACE" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
+        if [ -n "$ETH_IP" ]; then
+            export OPENDAQ_IP="$ETH_IP"
+            echo "  IP fraa $IFACE: $OPENDAQ_IP"
+            break
+        fi
+    done
+fi
+# Fallback til fyrste ikkje-loopback IP
+if [ -z "${OPENDAQ_IP}" ]; then
+    export OPENDAQ_IP="$(hostname -I | awk '{print $1}')"
+    echo "  IP fraa hostname -I: $OPENDAQ_IP"
+fi
 if [ -n "$OPENDAQ_IP" ]; then
     CURRENT_HOST=$(hostname)
-    if grep -q "127\.0.*${CURRENT_HOST}" /etc/hosts; then
+    CURRENT_RESOLVE=$(getent hosts "$CURRENT_HOST" 2>/dev/null | awk '{print $1}')
+    if [ -n "$CURRENT_RESOLVE" ] && [ "$CURRENT_RESOLVE" != "$OPENDAQ_IP" ]; then
+        # Hostname resolver til feil IP (127.0.x.x eller WiFi) — erstatt med LAN-IP
         # sed -i feiler paa Docker bind-mount, bruk cp+cat i staden
-        sed "s/127\.0[.0-9]*[[:space:]]*${CURRENT_HOST}/${OPENDAQ_IP} ${CURRENT_HOST}/" /etc/hosts > /tmp/hosts.fixed
+        sed "s/[0-9.]*[[:space:]]*${CURRENT_HOST}/${OPENDAQ_IP} ${CURRENT_HOST}/" /etc/hosts > /tmp/hosts.fixed
         cat /tmp/hosts.fixed > /etc/hosts
         rm -f /tmp/hosts.fixed
-        echo "  OPC-UA hostname: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
+        echo "  OPC-UA hostname: ${CURRENT_HOST} ${CURRENT_RESOLVE} -> ${OPENDAQ_IP}"
+    elif [ -z "$CURRENT_RESOLVE" ]; then
+        # Hostname finst ikkje i /etc/hosts — legg til
+        echo "${OPENDAQ_IP} ${CURRENT_HOST}" >> /etc/hosts
+        echo "  OPC-UA hostname lagt til: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
+    else
+        echo "  OPC-UA hostname OK: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
     fi
 fi
 echo ""

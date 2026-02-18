@@ -447,16 +447,38 @@ class OpenDAQBro:
         log.info("  Signal-leser-traad stoppa")
 
     def stopp(self):
-        """Stopp openDAQ instance og servere."""
+        """Stopp openDAQ instance og servere.
+
+        Eksplisitt opprydding av servere og instance for å frigjere
+        portar (4840, 7420, 7414) slik at restart kan binde dei på nytt.
+        """
         self._tilgjengelig = False
         self._stopp_event.set()
         if self._leser_traad and self._leser_traad.is_alive():
             self._leser_traad.join(timeout=3)
         with self._lock:
             self._status["aktiv"] = False
-        # Instance-opprydding handtert av Python GC
+
+        # Fjern serverane eksplisitt FØR instance-destruksjon.
+        # remove_server() stoppar nettverks-lyttarar og frigjer portar.
+        if self._instance is not None:
+            try:
+                servers = list(self._instance.servers)
+                for srv in servers:
+                    try:
+                        self._instance.remove_server(srv)
+                    except Exception:
+                        pass
+                log.info(f"  {len(servers)} serverar fjerna eksplisitt")
+            except Exception as e:
+                log.warning(f"  Fjerning av serverar feilet: {e}")
+
+        # Nullstill referansar og tving GC for å frigjere C++-objekt
+        self._kanal_signal = []
         self._instance = None
         self._device = None
+        import gc
+        gc.collect()
         log.info("openDAQ nettverksbro stoppa")
 
     # Kanalopsett (SIRIUSi-HS, 4×Hi-LV + 4×Lo-LV)

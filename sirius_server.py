@@ -451,7 +451,10 @@ def hent_opendaq_verdiar():
 
 
 def restart_opendaq_bro():
-    """Manuell restart av openDAQ bridge (for debugging/retry)."""
+    """Manuell restart av openDAQ bridge (for debugging/retry).
+
+    Stoppar serverar eksplisitt, ventar på port-frigjering, og startar på nytt.
+    """
     global _opendaq_bro, _opendaq_feil
     if _opendaq_bro is not None:
         try:
@@ -460,11 +463,35 @@ def restart_opendaq_bro():
             pass
         _opendaq_bro = None
 
-    # Tving GC og vent slik at C++ server-sockets (OPC-UA :4840,
+    # Tving GC og vent på at C++ server-sockets (OPC-UA :4840,
     # Native Streaming :7420, WebSocket :7414) vert frigjort.
+    # stopp() kallar no remove_server() eksplisitt, men OS treng
+    # tid til å frigjere TIME_WAIT-sockets.
     import gc
     gc.collect()
-    time.sleep(2)
+
+    # Vent til portane faktisk er ledige (maks 10s)
+    import socket as _sock
+    portar = [4840, 7420, 7414]
+    for forsok in range(20):
+        alle_ledige = True
+        for port in portar:
+            try:
+                s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s.setsockopt(_sock.SOL_SOCKET, _sock.SO_REUSEADDR, 1)
+                s.bind(("0.0.0.0", port))
+                s.close()
+            except OSError:
+                alle_ledige = False
+                break
+        if alle_ledige:
+            log.info(f"  Alle portar ledige etter {forsok * 0.5:.1f}s")
+            break
+        time.sleep(0.5)
+        if forsok == 0:
+            gc.collect()
+    else:
+        log.warning("  Portar ikkje frigjort etter 10s — prøver likevel")
 
     try:
         sn = server_status.get("serienummer", "")
