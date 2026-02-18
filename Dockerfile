@@ -255,7 +255,7 @@ if serial_line in content:
     // DeviceType: DewesoftX krasjar med 'Interface object is nil' i
     // TOpenDaqDeviceInfo.UpdateInfo viss DeviceType er nullptr.
     // DeviceType er eit objekt (ikkje streng), so nil-string-patchen hjelper ikkje.
-    devInfo.setDeviceType(DeviceType("dewesoft_sirius", "SIRIUSi-HS 8xHV 8xLV", "Dewesoft SIRIUSi-HS Data Acquisition"));"""
+    devInfo.setDeviceType(DeviceType("dewesoft_sirius", "SIRIUSi-HS 8xHV 8xLV", "Dewesoft SIRIUSi-HS Data Acquisition", "daq.ns", nullptr));"""
     content = content[:end_idx] + extra + content[end_idx:]
     patched += 1
     print("OK: La til MAC, platform, softwareRevision, DeviceType + alle string-felt")
