@@ -446,7 +446,16 @@ class OpenDAQBro:
 
         Eksplisitt opprydding av servere og instance for å frigjere
         portar (4840, 7420, 7414) slik at restart kan binde dei på nytt.
+
+        VIKTIG: Referansar MÅ fjernast i riktig rekkefølge:
+        1. Stopp leser-tråden (held referanse til self via metode-binding)
+        2. Fjern serverar eksplisitt (frigjer nettverks-lyttarar)
+        3. Fjern kanal/signal-referansar (held C++ channel/signal-objekt)
+        4. Fjern _device FYRST (same objekt som _instance)
+        5. Fjern _instance SIST
+        6. GC for å trigge C++-destruktorar som frigjer OS-sockets
         """
+        log.info("openDAQ nettverksbro stoppar...")
         self._tilgjengelig = False
         self._stopp_event.set()
         if self._leser_traad and self._leser_traad.is_alive():
@@ -459,20 +468,33 @@ class OpenDAQBro:
         if self._instance is not None:
             try:
                 servers = list(self._instance.servers)
-                for srv in servers:
+                for idx, srv in enumerate(servers):
                     try:
                         self._instance.remove_server(srv)
-                    except Exception:
-                        pass
-                log.info(f"  {len(servers)} serverar fjerna eksplisitt")
+                        log.info(f"  Server {idx} fjerna")
+                    except Exception as e:
+                        log.warning(f"  Server {idx} fjerning feilet: {e}")
+                log.info(f"  {len(servers)} serverar prosessert")
             except Exception as e:
-                log.warning(f"  Fjerning av serverar feilet: {e}")
+                log.warning(f"  Listing/fjerning av serverar feilet: {e}")
 
-        # Nullstill referansar og tving GC for å frigjere C++-objekt
-        self._kanal_signal = []
-        self._instance = None
-        self._device = None
+        # Nullstill ALLE referansar som held C++-objekt i live.
+        # Rekkefølge er kritisk: barnereferansar fyrst, deretter foreldre.
+        self._kanal_signal = []   # Kanal/signal-referansar
+        self._kanal_skala = []
+        self._siste_verdiar = {}
+        self._device = None       # Same objekt som _instance — fjern fyrst
+        inst = self._instance     # Lokal referanse for eksplisitt del
+        self._instance = None     # Fjern instansreferanse
+
+        # Eksplisitt del + dobbel GC for å tvinge C++-destruktorar.
+        # Python GC kan trenge fleire pass for finalizer-kjeder.
+        try:
+            del inst
+        except Exception:
+            pass
         import gc
+        gc.collect()
         gc.collect()
         log.info("openDAQ nettverksbro stoppa")
 

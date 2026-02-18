@@ -459,22 +459,33 @@ def restart_opendaq_bro():
     if _opendaq_bro is not None:
         try:
             _opendaq_bro.stopp()
+        except Exception as e:
+            log.warning(f"  opendaq_bro.stopp() feilet: {e}")
+        # Eksplisitt del for å fjerne siste Python-referanse til C++-objekta.
+        # Utan dette kan GC utsette destruktor-kall til neste samling.
+        try:
+            del _opendaq_bro
         except Exception:
             pass
         _opendaq_bro = None
 
-    # Tving GC og vent på at C++ server-sockets (OPC-UA :4840,
-    # Native Streaming :7420, WebSocket :7414) vert frigjort.
-    # stopp() kallar no remove_server() eksplisitt, men OS treng
-    # tid til å frigjere TIME_WAIT-sockets.
+    # Tving GC fleire gonger for å trigge C++ destruktor-kjeder.
+    # openDAQ server-objekt → TCP acceptor → OS socket.
     import gc
     gc.collect()
+    gc.collect()
+    gc.collect()
+    # Kort pause for at OS-kjernen skal frigjere socket-bindingar
+    time.sleep(1)
 
-    # Vent til portane faktisk er ledige (maks 10s)
+    # Vent til portane faktisk er ledige (maks 30s).
+    # TCP TIME_WAIT er normalt 60s, men sidan vi gjer clean shutdown
+    # (ikkje RST) bør portane vere ledige raskare.
     import socket as _sock
     portar = [4840, 7420, 7414]
-    for forsok in range(20):
+    for forsok in range(60):
         alle_ledige = True
+        opptekne = []
         for port in portar:
             try:
                 s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
@@ -483,15 +494,16 @@ def restart_opendaq_bro():
                 s.close()
             except OSError:
                 alle_ledige = False
-                break
+                opptekne.append(port)
         if alle_ledige:
             log.info(f"  Alle portar ledige etter {forsok * 0.5:.1f}s")
             break
-        time.sleep(0.5)
-        if forsok == 0:
+        if forsok % 10 == 0 and forsok > 0:
+            log.info(f"  Ventar på portar {opptekne} ({forsok * 0.5:.0f}s)...")
             gc.collect()
+        time.sleep(0.5)
     else:
-        log.warning("  Portar ikkje frigjort etter 10s — prøver likevel")
+        log.warning(f"  Portar {opptekne} ikkje frigjort etter 30s — prøver likevel")
 
     try:
         sn = server_status.get("serienummer", "")
