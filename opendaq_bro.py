@@ -215,17 +215,51 @@ class OpenDAQBro:
             # at streaming-serverane er oppe (openDAQ-dokumentasjon).
             servere = []
 
-            # Diagnostikk: list tilgjengelege server-typar
+            # Diagnostikk: list tilgjengelege server-typar og deira konfig
             try:
                 tilgjengelege = self._instance.available_server_types
                 log.info(f"  Tilgjengelege server-typar: {list(tilgjengelege.keys())}")
+                for srv_name in tilgjengelege:
+                    try:
+                        srv_type_obj = tilgjengelege[srv_name]
+                        cfg = srv_type_obj.create_default_config()
+                        props = []
+                        for p in cfg.visible_properties:
+                            try:
+                                val = cfg.get_property_value(p.name)
+                                props.append(f"{p.name}={val!r}")
+                            except Exception:
+                                props.append(f"{p.name}=?")
+                        log.info(f"  Konfig {srv_name}: {', '.join(props) or '(ingen)'}")
+                    except Exception:
+                        log.info(f"  Konfig {srv_name}: ikkje tilgjengeleg")
             except Exception as e:
                 log.warning(f"  Kunne ikkje liste server-typar: {e}")
+
+            ip = self._hent_ip()
 
             for srv_type in ['OpenDAQNativeStreaming', 'OpenDAQLTStreaming',
                              'OpenDAQOPCUA']:
                 try:
-                    self._instance.add_server(srv_type, None)
+                    # Prøv å lage server med konfig (sett Path til IP for OPC-UA)
+                    config = None
+                    try:
+                        srv_type_obj = self._instance.available_server_types.get(srv_type)
+                        if srv_type_obj:
+                            config = srv_type_obj.create_default_config()
+                            # Sett Path-eigenskap viss den finst (OPC-UA brukar Path
+                            # som del av endpoint-URL: opc.tcp://host:port/path)
+                            for prop_name in ('Path', 'Hostname', 'Host'):
+                                try:
+                                    config.set_property_value(prop_name, f"/{ip}")
+                                    log.info(f"  {srv_type}: sett {prop_name}=/{ip}")
+                                    break
+                                except Exception:
+                                    pass
+                    except Exception:
+                        config = None
+
+                    self._instance.add_server(srv_type, config)
                     servere.append(srv_type)
                     log.info(f"  Server: {srv_type}")
                 except Exception as e2:

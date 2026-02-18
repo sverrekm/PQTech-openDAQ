@@ -133,6 +133,16 @@ if [ -n "$OPENDAQ_IP" ]; then
         echo "  OPC-UA hostname OK: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
     fi
 fi
+# Override hostname til IP for OPC-UA endpoint-URL.
+# open62541 brukar gethostname() for å lage opc.tcp://hostname:port URL-ar.
+# DewesoftX på Windows kan ikkje resolve Linux container-hostname (t.d. "IOTmanager")
+# og viser "Disconnected". Fix: sett hostname til IP slik at endpoint-URL
+# vert opc.tcp://192.168.1.x:4840 som Windows kan nå direkte.
+if [ -n "$OPENDAQ_IP" ]; then
+    OLD_HOSTNAME=$(hostname)
+    hostname "$OPENDAQ_IP" 2>/dev/null || true
+    echo "  Hostname: $OLD_HOSTNAME -> $OPENDAQ_IP (OPC-UA endpoint URL)"
+fi
 echo ""
 
 # Deaktiver modular som ikkje trengst for server-modus og kan foraarsake

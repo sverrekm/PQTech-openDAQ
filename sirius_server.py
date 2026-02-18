@@ -436,41 +436,47 @@ def hent_enhetsinfo():
 _opendaq_feil = None
 
 
+_port_probe_cache = {"ts": 0.0, "result": {}}
+
+
 def hent_opendaq_status():
     """Hent openDAQ bridge status for web API.
 
-    Inkluderer live port-verifisering: sjekkar at serverane faktisk
-    lyttar på portane sine, uavhengig av kva den interne statusen seier.
+    Inkluderer live port-verifisering med cache (maks kvar 10. sekund)
+    for å unngå at konstante TCP-probar forstyrrar serverane.
     """
     if _opendaq_bro is not None:
         status = _opendaq_bro.hent_status()
 
-        # Live port-verifisering — uavhengig av cached status.
-        # Gjer TCP connect-probe mot kvar server-port for å stadfeste
-        # at serveren faktisk lyttar (ikkje berre at start() returnerte OK).
-        import socket as _sock
-        port_sjekk = {
-            'opcua': 4840,
-            'native_streaming': 7420,
-            'websocket': 7414,
-        }
-        port_status = {}
-        for namn, port in port_sjekk.items():
-            try:
-                s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-                s.settimeout(0.5)
-                s.connect(("127.0.0.1", port))
-                s.close()
-                port_status[namn] = True
-            except (ConnectionRefusedError, OSError):
-                port_status[namn] = False
-        status["port_status"] = port_status
-        status["alle_portar_oppe"] = all(port_status.values())
+        # Live port-verifisering — maks kvar 10. sekund.
+        # Hyppigare probing skapar "Failed to read connect request headers"
+        # i NativeStreaming-serveren og kan forstyrre DewesoftX-tilkoplinga.
+        now = time.time()
+        if now - _port_probe_cache["ts"] > 10.0:
+            import socket as _sock
+            port_sjekk = {
+                'opcua': 4840,
+                'native_streaming': 7420,
+                'websocket': 7414,
+            }
+            port_status = {}
+            for namn, port in port_sjekk.items():
+                try:
+                    s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                    s.settimeout(0.5)
+                    s.connect(("127.0.0.1", port))
+                    s.close()
+                    port_status[namn] = True
+                except (ConnectionRefusedError, OSError):
+                    port_status[namn] = False
+            _port_probe_cache.update({"ts": now, "result": port_status})
 
-        # Overstyr aktiv-flagget basert på live-verifisering.
-        # Viss minst éin port er oppe, er broa funksjonell.
-        if any(port_status.values()) and not status.get("aktiv"):
-            status["aktiv"] = True
+        port_status = _port_probe_cache["result"]
+        if port_status:
+            status["port_status"] = port_status
+            status["alle_portar_oppe"] = all(port_status.values())
+            if any(port_status.values()) and not status.get("aktiv"):
+                status["aktiv"] = True
         return status
     return {"tilgjengelig": False, "aktiv": False, "feil": _opendaq_feil or "Ikkje starta"}
 
