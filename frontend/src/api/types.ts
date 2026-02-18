@@ -54,6 +54,13 @@ export interface OpenDaqStatus {
     native_streaming?: number
     websocket?: number
   }
+  port_status?: {
+    opcua?: boolean
+    native_streaming?: boolean
+    websocket?: boolean
+  }
+  alle_portar_oppe?: boolean
+  startet?: string
   feil?: string
   melding?: string
 }

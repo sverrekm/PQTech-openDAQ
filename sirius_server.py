@@ -437,9 +437,41 @@ _opendaq_feil = None
 
 
 def hent_opendaq_status():
-    """Hent openDAQ bridge status for web API."""
+    """Hent openDAQ bridge status for web API.
+
+    Inkluderer live port-verifisering: sjekkar at serverane faktisk
+    lyttar på portane sine, uavhengig av kva den interne statusen seier.
+    """
     if _opendaq_bro is not None:
-        return _opendaq_bro.hent_status()
+        status = _opendaq_bro.hent_status()
+
+        # Live port-verifisering — uavhengig av cached status.
+        # Gjer TCP connect-probe mot kvar server-port for å stadfeste
+        # at serveren faktisk lyttar (ikkje berre at start() returnerte OK).
+        import socket as _sock
+        port_sjekk = {
+            'opcua': 4840,
+            'native_streaming': 7420,
+            'websocket': 7414,
+        }
+        port_status = {}
+        for namn, port in port_sjekk.items():
+            try:
+                s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect(("127.0.0.1", port))
+                s.close()
+                port_status[namn] = True
+            except (ConnectionRefusedError, OSError):
+                port_status[namn] = False
+        status["port_status"] = port_status
+        status["alle_portar_oppe"] = all(port_status.values())
+
+        # Overstyr aktiv-flagget basert på live-verifisering.
+        # Viss minst éin port er oppe, er broa funksjonell.
+        if any(port_status.values()) and not status.get("aktiv"):
+            status["aktiv"] = True
+        return status
     return {"tilgjengelig": False, "aktiv": False, "feil": _opendaq_feil or "Ikkje starta"}
 
 
