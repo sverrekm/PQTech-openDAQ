@@ -113,18 +113,9 @@ class OpenDAQBro:
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
 
-            # Sett DeviceInfo FØR build — etter build er info frosen/read-only.
-            try:
-                dev_info = _daq.DeviceInfo("")
-                dev_info.name = self._enhetsnamn or "SIRIUSi-HS"
-                dev_info.manufacturer = "Dewesoft"
-                dev_info.model = "SIRIUSi-HS"
-                dev_info.serial_number = self._serienummer or "0000000000"
-                builder.set_default_root_device_info(dev_info)
-                log.info(f"  DeviceInfo sett via InstanceBuilder: "
-                         f"name={dev_info.name}, sn={dev_info.serial_number}")
-            except Exception as e:
-                log.warning(f"  set_default_root_device_info feilet: {e}")
+            # MERK: set_default_root_device_info() skapar access violation i
+            # DewesoftX — referanse-eininga si DeviceInfo er read-only etter build.
+            # DeviceInfo-endring er deaktivert inntil vidare.
 
             builder.set_root_device("daqref://device0")
             self._instance = builder.build()
