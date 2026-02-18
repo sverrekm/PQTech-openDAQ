@@ -96,7 +96,7 @@ FELLES_ARGS=(
 # open62541 bruker gethostname() for endpoint-URL. Docker mapper hostname
 # til 127.0.x.x i /etc/hosts, saa OPC-UA annonserer localhost.
 # Fiks: erstatt med faktisk IP slik at DewesoftX kan koble til.
-OPENDAQ_IP="${OPENDAQ_IP:-$(hostname -I | awk '{print $1}')}"
+export OPENDAQ_IP="${OPENDAQ_IP:-$(hostname -I | awk '{print $1}')}"
 if [ -n "$OPENDAQ_IP" ]; then
     CURRENT_HOST=$(hostname)
     if grep -q "127\.0.*${CURRENT_HOST}" /etc/hosts; then

@@ -112,6 +112,20 @@ class OpenDAQBro:
             # getDomain() nil-krasj fiksa med C++ patch i Dockerfile.
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
+
+            # Sett DeviceInfo FØR build — etter build er info frosen/read-only.
+            try:
+                dev_info = _daq.DeviceInfo("")
+                dev_info.name = self._enhetsnamn or "SIRIUSi-HS"
+                dev_info.manufacturer = "Dewesoft"
+                dev_info.model = "SIRIUSi-HS"
+                dev_info.serial_number = self._serienummer or "0000000000"
+                builder.set_default_root_device_info(dev_info)
+                log.info(f"  DeviceInfo sett via InstanceBuilder: "
+                         f"name={dev_info.name}, sn={dev_info.serial_number}")
+            except Exception as e:
+                log.warning(f"  set_default_root_device_info feilet: {e}")
+
             builder.set_root_device("daqref://device0")
             self._instance = builder.build()
             self._device = self._instance  # Instance wraps root device
@@ -124,9 +138,8 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Root device: {enhet_namn}")
 
-            # Sett DeviceInfo til å matche SIRIUS slik DewesoftX kjenner att eininga.
-            # Utan dette viser DewesoftX "RefDev0" / "Reference device" og kan
-            # avvise tilkoplinga fordi det ikkje matchar forventa SIRIUS-profil.
+            # DeviceInfo er sett via InstanceBuilder ovanfor (set_default_root_device_info).
+            # Etter build er info frosen — prøv likevel å oppdatere som fallback.
             self._sett_sirius_device_info()
 
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
@@ -192,17 +205,28 @@ class OpenDAQBro:
                 log.warning(f"  Kanallisting feilet: {e}")
 
             # Start servere på instance (som er rota).
-            # Inkluderer Native Streaming som DewesoftX treng for full
-            # NewSetup-forhandling.
+            # VIKTIG rekkefølge: Streaming-servere FYRST, OPC-UA SIST.
+            # OPC-UA publiserer streaming capabilities og MÅ startast etter
+            # at streaming-serverane er oppe (openDAQ-dokumentasjon).
             servere = []
-            for srv_type in ['OpenDAQOPCUA', 'OpenDAQNativeStreaming',
-                             'OpenDAQLTStreaming']:
+
+            # Diagnostikk: list tilgjengelege server-typar
+            try:
+                tilgjengelege = self._instance.available_server_types
+                log.info(f"  Tilgjengelege server-typar: {list(tilgjengelege.keys())}")
+            except Exception as e:
+                log.warning(f"  Kunne ikkje liste server-typar: {e}")
+
+            for srv_type in ['OpenDAQNativeStreaming', 'OpenDAQLTStreaming',
+                             'OpenDAQOPCUA']:
                 try:
                     self._instance.add_server(srv_type, None)
                     servere.append(srv_type)
                     log.info(f"  Server: {srv_type}")
                 except Exception as e2:
+                    import traceback
                     log.warning(f"  {srv_type} feilet: {e2}")
+                    log.warning(f"  {srv_type} traceback: {traceback.format_exc()}")
 
             ip = self._hent_ip()
 
@@ -751,7 +775,14 @@ class OpenDAQBro:
 
     @staticmethod
     def _hent_ip():
-        """Finn maskinens IP-adresse."""
+        """Finn maskinens IP-adresse.
+
+        Brukar OPENDAQ_IP env var fyrst (sett i docker-entrypoint.sh),
+        deretter fallback til socket-deteksjon.
+        """
+        env_ip = os.environ.get("OPENDAQ_IP", "").strip()
+        if env_ip:
+            return env_ip
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
