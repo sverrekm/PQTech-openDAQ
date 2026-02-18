@@ -124,6 +124,11 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Root device: {enhet_namn}")
 
+            # Sett DeviceInfo til å matche SIRIUS slik DewesoftX kjenner att eininga.
+            # Utan dette viser DewesoftX "RefDev0" / "Reference device" og kan
+            # avvise tilkoplinga fordi det ikkje matchar forventa SIRIUS-profil.
+            self._sett_sirius_device_info()
+
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
                 props = self._device.visible_properties
@@ -191,7 +196,7 @@ class OpenDAQBro:
             # NewSetup-forhandling.
             servere = []
             for srv_type in ['OpenDAQOPCUA', 'OpenDAQNativeStreaming',
-                             'OpenDAQLTStreaming', 'OpenDAQNewLTStreaming']:
+                             'OpenDAQLTStreaming']:
                 try:
                     self._instance.add_server(srv_type, None)
                     servere.append(srv_type)
@@ -529,6 +534,39 @@ class OpenDAQBro:
         for idx, ch in enumerate(channels):
             if idx < len(kanal_konfig):
                 self._logg_eigenskapar(ch, f"Ch{idx}.")
+
+    def _sett_sirius_device_info(self):
+        """Sett DeviceInfo til å matche ekte Dewesoft SIRIUS.
+
+        DewesoftX identifiserer einingar basert på DeviceInfo-felt.
+        Standard referanse-eining rapporterer 'RefDev0' / 'openDAQ' som
+        DewesoftX ikkje kjenner att. Sett til SIRIUS-verdiar slik at
+        DewesoftX handterer eininga som ein kjent Dewesoft-enhet.
+        """
+        sirius_info = {
+            "name": self._enhetsnamn or "SIRIUSi-HS",
+            "manufacturer": "Dewesoft",
+            "model": "SIRIUSi-HS",
+            "serialNumber": self._serienummer or "0000000000",
+        }
+        try:
+            info = self._device.info
+            for prop_name, value in sirius_info.items():
+                try:
+                    info.set_property_value(prop_name, value)
+                    log.info(f"  DeviceInfo.{prop_name} = {value}")
+                except Exception as e:
+                    # Prøv alternativ: direkte attributt-setting
+                    try:
+                        py_attr = prop_name
+                        if prop_name == "serialNumber":
+                            py_attr = "serial_number"
+                        setattr(info, py_attr, value)
+                        log.info(f"  DeviceInfo.{prop_name} = {value} (via attributt)")
+                    except Exception as e2:
+                        log.info(f"  DeviceInfo.{prop_name}: ikkje endrbar ({e})")
+        except Exception as e:
+            log.warning(f"  Sett SIRIUS DeviceInfo feilet: {e}")
 
     def _fiks_server_capabilities(self, ip):
         """Sett server capability-adresser manuelt for Docker-miljoe.
