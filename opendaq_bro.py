@@ -233,6 +233,31 @@ class OpenDAQBro:
                     log.warning(f"  {srv_type} feilet: {e2}")
                     log.warning(f"  {srv_type} traceback: {traceback.format_exc()}")
 
+            # Verifiser at serverane faktisk lyttar på portane.
+            # add_server() kan returnere OK sjølv om bind() feila internt
+            # (NativeStreaming loggar feilen men kastar ikkje exception).
+            import socket as _sock
+            port_map = {
+                'OpenDAQNativeStreaming': 7420,
+                'OpenDAQLTStreaming': 7414,
+                'OpenDAQOPCUA': 4840,
+            }
+            faktisk_aktive = []
+            for srv_type in servere:
+                port = port_map.get(srv_type)
+                if port:
+                    try:
+                        s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                        s.settimeout(1.0)
+                        s.connect(("127.0.0.1", port))
+                        s.close()
+                        faktisk_aktive.append(srv_type)
+                    except (ConnectionRefusedError, OSError):
+                        log.warning(f"  {srv_type} rapporterte OK men lyttar "
+                                    f"IKKJE på port {port}!")
+                        servere.remove(srv_type)
+            log.info(f"  Verifiserte serverar: {faktisk_aktive}")
+
             ip = self._hent_ip()
 
             # Fiks tomme server capability-adresser.

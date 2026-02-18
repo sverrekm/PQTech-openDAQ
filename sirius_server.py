@@ -454,6 +454,11 @@ def restart_opendaq_bro():
     """Manuell restart av openDAQ bridge (for debugging/retry).
 
     Stoppar serverar eksplisitt, ventar på port-frigjering, og startar på nytt.
+
+    VIKTIG: C++ openDAQ server-objekt held TCP-sockets som Python GC ikkje
+    kan frigjere paalidelig. Viss portane ikkje vert ledige innan 5 sekund,
+    triggar vi os._exit(1) slik at Docker restartar containeren friskt.
+    restart: unless-stopped i docker-compose.yml sikrar automatisk omstart.
     """
     global _opendaq_bro, _opendaq_feil
     if _opendaq_bro is not None:
@@ -478,12 +483,14 @@ def restart_opendaq_bro():
     # Kort pause for at OS-kjernen skal frigjere socket-bindingar
     time.sleep(1)
 
-    # Vent til portane faktisk er ledige (maks 30s).
-    # TCP TIME_WAIT er normalt 60s, men sidan vi gjer clean shutdown
-    # (ikkje RST) bør portane vere ledige raskare.
+    # Vent til portane faktisk er ledige (maks 5s).
+    # Viss C++ destruktorane ikkje køyrde, er portane framleis opptekne
+    # og den einaste løysinga er container-restart.
     import socket as _sock
     portar = [4840, 7420, 7414]
-    for forsok in range(60):
+    alle_ledige = False
+    opptekne = []
+    for forsok in range(10):
         alle_ledige = True
         opptekne = []
         for port in portar:
@@ -498,12 +505,27 @@ def restart_opendaq_bro():
         if alle_ledige:
             log.info(f"  Alle portar ledige etter {forsok * 0.5:.1f}s")
             break
-        if forsok % 10 == 0 and forsok > 0:
+        if forsok % 4 == 0 and forsok > 0:
             log.info(f"  Ventar på portar {opptekne} ({forsok * 0.5:.0f}s)...")
             gc.collect()
         time.sleep(0.5)
-    else:
-        log.warning(f"  Portar {opptekne} ikkje frigjort etter 30s — prøver likevel")
+
+    if not alle_ledige:
+        # C++ zombie-objekt held portane. GC kan ikkje frigjere dei.
+        # Einaste løysing: restart container slik at OS frigjer alt.
+        log.warning(f"  Portar {opptekne} opptekne av zombie C++-objekt")
+        log.warning("  Restartar container for rein port-frigjering...")
+        log.warning("  (Docker restart: unless-stopped startar oss automatisk)")
+
+        # Returner melding til web UI FYRST, deretter exit i bakgrunnstraad.
+        def _delayed_exit():
+            time.sleep(0.5)  # La Flask sende response
+            log.info("=== CONTAINER RESTART (port-frigjering) ===")
+            os._exit(1)
+
+        exit_traad = threading.Thread(target=_delayed_exit, daemon=True)
+        exit_traad.start()
+        return True, "Container restartar for å frigjere portar (10-15s)..."
 
     try:
         sn = server_status.get("serienummer", "")
