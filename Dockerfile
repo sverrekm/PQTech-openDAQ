@@ -106,7 +106,7 @@ else:
 
 with open(path, "w") as f:
     f.write(content)
-print("Patch 1/2 komplett: getDomain")
+print("Patch 1/3 komplett: getDomain")
 
 # ---- Patch 2: OPC-UA nil string → tom streng ----
 # VariantConverter<IString>::ToVariant krasjar når input er nullptr.
@@ -196,7 +196,61 @@ else:
 
 with open(path2, "w") as f:
     f.write(content2)
-print("Patch 2/2 komplett: nil string")
+print("Patch 2/3 komplett: nil string")
+PYEOF
+
+# ---- Patch 3: RefDevice DeviceInfo → SIRIUS-verdiar ----
+# DewesoftX viser tomme felt (Name, Model, Manufacturer, MAC, Serial)
+# fordi referanse-eininga brukar standardverdiar ("openDAQ", "Reference device").
+# DeviceInfo er frosen (read-only) etter build — kan ikkje endrast frå Python.
+# Fix: Patch C++-kjelda til å bruke SIRIUS-verdiar som standard.
+RUN python3 << 'PYEOF'
+import sys
+
+path = "/src/examples/modules/ref_device_module/src/ref_device_impl.cpp"
+with open(path, "r") as f:
+    content = f.read()
+
+# Patch CreateDeviceInfo(): endre standardverdiar
+replacements = [
+    ('devInfo.setManufacturer("openDAQ")',
+     'devInfo.setManufacturer("Dewesoft")'),
+    ('devInfo.setModel("Reference device")',
+     'devInfo.setModel("SIRIUSi-HS 8xHV 8xLV")'),
+]
+
+patched = 0
+for old, new in replacements:
+    if old in content:
+        content = content.replace(old, new, 1)
+        patched += 1
+        print(f"OK: {old} -> {new}")
+    else:
+        print(f"ADVARSEL: Fann ikkje '{old}'", file=sys.stderr)
+
+# Legg til MAC-adresse og platforminfo etter serialNumber-linja
+serial_line = 'devInfo.setSerialNumber(serialNumber.assigned()'
+if serial_line in content:
+    # Finn slutten av serialNumber-linja (neste semikolon + newline)
+    idx = content.index(serial_line)
+    end_idx = content.index(';', idx) + 1
+    extra = """
+    devInfo.setMacAddress("00:00:00:00:00:00");
+    devInfo.setPlatform("RPi5-Docker");
+    devInfo.setSoftwareRevision("1.0.0-opendaq3.30");"""
+    content = content[:end_idx] + extra + content[end_idx:]
+    patched += 1
+    print("OK: La til MAC, platform, softwareRevision")
+else:
+    print("ADVARSEL: Fann ikkje serialNumber-linje", file=sys.stderr)
+
+if patched < 2:
+    print(f"FEIL: Berre {patched} av 3 patchar lukkast!", file=sys.stderr)
+    sys.exit(1)
+
+with open(path, "w") as f:
+    f.write(content)
+print(f"Patch 3/3 komplett: DeviceInfo ({patched} endringar)")
 PYEOF
 
 RUN cmake -S /src -B /src/build -G Ninja \
