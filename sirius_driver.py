@@ -4,8 +4,8 @@ SIRIUS Hoeynivaa-driver (Lag 2)
 =================================
 Brukervenlig driver med tilkobling, initialisering, konfigurasjon og streaming.
 
-Initialiserings-sekvensen er basert paa reverse-engineering av DewesoftX sin
-USB-trafikk, fanget med usbmon paa Raspberry Pi.
+Initialiserings-sekvensen er eksakt replay av DewesoftX sin USB-trafikk,
+reverse-engineered fraa sirius2.pcapng (USBPcap-fangst).
 
 Bruk:
     from sirius_driver import SiriusDriver
@@ -42,11 +42,7 @@ from sirius_protokoll_impl import (
     SiriusProtokoll,
     DEWESOFT_VID, SIRIUS_PID,
     EP_CMD_IN, EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN,
-    ALLE_SLOTTER,
-    REG_CMD, REG_COMMIT, REG_SAMPLE_CFG,
-    REG_TRIG_33, REG_TRIG_08, REG_TRIG_0B, REG_TRIG_0A,
     ADC_KANALER,
-    OPCODE_SETMODE, OPCODE_INIT, OPCODE_PRESTART,
     SiriusFeil, SiriusUSBFeil, SiriusPollTimeout, SiriusIkkeFunnet,
     TIMEOUT_DATA,
 )
@@ -1048,15 +1044,16 @@ class SiriusDriver:
                     self._strategi_logg.registrer_suksess("3a_reset_åleine")
                     log.info("SUKSESS: Strategi 3a (dev.reset åleine)")
                     return True
-                # EP2 ikkje oppe etter reset - proev start-sekvens
+                # EP2 ikkje oppe etter reset - proev full init + start
                 try:
+                    self._initialiser()
                     self._start_acquisition()
                     if self._test_ep2_med_heartbeat():
                         self._strategi_logg.registrer_suksess("3b_reset_start")
-                        log.info("SUKSESS: Strategi 3b (dev.reset + start-acquisition)")
+                        log.info("SUKSESS: Strategi 3b (dev.reset + init + start)")
                         return True
                 except (SiriusPollTimeout, SiriusUSBFeil) as e:
-                    log.warning(f"  Start-acquisition etter reset feilet: {e}")
+                    log.warning(f"  Init + start etter reset feilet: {e}")
         except Exception as e:
             log.warning(f"  Strategi 3 feilet: {e}")
             try:
@@ -1065,10 +1062,10 @@ class SiriusDriver:
                 pass
 
         # ============================================================
-        # STRATEGI 4: uhubctl power-cycle + start-acquisition
-        # Fysisk USB-straumkutt, koble til att, kjoer start-sekvens.
+        # STRATEGI 4: uhubctl power-cycle + init + start-acquisition
+        # Fysisk USB-straumkutt, koble til att, kjoer full init.
         # ============================================================
-        log.info("Strategi 4/4: uhubctl + start-acquisition...")
+        log.info("Strategi 4/4: uhubctl + init + start-acquisition...")
         try:
             self._frigjer_dev()
             if self._uhubctl_power_cycle():
@@ -1106,16 +1103,17 @@ class SiriusDriver:
                     self._strategi_logg.registrer_suksess("4a_uhubctl_åleine")
                     log.info("SUKSESS: Strategi 4a (uhubctl åleine)")
                     return True
-                # EP2 ikkje oppe - proev start-sekvens
+                # EP2 ikkje oppe - proev full init + start
                 if self._tilkoblet and self._proto:
                     try:
+                        self._initialiser()
                         self._start_acquisition()
                         if self._test_ep2_med_heartbeat():
                             self._strategi_logg.registrer_suksess("4b_uhubctl_start")
-                            log.info("SUKSESS: Strategi 4b (uhubctl + start-acquisition)")
+                            log.info("SUKSESS: Strategi 4b (uhubctl + init + start)")
                             return True
                     except (SiriusPollTimeout, SiriusUSBFeil) as e:
-                        log.warning(f"  Start-acquisition etter uhubctl feilet: {e}")
+                        log.warning(f"  Init + start etter uhubctl feilet: {e}")
         except Exception as e:
             log.warning(f"  Strategi 4 feilet: {e}")
             try:
@@ -1245,98 +1243,83 @@ class SiriusDriver:
         """
         Send komplett start-acquisition-sekvens for aa starte EP2 ADC-streaming.
 
-        Reverse-engineered fraa DewesoftX Wireshark USB-capture (sirius1.pcapng,
-        2026-02-14). Konfigurerer ADC-sampling, DMA, kalibrering og triggar
+        Reverse-engineered fraa DewesoftX Wireshark USB-capture (sirius2.pcapng).
+        Konfigurerer ADC-sampling, DMA, kalibrering og triggar
         streaming-start via register 0x02.
 
-        Sekvensen er 35 steg:
+        Sekvensen:
           1. A4 00 (pre-start modus)
           2. AC (hent slot-typar)
           3-34. Globale register-skrivingar via AD-kommando
           35. Register 0x02 trigger (startar EP2, ~137ms ventetid)
-
-        VIKTIG: Reg 0x03 ("streaming confirmed") vert IKKJE sendt.
-        pcapng-analyse (sirius2.pcapng) viser at DewesoftX ikkje alltid
-        sender den, og time.sleep() mellom 0x02 og 0x03 drap EP2 fordi
-        B1-heartbeat stoppa i 200ms.
 
         Raises:
             SiriusPollTimeout: Viss trigger-registeret ikkje responderer
             SiriusUSBFeil: Ved USB-feil
         """
         proto = self._proto
-        self._treng_heartbeat = True  # Etter start-acquisition treng SIRIUS heartbeat
-        log.info("Start-acquisition sekvens (35 steg)...")
+        self._treng_heartbeat = True
+        log.info("Start-acquisition sekvens...")
 
         # Steg 1: A4 00 (pre-start modus)
-        log.info("  Steg 1/35: A4 00 (pre-start)")
+        log.info("  A4 00 (pre-start)")
         proto.send_prestart()
 
         # Steg 2: AC (hent slot-typar)
-        log.info("  Steg 2/35: AC (slot-typar)")
+        log.info("  AC (slot-typar)")
         proto.hent_slot_typer()
 
         # Steg 3-34: Globale register-skrivingar
-        # Format: AD 3F 0C 00 00 00 [reg] [8 bytes data]
-        # Eksakte verdiar fraa DewesoftX pcapng (verifisert med tshark)
-        regs = [
-            # Sample rate og buffer
-            (0x67, '80004e20005a0306'),   # Sample rate 20 kHz
-            (0x7B, '00000c8000000040'),   # Buffer-konfig
+        # Eksakte verdiar fraa DewesoftX sirius2.pcapng
+        streaming_regs = [
+            'ad3f0c0000006780004e20005a0306',   # Sample rate 20 kHz
+            'ad3f0c0000007b00000c8000000040',   # Buffer-konfig
+            'ad3f0c000000820000000000000031',   # ADC ch 0
+            'ad3f0c000000820000000100000031',   # ADC ch 1
+            'ad3f0c000000820000000200000031',   # ADC ch 2
+            'ad3f0c000000820000000300000031',   # ADC ch 3
+            'ad3f0c000000820000000400000031',   # ADC ch 4
+            'ad3f0c000000820000000500000031',   # ADC ch 5
+            'ad3f0c000000820000000600000031',   # ADC ch 6
+            'ad3f0c000000820000000700000031',   # ADC ch 7
+            'ad3f0c000000e500001800ffffffff',   # Timing/sync
+            'ad3f0c0000006f3fff231fffffffff',   # Kanal-enable-maske
+            'ad3f0c000000720000000200000000',   # Trigger-konfig
+            'ad3f0c0000001000000000ffffffff',   # Kontroll
+            'ad3f0c0000001100000000ffffffff',   # Kontroll
+            'ad3f0c0000000703000000ffffffff',   # Mode/kontroll
+            'ad3f0c0000009c00640064ffffffff',   # Filter
+            'ad3f0c000000980214320000000000',   # Desimering/averaging
+            'ad3f0c0000009960600000ffffffff',   # Sample timing
+            'ad3f0c0000009d0000000000000000',   # Tilleggskonfig
+            'ad3f0c00000096ffffffffffffffff',   # ADC trigger
+            'ad3f0c000000d000000001ffffffff',   # DMA enable
+            'ad3f0c00000068000000ffffffffff',   # Buffer reset
+            'ad3f0c000000cc000000c0ffffffff',   # DMA config
+            'ad3f0c000000cd000001ffffffffff',   # DMA mode
+            'ad3f0c000000ca0010001000100010',   # Kanal-maske slots 0-3
+            'ad3f0c000000cb0010001000100010',   # Kanal-maske slots 4-7
+            'ad3f0c000000ce1010000000000000',   # Slot enable-maske
+            'ad3f0c000000cf00000000ffffffff',   # Clear flags
+            'ad3f0c000000840000000000000000',   # Transfer start
+            'ad3f0c000000c8ffffffffffffffff',   # DMA arm
+            'ad3f0c00000064ffffffffffffffff',   # Streaming start
         ]
 
-        # ADC-konfig per kanal (reg 0x82, kanal 0-7)
-        for ch in range(8):
-            data = bytearray.fromhex('0000000000000031')
-            data[3] = ch
-            regs.append((0x82, data.hex()))
-
-        # Timing, kontroll, filter, kalibrering
-        regs.extend([
-            (0xE5, '00001800ffffffff'),   # Timing/sync
-            (0x6F, '3fff231fffffffff'),   # Kanal-enable-maske
-            (0x72, '0000000200000000'),   # Trigger-konfig
-            (0x10, '00000000ffffffff'),   # Kontroll
-            (0x11, '00000000ffffffff'),   # Kontroll
-            (0x07, '03000000ffffffff'),   # Mode/kontroll
-            (0x9C, '00640064ffffffff'),   # Filter
-            (0x98, '0214320000000000'),   # Desimering/averaging
-            (0x99, '60600000ffffffff'),   # Sample timing
-            (0x9D, '0000000000000000'),   # Tilleggskonfig
-            (0x96, 'ffffffffffffffff'),   # Status-sjekk (les)
-            (0xD0, '00000001ffffffff'),   # Stream enable
-            (0x68, '000000ffffffffff'),   # DMA/transfer-konfig
-            (0xCC, '000000c0ffffffff'),   # Tilleggskonfig
-            (0xCD, '000001ffffffffff'),   # Tilleggskonfig
-            (0xCA, '0010001000100010'),   # Kalibrering
-            (0xCB, '0010001000100010'),   # Kalibrering
-            (0xCE, '1010000000000000'),   # Tilleggskonfig
-            (0xCF, '00000000ffffffff'),   # Tilleggskonfig
-            (0x84, '0000000000000000'),   # Clear status
-            (0xC8, 'ffffffffffffffff'),   # Status readback (les)
-            (0x64, 'ffffffffffffffff'),   # Status readback (les)
-        ])
-
-        steg = 3
-        for reg, data_hex in regs:
-            cmd = bytes([0xAD, 0x3F, 0x0C, 0x00, 0x00, 0x00, reg]) + bytes.fromhex(data_hex)
+        for i, cmd_hex in enumerate(streaming_regs):
+            cmd = bytes.fromhex(cmd_hex)
+            reg = cmd[6]
+            # Reg 0x96 (apply config) treng ~284 B1-polls
+            maks = 400 if reg == 0x96 else 50
             try:
-                proto.send_ad_raa_og_poll(cmd)
-                log.debug(f"  Steg {steg}/35: reg 0x{reg:02X} OK")
+                proto.send_ad_raa_og_poll(cmd, maks_forsok=maks)
+                log.debug(f"  Reg 0x{reg:02X} OK")
             except SiriusPollTimeout:
-                log.warning(f"  Steg {steg}/35: reg 0x{reg:02X} poll timeout (held fram)")
-            steg += 1
+                log.warning(f"  Reg 0x{reg:02X} poll timeout (held fram)")
 
-        # Steg 35: TRIGGER - Register 0x02 (startar EP2 ADC-streaming)
-        # Denne tek ~137ms og krev mange B1-poll-syklusar.
+        # TRIGGER - Register 0x02 (startar EP2 ADC-streaming)
         # er_skriving=False fordi vi MÅ vente på POLL_KLAR (0x01)
-        #
-        # KRITISK: Etter at trigger returnerer, MÅ B1-heartbeat halde fram
-        # utan opphald.  Kvar pause >5-10ms utan B1 kan få SIRIUS til å
-        # stoppe EP2-straumen.  Difor sender vi IKKJE reg 0x03 her —
-        # pcapng-analyse (sirius2.pcapng) viser at DewesoftX ikkje alltid
-        # sender reg 0x03, og EP2 strøymer fint utan den.
-        log.info("  Steg 35/35: reg 0x02 TRIGGER (startar streaming)...")
+        log.info("  Reg 0x02 TRIGGER (startar streaming)...")
         trigger_cmd = bytes.fromhex('ad3f0c00000002ffffffffffffffff')
         try:
             proto.send_ad_raa_og_poll(trigger_cmd, maks_forsok=1000,
@@ -1347,245 +1330,123 @@ class SiriusDriver:
 
         log.info("Start-acquisition sekvens sendt")
 
-    # ---- Initialisering (repliserer DewesoftX-sekvensen) ----
+    # ---- Initialisering (repliserer DewesoftX-sekvensen fraa pcapng) ----
 
     def _initialiser(self):
         """
-        Kjoer full init-sekvens basert paa reverse-engineered DewesoftX-protokoll.
+        Kjoer full init-sekvens basert paa eksakt replay av DewesoftX USB-trafikk.
 
-        Fase 1: Heartbeat-sjekk (AE telemetri x4)
-        Fase 2: Enhetsoppdaging (FW-versjon, modus, slotinfo, EEPROM, init)
-        Fase 3: Slot-enumerering (AD query, enum, batch)
-        Fase 4: Per-slot initialisering (A5 kommando-dispatch)
-        Fase 5: Flush dataendepunkt
+        Replay av alle kommandoar fraa sirius2.pcapng FOER streaming-start (A4).
+        Sekvensen inkluderer:
+
+        Fase 1: Enhetsoppdaging (A1 slot-kart, A0 aktiv modus, 00 FW-versjon)
+        Fase 2: EEPROM-lesing (A8 x64 - kalibrering, serienummer, etc.)
+        Fase 3: Init/config-modus (B0 3F 0C)
+        Fase 4: Globale AD register-operasjonar (0x06, 0x08, 0x00, 0x01,
+                 0x17, 0x15 slot-presence config)
+        Fase 5: Per-slot initialisering via AD 3F 0C (A5 command dispatch,
+                 EEPROM-kalibrering, modulidentifikasjon)
+        Fase 6: Flush dataendepunkt
+
+        Totalt ~1000+ AD-kommandoar med B1-poll per stykke.
         """
-        log.info("Initialiserer SIRIUS (DewesoftX-sekvens)...")
+        from sirius_init_sekvens import INIT_SEKVENS
+
+        log.info("Initialiserer SIRIUS (pcapng replay)...")
         proto = self._proto
 
-        # ---- Fase 1: Heartbeat-sjekk ----
-        log.info("  Fase 1: Heartbeat-sjekk...")
-        alle_ff_teller = 0
-        for i in range(4):
-            try:
-                svar = proto.send_telemetri()
-                er_ff = all(b == 0xFF for b in svar)
-                if er_ff:
-                    alle_ff_teller += 1
-                log.info(f"    AE #{i+1}: {svar[:8].hex()} "
-                         f"({len(svar)}B{' ALL-FF' if er_ff else ''})")
-            except SiriusUSBFeil as e:
-                log.warning(f"    AE #{i+1} feilet: {e}")
+        ad_teller = 0
+        enkel_teller = 0
+        feil_teller = 0
+        fase = "init"
 
-        if alle_ff_teller >= 4:
-            log.error(
-                "ALLE AE-svar er 0xFF! Enheten responderer ikkje paa kommandoar. "
-                "Mogelege aarsaker: "
-                "1) FX2-firmware ikkje lasta / korrumpert, "
-                "2) USB-reset har forstyrra firmware, "
-                "3) Enheten treng straumsykling (koble fraa/til USB-kabelen)"
-            )
+        for cmd_hex in INIT_SEKVENS:
+            cmd = bytes.fromhex(cmd_hex)
+            opcode = cmd[0]
 
-        # ---- Fase 2: Enhetsoppdaging ----
-        log.info("  Fase 2: Enhetsoppdaging...")
+            # Stopp foer A4 (pre-start) — streaming-start vert handtert av
+            # _start_acquisition() separat.
+            if opcode == 0xA4:
+                break
 
-        # FW-versjon (0x00)
-        try:
-            fw = proto.les_fw_versjon()
-            self._enhetsinfo.fw_versjon = fw
-            er_ff = all(b == 0xFF for b in fw)
-            log.info(f"    FW-versjon: {fw[:8].hex()} ({len(fw)}B{' ALL-FF' if er_ff else ''})")
-        except SiriusUSBFeil as e:
-            log.warning(f"    FW-versjon feilet: {e}")
+            if opcode == 0xAD:
+                # AD-kommando med B1-polling
+                reg = cmd[6]
 
-        # Aktiver eining (A0 01)
-        try:
-            proto.sett_aktiv_modus()
-        except SiriusUSBFeil as e:
-            log.warning(f"    Sett aktiv modus feilet: {e}")
+                # Avgjer om dette er skriving eller lesing for B1-poll-logikk:
+                #   0x13 = slot-skriving → aksepter status=0x00 med ein gong
+                #   0x14, 0x08, 0x0C, 0x1C = lesing → vent på status=0x01
+                #   Andre (globale reg) = skriving viss data != all-FF
+                if reg == 0x13:
+                    er_skriving = True
+                elif reg in (0x14, 0x08, 0x0C, 0x1C):
+                    er_skriving = False
+                else:
+                    er_skriving = not all(b == 0xFF for b in cmd[7:15])
 
-        # Slot-tilstedevaerelse (A1)
-        try:
-            slot_map = proto.hent_slot_tilstedevaerelse()
-            self._enhetsinfo.slot_tilstedevaerelse = slot_map
-            er_ff = all(b == 0xFF for b in slot_map)
-            log.info(f"    Slot-kart: {slot_map[:16].hex()} ({len(slot_map)}B{' ALL-FF' if er_ff else ''})")
-        except SiriusUSBFeil as e:
-            log.warning(f"    Slot-tilstedevaerelse feilet: {e}")
+                # Visse register treng mange B1-polls (fraa pcapng-analyse):
+                #   0x0B (sync/kalibrering): ~122 polls
+                #   0x96 (apply config): ~284 polls
+                #   0x02 (start acquisition): ~370 polls
+                lang_poll = {0x0B: 200, 0x96: 400, 0x02: 500}
+                maks = lang_poll.get(reg, 50)
 
-        # Slot-typer (AC)
-        try:
-            slot_types = proto.hent_slot_typer()
-            self._enhetsinfo.slot_typer = slot_types
-            er_ff = all(b == 0xFF for b in slot_types)
-            log.info(f"    Slot-typer: {slot_types[:16].hex()} ({len(slot_types)}B{' ALL-FF' if er_ff else ''})")
-        except SiriusUSBFeil as e:
-            log.warning(f"    Slot-typer feilet: {e}")
+                try:
+                    svar = proto.send_ad_raa_og_poll(
+                        cmd[:15],
+                        er_skriving=er_skriving,
+                        maks_forsok=maks,
+                    )
+                    ad_teller += 1
+                except SiriusPollTimeout:
+                    feil_teller += 1
+                    if feil_teller <= 5:
+                        log.debug(f"  AD reg=0x{reg:02X} poll timeout (held fram)")
+                except SiriusUSBFeil as e:
+                    feil_teller += 1
+                    log.warning(f"  AD reg=0x{reg:02X} USB-feil: {e}")
 
-        # EEPROM-lesing (A8) - enhetsstreng og serienummer
-        try:
-            eeprom = proto.les_eeprom(0x00, 0x00)
-            er_ff = all(b == 0xFF for b in eeprom)
-            log.info(f"    EEPROM raa: {eeprom[:16].hex()} ({len(eeprom)}B{' ALL-FF' if er_ff else ''})")
-            if not er_ff:
-                tekst = eeprom.rstrip(b'\x00\xff').decode('ascii', errors='replace')
-                if tekst:
-                    self._enhetsinfo.enhetsstreng = tekst[:8]
-                    self._enhetsinfo.serienummer = tekst[8:].strip('\x00').strip()
-                    log.info(f"    Eining: {self._enhetsinfo.enhetsstreng}")
-                    log.info(f"    Serienr: {self._enhetsinfo.serienummer}")
-        except SiriusUSBFeil as e:
-            log.warning(f"    EEPROM feilet: {e}")
-            # Fallback: proev E3 (FX2-lag)
-            try:
-                ident = proto.les_enhetsid()
-                self._enhetsinfo.enhetsstreng = ident.get('enhetsstreng', '')
-                self._enhetsinfo.serienummer = ident.get('serienummer', '')
-                log.info(f"    Eining (E3): {self._enhetsinfo.enhetsstreng}")
-                log.info(f"    Serienr (E3): {self._enhetsinfo.serienummer}")
-            except SiriusUSBFeil:
-                pass
+                # Logg framdrift
+                if ad_teller > 0 and ad_teller % 200 == 0:
+                    log.info(f"  Init: {ad_teller} AD-kommandoar sendt "
+                             f"({feil_teller} feil)...")
 
-        # Init-kommando (B0 3F 0C)
-        try:
-            proto.init_kommando()
-        except SiriusUSBFeil as e:
-            log.warning(f"    Init-kommando feilet: {e}")
+            else:
+                # Enkel kommando (A1, A0, 00, A8, B0, AC)
+                try:
+                    svar = proto.send_raa_kommando(cmd)
+                    enkel_teller += 1
 
-        # ---- Fase 3: Slot-enumerering ----
-        log.info("  Fase 3: Slot-enumerering...")
+                    # Fang opp metadata frå svar
+                    if opcode == 0xA1:
+                        self._enhetsinfo.slot_tilstedevaerelse = svar
+                        log.info(f"  Slot-kart: {svar[:16].hex()}")
+                    elif opcode == 0x00:
+                        self._enhetsinfo.fw_versjon = svar
+                        log.info(f"  FW-versjon: {svar[:8].hex()}")
+                    elif opcode == 0xAC:
+                        self._enhetsinfo.slot_typer = svar
+                        log.info(f"  Slot-typar: {svar[:16].hex()}")
+                    elif opcode == 0xB0:
+                        log.info("  B0 3F 0C init/config-modus sett")
+                        fase = "global_ad"
+                    elif opcode == 0xA0:
+                        log.info("  A0 01 aktiv modus sett")
+                    elif opcode == 0xA8 and enkel_teller <= 2:
+                        # Logg fyrste EEPROM-lesing
+                        log.info(f"  EEPROM-lesing startar ({cmd[1:].hex()})...")
 
-        try:
-            svar = proto.slot_query()
-            log.info(f"    Slot-query: {svar[:12].hex()}")
-        except (SiriusPollTimeout, SiriusUSBFeil) as e:
-            log.warning(f"    Slot-query feilet: {e}")
+                except SiriusUSBFeil as e:
+                    feil_teller += 1
+                    log.warning(f"  Cmd 0x{opcode:02X} feilet: {e}")
 
-        for enum_slot in [0x00, 0x01, 0x02]:
-            try:
-                svar = proto.slot_enum(enum_slot)
-                log.debug(f"    Enum slot {enum_slot}: {svar[:12].hex()}")
-            except (SiriusPollTimeout, SiriusUSBFeil) as e:
-                log.debug(f"    Enum slot {enum_slot} feilet: {e}")
-
-        try:
-            svar = proto.batch_op()
-            log.info(f"    Batch-op: {svar[:12].hex()}")
-        except (SiriusPollTimeout, SiriusUSBFeil) as e:
-            log.warning(f"    Batch-op feilet: {e}")
-
-        # ---- Fase 4: Per-slot initialisering ----
-        log.info("  Fase 4: Per-slot initialisering...")
-        self._enhetsinfo.slotter = []
-
-        for i, slot_addr in enumerate(ALLE_SLOTTER):
-            slot = SlotInfo(slot_id=slot_addr, kanal_nummer=i)
-
-            # Sjekk slot-type fraa kartet
-            if (self._enhetsinfo.slot_typer
-                    and len(self._enhetsinfo.slot_typer) > i
-                    and self._enhetsinfo.slot_typer[i] > 0):
-                slot.slot_type = self._enhetsinfo.slot_typer[i]
-
-            try:
-                self._init_slot(slot)
-                slot.aktiv = True
-                log.info(f"    Slot {i} (0x{slot_addr:02X}): OK - {slot.produsent}")
-            except (SiriusPollTimeout, SiriusUSBFeil) as e:
-                log.warning(f"    Slot {i} (0x{slot_addr:02X}): feilet ({e})")
-                slot.aktiv = False
-
-            self._enhetsinfo.slotter.append(slot)
-
-        aktive = sum(1 for s in self._enhetsinfo.slotter if s.aktiv)
-        log.info(f"    Aktive slotter: {aktive}/{len(ALLE_SLOTTER)}")
-
-        # ---- Fase 5: Flush dataendepunkt ----
-        log.info("  Fase 5: Flush endepunkt...")
+        # Flush dataendepunkt
+        log.info("  Flush endepunkt...")
         for ep in [EP_ADC_IN, EP_CTRL_IN, EP_SYNC_IN]:
-            self._proto.flush_endepunkt(ep)
+            proto.flush_endepunkt(ep)
 
-        log.info("Initialisering fullfoert")
-
-    def _init_slot(self, slot: SlotInfo):
-        """
-        Initialiser ein enkelt analog slot via A5 kommando-dispatch.
-
-        Repliserer DewesoftX sin per-slot sekvens:
-        1. Aktiver slot (A5 SET_PARAM 0xF0)
-        2. Sett modus (A5 SET_MODE D1=01 + commit)
-        3. Les konfigurasjon (A5 READ_STRING D1,02 + trigger 0x33)
-        4. Les kalibrering (A5 READ_STRING D1,03 + trigger 0x08)
-        5. Sett modus paa nytt + utvidet konfig
-        6. Samplingsoppsett (CC register)
-        7. Les modulstrenger (trigger 0x0B)
-        8. Les binaerdata (trigger 0x0A)
-        """
-        proto = self._proto
-        s = slot.slot_id
-
-        # 1. Aktiver slot
-        proto.a5_set_param(s, 0xF0)
-        proto.les_register(s)
-
-        # 2. Sett modus D1=01 + commit
-        proto.a5_set_mode(s, 0xD1, 0x01)
-        proto.commit(s)
-        proto.les_register(s)
-
-        # 3. Les konfigurasjon (D1 offset 0x02 via trigger 0x33)
-        proto.a5_read_string(s, 0xD1, 0x02)
-        proto.trigger_read(s, REG_TRIG_33)
-        proto.les_register(s)
-        proto.les_register(s)  # Andre lesing for komplett data
-
-        # 4. Les kalibrering (D1 offset 0x03 via trigger 0x08)
-        proto.a5_read_string(s, 0xD1, 0x03)
-        proto.trigger_read(s, REG_TRIG_08)
-        kalibrering = proto.les_register(s)
-        slot.kalibrering_raa = kalibrering
-        proto.les_register(s)  # Andre lesing
-
-        # 5. Sett modus paa nytt + commit
-        proto.a5_set_mode(s, 0xD1, 0x01)
-        proto.commit(s)
-        proto.les_register(s)
-
-        # 6. Utvidet konfig + samplingsoppsett
-        proto.a5_set_config(s, 0xD1, 0x02)
-        proto.skriv_register(s, REG_SAMPLE_CFG, bytes([0xF0, 0x00, 0x00]))
-        proto.commit(s)
-        proto.les_register(s)
-
-        # 7. Les modulstrenger via trigger 0x0B (produsent, serienr)
-        for offset in [0x02, 0x03]:
-            proto.a5_read_string(s, 0xD1, 0x03)
-            proto.trigger_read(s, REG_TRIG_0B)
-            svar = proto.les_register(s)
-            # Parse streng fraa svar
-            if offset == 0x02:
-                self._parse_slot_streng(slot, svar, 'produsent')
-            elif offset == 0x03:
-                self._parse_slot_streng(slot, svar, 'maskinvare_del')
-
-        # 8. Les binaerdata via trigger 0x0A
-        proto.a5_read_string(s, 0xD1, 0x03)
-        proto.trigger_read(s, REG_TRIG_0A)
-        proto.les_register(s)
-
-    def _parse_slot_streng(self, slot, svar, felt):
-        """Parse ein tekststreng fraa slot-svar og sett paa SlotInfo."""
-        try:
-            # Hopp over status-bytes og finn ASCII-tekst
-            tekst = ""
-            for b in svar:
-                if 0x20 <= b <= 0x7E:
-                    tekst += chr(b)
-                elif tekst:
-                    break
-            if tekst:
-                setattr(slot, felt, tekst.strip())
-        except Exception:
-            pass
+        log.info(f"Init fullfoert: {enkel_teller} enkle + {ad_teller} AD "
+                 f"= {enkel_teller + ad_teller} kommandoar ({feil_teller} feil)")
 
     # ---- Streaming ----
 
