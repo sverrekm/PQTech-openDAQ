@@ -113,9 +113,42 @@ class OpenDAQBro:
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
 
-            # MERK: set_default_root_device_info() skapar access violation i
-            # DewesoftX — referanse-eininga si DeviceInfo er read-only etter build.
-            # DeviceInfo-endring er deaktivert inntil vidare.
+            # Pre-populate DeviceInfo med alle felt INKLUDERT DeviceType.
+            # DeviceInfo er frosen (read-only) etter build — dette er einaste
+            # sjansen til å sette DeviceType som eit objekt (ikkje streng).
+            # DewesoftX krasjar med 'Interface object is nil' i
+            # TOpenDaqDeviceInfo.UpdateInfo viss DeviceType er nullptr.
+            try:
+                dev_info = _daq.DeviceInfoConfig(
+                    self._enhetsnamn or "SIRIUSi-HS", "")
+                dev_info.manufacturer = "Dewesoft"
+                dev_info.model = "SIRIUSi-HS 8xHV 8xLV"
+                dev_info.serial_number = self._serienummer or "0000000000"
+                dev_info.mac_address = "00:00:00:00:00:00"
+                dev_info.platform = "RPi5-Docker"
+                dev_info.software_revision = "1.0.0-opendaq3.30"
+                # Sett alle andre string-felt til tom streng for å unngå nil
+                for attr in ('hardware_revision', 'device_manual', 'device_class',
+                             'product_code', 'device_revision', 'manufacturer_uri',
+                             'product_instance_uri', 'asset_id', 'parent_mac_address',
+                             'system_type', 'system_uuid', 'location', 'user_name'):
+                    try:
+                        setattr(dev_info, attr, "")
+                    except Exception:
+                        pass
+                # DeviceType — kritisk! Nil DeviceType krasjar DewesoftX.
+                try:
+                    dev_type = _daq.DeviceType(
+                        "dewesoft_sirius", "SIRIUSi-HS 8xHV 8xLV",
+                        "Dewesoft SIRIUSi-HS Data Acquisition", None, "daq.ns")
+                    dev_info.device_type = dev_type
+                    log.info("  DeviceType sett: dewesoft_sirius")
+                except Exception as e:
+                    log.warning(f"  DeviceType feilet: {e}")
+                builder.set_default_root_device_info(dev_info)
+                log.info("  DeviceInfo sett via InstanceBuilder (pre-build)")
+            except Exception as e:
+                log.warning(f"  set_default_root_device_info feilet: {e}")
 
             builder.set_root_device("daqref://device0")
             self._instance = builder.build()
@@ -814,13 +847,26 @@ class OpenDAQBro:
             for prop in obj.visible_properties:
                 try:
                     if prop.value_type == ct.ctString:
-                        val = obj.get_property_value(prop.name)
+                        try:
+                            val = obj.get_property_value(prop.name)
+                        except Exception:
+                            val = None  # get_property_value kan kaste for nil
                         if val is None:
                             try:
                                 obj.set_property_value(prop.name, "")
                                 log.info(f"  {label}{prop.name}: nil → ''")
                             except Exception:
                                 pass  # Read-only property
+                    else:
+                        # Logg nil-verdiar av andre typar (objekt, liste, etc.)
+                        try:
+                            val = obj.get_property_value(prop.name)
+                            if val is None:
+                                log.warning(f"  {label}{prop.name}: nil "
+                                            f"(type={prop.value_type})")
+                        except Exception:
+                            log.warning(f"  {label}{prop.name}: kan ikkje "
+                                        f"lesast (type={prop.value_type})")
                 except Exception:
                     pass
         except Exception as e:

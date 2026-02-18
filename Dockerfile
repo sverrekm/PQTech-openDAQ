@@ -237,15 +237,48 @@ if serial_line in content:
     extra = """
     devInfo.setMacAddress("00:00:00:00:00:00");
     devInfo.setPlatform("RPi5-Docker");
-    devInfo.setSoftwareRevision("1.0.0-opendaq3.30");"""
+    devInfo.setSoftwareRevision("1.0.0-opendaq3.30");
+    devInfo.setHardwareRevision("");
+    devInfo.setDeviceManual("");
+    devInfo.setDeviceClass("");
+    devInfo.setProductCode("");
+    devInfo.setDeviceRevision("");
+    devInfo.setManufacturerUri("");
+    devInfo.setProductInstanceUri("");
+    devInfo.setAssetId("");
+    devInfo.setParentMacAddress("");
+    devInfo.setSystemType("");
+    devInfo.setSystemUuid("");
+    devInfo.setLocation("");
+    devInfo.setUserName("");
+
+    // DeviceType: DewesoftX krasjar med 'Interface object is nil' i
+    // TOpenDaqDeviceInfo.UpdateInfo viss DeviceType er nullptr.
+    // DeviceType er eit objekt (ikkje streng), so nil-string-patchen hjelper ikkje.
+    devInfo.setDeviceType(DeviceType("dewesoft_sirius", "SIRIUSi-HS 8xHV 8xLV", "Dewesoft SIRIUSi-HS Data Acquisition"));"""
     content = content[:end_idx] + extra + content[end_idx:]
     patched += 1
-    print("OK: La til MAC, platform, softwareRevision")
+    print("OK: La til MAC, platform, softwareRevision, DeviceType + alle string-felt")
 else:
     print("ADVARSEL: Fann ikkje serialNumber-linje", file=sys.stderr)
 
+# Sikre at DeviceType-header er inkludert
+if '#include' in content:
+    # Legg til device_type.h viss ikkje allereie inkludert
+    if 'device_type' not in content.lower():
+        # Finn siste #include-linje og legg til etter den
+        import re
+        last_include = None
+        for m in re.finditer(r'^#include\s+.*$', content, re.MULTILINE):
+            last_include = m
+        if last_include:
+            insert_pos = last_include.end()
+            content = content[:insert_pos] + '\n#include <opendaq/device_type_factory.h>' + content[insert_pos:]
+            patched += 1
+            print("OK: La til #include <opendaq/device_type_factory.h>")
+
 if patched < 2:
-    print(f"FEIL: Berre {patched} av 3 patchar lukkast!", file=sys.stderr)
+    print(f"FEIL: Berre {patched} av minst 3 patchar lukkast!", file=sys.stderr)
     sys.exit(1)
 
 with open(path, "w") as f:
