@@ -29,14 +29,51 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "[1/5] Installerer usbip-verktoy..."
 apt-get update -qq
 
-# Raspberry Pi OS (Debian) og Ubuntu bruker forskjellige pakkenavn
-if apt-cache show linux-tools-common &>/dev/null; then
-    # Ubuntu
-    apt-get install -y --no-install-recommends linux-tools-common linux-tools-generic usbip hwdata usbutils
-else
-    # Raspberry Pi OS / Debian
+# usbip-pakkenavnet varierer mellom distroer:
+#   Ubuntu:            linux-tools-common + linux-tools-$(uname -r)
+#   Debian (eldre):    usbip (eigen pakke)
+#   Debian (nyare):    linux-tools-$(uname -r) eller ikkje pakka separat
+#   Raspberry Pi OS:   usbip eller linux-tools-*
+KJERNEVERSJON=$(uname -r)
+INSTALLERT=false
+
+# Proov 1: linux-tools for gjeldande kjerne (Ubuntu/Debian med kernel-tools)
+if apt-cache show "linux-tools-${KJERNEVERSJON}" &>/dev/null 2>&1; then
+    echo "      Fann linux-tools-${KJERNEVERSJON}"
+    apt-get install -y --no-install-recommends \
+        "linux-tools-${KJERNEVERSJON}" linux-tools-common hwdata usbutils
+    INSTALLERT=true
+# Proov 2: linux-tools-generic (Ubuntu meta-pakke)
+elif apt-cache show linux-tools-generic &>/dev/null 2>&1; then
+    echo "      Fann linux-tools-generic"
+    apt-get install -y --no-install-recommends \
+        linux-tools-common linux-tools-generic hwdata usbutils
+    INSTALLERT=true
+# Proov 3: usbip som eigen pakke (eldre Debian / Raspberry Pi OS)
+elif apt-cache show usbip &>/dev/null 2>&1; then
+    echo "      Fann usbip-pakke"
     apt-get install -y --no-install-recommends usbip usbutils hwdata
+    INSTALLERT=true
 fi
+
+if [ "$INSTALLERT" = false ]; then
+    echo ""
+    echo "      [ADVARSEL] Fann ikkje usbip-pakke automatisk."
+    echo "      Kjerne: ${KJERNEVERSJON}"
+    echo ""
+    echo "      Proov manuelt:"
+    echo "        apt-cache search linux-tools"
+    echo "        apt-cache search usbip"
+    echo ""
+    echo "      Eller installer fraa kjelder:"
+    echo "        apt-get install -y build-essential libwrap0-dev libudev-dev"
+    echo "        # Bygg usbip fraa kernel-kjelder"
+    echo ""
+    echo "      Held fram utan usbip (resten av oppsettet kjoerer)..."
+fi
+
+# Installer usbutils uansett (for lsusb)
+apt-get install -y --no-install-recommends usbutils hwdata 2>/dev/null || true
 echo "      OK"
 
 # 2. Installer udev-regler for Dewesoft USB-enheter
