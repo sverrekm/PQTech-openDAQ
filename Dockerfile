@@ -235,7 +235,17 @@ if serial_line in content:
     idx = content.index(serial_line)
     end_idx = content.index(';', idx) + 1
     extra = """
-    devInfo.setMacAddress("00:00:00:00:00:00");
+    // MAC-adresse: les frå OPENDAQ_MAC miljøvariabel (sett i entrypoint)
+    {
+        const char* envMac = std::getenv("OPENDAQ_MAC");
+        devInfo.setMacAddress(envMac && envMac[0] ? envMac : "00:00:00:00:00:00");
+    }
+    // Serienummer: bruk OPENDAQ_SERIAL viss sett (overskriv default DevSerN)
+    {
+        const char* envSerial = std::getenv("OPENDAQ_SERIAL");
+        if (envSerial && envSerial[0])
+            devInfo.setSerialNumber(envSerial);
+    }
     devInfo.setPlatform("RPi5-Docker");
     devInfo.setSoftwareRevision("1.0.0-opendaq3.30");
     devInfo.setHardwareRevision("");
@@ -273,7 +283,7 @@ if '#include' in content:
             last_include = m
         if last_include:
             insert_pos = last_include.end()
-            content = content[:insert_pos] + '\n#include <opendaq/device_type_factory.h>' + content[insert_pos:]
+            content = content[:insert_pos] + '\n#include <cstdlib>\n#include <opendaq/device_type_factory.h>' + content[insert_pos:]
             patched += 1
             print("OK: La til #include <opendaq/device_type_factory.h>")
 

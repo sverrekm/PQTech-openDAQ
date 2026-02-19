@@ -133,6 +133,26 @@ if [ -n "$OPENDAQ_IP" ]; then
         echo "  OPC-UA hostname OK: ${CURRENT_HOST} -> ${OPENDAQ_IP}"
     fi
 fi
+# Detekter MAC-adresse frå same grensesnitt som IP (for DeviceInfo)
+if [ -z "${OPENDAQ_MAC}" ]; then
+    for IFACE in eth0 end0 lan0 wlan0; do
+        IF_MAC=$(cat /sys/class/net/"$IFACE"/address 2>/dev/null)
+        if [ -n "$IF_MAC" ] && [ "$IF_MAC" != "00:00:00:00:00:00" ]; then
+            export OPENDAQ_MAC="$IF_MAC"
+            echo "  MAC fraa $IFACE: $OPENDAQ_MAC"
+            break
+        fi
+    done
+fi
+if [ -z "${OPENDAQ_MAC}" ]; then
+    echo "  MAC: ikkje detektert (brukar fallback)"
+fi
+
+# Serienummer: bruk OPENDAQ_SERIAL frå environment (docker-compose.yml)
+if [ -n "${OPENDAQ_SERIAL}" ]; then
+    echo "  Serienummer: $OPENDAQ_SERIAL"
+fi
+
 # OPC-UA endpoint URL:
 # open62541 brukar gethostname() for å lage opc.tcp://hostname:port URL-ar.
 # /etc/hosts-fiksen ovanfor sikrar at hostname resolver til LAN-IP internt.
