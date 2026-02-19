@@ -117,6 +117,10 @@ class OpenDAQBro:
             # (Patch 3: ref_device_impl.cpp). Python-bindingane har ikkje
             # set_default_root_device_info(), so alt skjer i C++-kjelda.
 
+            # mDNS discovery server: annonserer eininga på nettverket slik at
+            # DewesoftX finn den automatisk (same som offisielt eksempel).
+            builder.add_discovery_server("mdns")
+
             builder.set_root_device("daqref://device0")
             self._instance = builder.build()
             self._device = self._instance  # Instance wraps root device
@@ -259,9 +263,17 @@ class OpenDAQBro:
                     except Exception:
                         config = None
 
-                    self._instance.add_server(srv_type, config)
+                    server = self._instance.add_server(srv_type, config)
                     servere.append(srv_type)
                     log.info(f"  Server: {srv_type}")
+                    # enable_discovery() registrerer streaming-capabilities med
+                    # mDNS slik at DewesoftX finn og kan KOBLE TIL eininga
+                    # (same moenster som offisielt SimpleDeviceModule-eksempel).
+                    try:
+                        server.enable_discovery()
+                        log.info(f"  {srv_type}: discovery aktivert")
+                    except Exception as e_disc:
+                        log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
                 except Exception as e2:
                     import traceback
                     log.warning(f"  {srv_type} feilet: {e2}")
