@@ -77,9 +77,7 @@ class OpenDAQBro:
             "servere": [],
             "ip": "",
             "porter": {
-                "opcua": 4840,
                 "native_streaming": 7420,
-                "websocket": 7414,
             },
             "startet": None,
             "feil": None,
@@ -253,10 +251,14 @@ class OpenDAQBro:
             # og DewesoftX kan ikkje koble til (viser "Disconnected").
             # ============================================================
 
-            # Fase 1: Legg til alle servere (bind portar)
+            # Fase 1: Legg til server(ar) (bind portar)
+            # VIKTIG: Berre OpenDAQNativeStreaming — same som offisielt
+            # SimpleDeviceModule-eksempel. NativeStreaming handterer BÅDE
+            # konfigurasjon og datastreaming. OPC-UA og LT-servere er
+            # unødvendige og kan forårsake at DewesoftX viser to einingar
+            # (kvar server publiserer separat mDNS-record).
             servers_added = []
-            for srv_type in ['OpenDAQNativeStreaming', 'OpenDAQLTStreaming',
-                             'OpenDAQOPCUA']:
+            for srv_type in ['OpenDAQNativeStreaming']:
                 try:
                     config = None
                     try:
@@ -279,8 +281,6 @@ class OpenDAQBro:
             import socket as _sock
             port_map = {
                 'OpenDAQNativeStreaming': 7420,
-                'OpenDAQLTStreaming': 7414,
-                'OpenDAQOPCUA': 4840,
             }
             faktisk_aktive = []
             for srv_type in list(servere):
@@ -360,9 +360,7 @@ class OpenDAQBro:
 
             log.info("")
             log.info("  openDAQ nettverksbro aktiv:")
-            log.info(f"    OPC-UA:           {ip}:4840")
             log.info(f"    Native Streaming: {ip}:7420")
-            log.info(f"    WebSocket:        {ip}:7414")
             log.info(f"    DewesoftX: HW Settings > + > openDAQ device")
             log.info("")
             return True
