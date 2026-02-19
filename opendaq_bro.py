@@ -113,42 +113,9 @@ class OpenDAQBro:
             builder = _daq.InstanceBuilder()
             builder.add_module_path(self._module_path)
 
-            # Pre-populate DeviceInfo med alle felt INKLUDERT DeviceType.
-            # DeviceInfo er frosen (read-only) etter build — dette er einaste
-            # sjansen til å sette DeviceType som eit objekt (ikkje streng).
-            # DewesoftX krasjar med 'Interface object is nil' i
-            # TOpenDaqDeviceInfo.UpdateInfo viss DeviceType er nullptr.
-            try:
-                dev_info = _daq.DeviceInfoConfig(
-                    self._enhetsnamn or "SIRIUSi-HS", "")
-                dev_info.manufacturer = "Dewesoft"
-                dev_info.model = "SIRIUSi-HS 8xHV 8xLV"
-                dev_info.serial_number = self._serienummer or "0000000000"
-                dev_info.mac_address = "00:00:00:00:00:00"
-                dev_info.platform = "RPi5-Docker"
-                dev_info.software_revision = "1.0.0-opendaq3.30"
-                # Sett alle andre string-felt til tom streng for å unngå nil
-                for attr in ('hardware_revision', 'device_manual', 'device_class',
-                             'product_code', 'device_revision', 'manufacturer_uri',
-                             'product_instance_uri', 'asset_id', 'parent_mac_address',
-                             'system_type', 'system_uuid', 'location', 'user_name'):
-                    try:
-                        setattr(dev_info, attr, "")
-                    except Exception:
-                        pass
-                # DeviceType — kritisk! Nil DeviceType krasjar DewesoftX.
-                try:
-                    dev_type = _daq.DeviceType(
-                        "dewesoft_sirius", "SIRIUSi-HS 8xHV 8xLV",
-                        "Dewesoft SIRIUSi-HS Data Acquisition", None, "daq.ns")
-                    dev_info.device_type = dev_type
-                    log.info("  DeviceType sett: dewesoft_sirius")
-                except Exception as e:
-                    log.warning(f"  DeviceType feilet: {e}")
-                builder.set_default_root_device_info(dev_info)
-                log.info("  DeviceInfo sett via InstanceBuilder (pre-build)")
-            except Exception as e:
-                log.warning(f"  set_default_root_device_info feilet: {e}")
+            # DeviceInfo og DeviceType er sett via C++ patch i Dockerfile
+            # (Patch 3: ref_device_impl.cpp). Python-bindingane har ikkje
+            # set_default_root_device_info(), so alt skjer i C++-kjelda.
 
             builder.set_root_device("daqref://device0")
             self._instance = builder.build()
