@@ -242,46 +242,40 @@ class OpenDAQBro:
 
             ip = self._hent_ip()
 
+            # ============================================================
+            # Server-oppstart i 3 fasar:
+            #   1) add_server() — start servere og bind portar
+            #   2) _fiks_server_capabilities() — sett korrekt IP i capabilities
+            #   3) enable_discovery() — publiser mDNS med riktige adresser
+            #
+            # VIKTIG: Capabilities MÅ fiksast FØR enable_discovery()!
+            # Elles vert mDNS-recorden publisert med feil/tomme IP-adresser
+            # og DewesoftX kan ikkje koble til (viser "Disconnected").
+            # ============================================================
+
+            # Fase 1: Legg til alle servere (bind portar)
+            servers_added = []
             for srv_type in ['OpenDAQNativeStreaming', 'OpenDAQLTStreaming',
                              'OpenDAQOPCUA']:
                 try:
-                    # Prøv å lage server med konfig (sett Path til IP for OPC-UA)
                     config = None
                     try:
                         srv_type_obj = self._instance.available_server_types.get(srv_type)
                         if srv_type_obj:
                             config = srv_type_obj.create_default_config()
-                            # Sett Path-eigenskap viss den finst (OPC-UA brukar Path
-                            # som del av endpoint-URL: opc.tcp://host:port/path)
-                            for prop_name in ('Path', 'Hostname', 'Host'):
-                                try:
-                                    config.set_property_value(prop_name, f"/{ip}")
-                                    log.info(f"  {srv_type}: sett {prop_name}=/{ip}")
-                                    break
-                                except Exception:
-                                    pass
                     except Exception:
                         config = None
 
                     server = self._instance.add_server(srv_type, config)
+                    servers_added.append((srv_type, server))
                     servere.append(srv_type)
                     log.info(f"  Server: {srv_type}")
-                    # enable_discovery() registrerer streaming-capabilities med
-                    # mDNS slik at DewesoftX finn og kan KOBLE TIL eininga
-                    # (same moenster som offisielt SimpleDeviceModule-eksempel).
-                    try:
-                        server.enable_discovery()
-                        log.info(f"  {srv_type}: discovery aktivert")
-                    except Exception as e_disc:
-                        log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
                 except Exception as e2:
                     import traceback
                     log.warning(f"  {srv_type} feilet: {e2}")
                     log.warning(f"  {srv_type} traceback: {traceback.format_exc()}")
 
             # Verifiser at serverane faktisk lyttar på portane.
-            # add_server() kan returnere OK sjølv om bind() feila internt
-            # (NativeStreaming loggar feilen men kastar ikkje exception).
             import socket as _sock
             port_map = {
                 'OpenDAQNativeStreaming': 7420,
@@ -289,7 +283,7 @@ class OpenDAQBro:
                 'OpenDAQOPCUA': 4840,
             }
             faktisk_aktive = []
-            for srv_type in servere:
+            for srv_type in list(servere):
                 port = port_map.get(srv_type)
                 if port:
                     try:
@@ -306,10 +300,9 @@ class OpenDAQBro:
 
             ip = self._hent_ip()
 
-            # Fiks tomme server capability-adresser.
-            # openDAQ sin mDNS-baserte interface-oppdaging fungerer ikkje
-            # paalidelig i Docker (fleire bridge-interface). Sett adresser
-            # manuelt slik at DewesoftX-klienten finn streaming-endepunkta.
+            # Fase 2: Fiks server capabilities med korrekt IP
+            # MÅ skje FØR enable_discovery() slik at mDNS-recorden
+            # inneheld riktig IP som DewesoftX kan koble til.
             self._fiks_server_capabilities(ip)
 
             # Logg server capabilities etter fiks
@@ -322,6 +315,14 @@ class OpenDAQBro:
                         log.info(f"  Cap {cap.protocol_id}: port={cap.port}")
             except Exception as e:
                 log.warning(f"  Listing server capabilities feilet: {e}")
+
+            # Fase 3: Aktiver mDNS-discovery (NÅ med korrekte adresser)
+            for srv_type, server in servers_added:
+                try:
+                    server.enable_discovery()
+                    log.info(f"  {srv_type}: discovery aktivert")
+                except Exception as e_disc:
+                    log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
 
             with self._lock:
                 self._status.update({
@@ -643,14 +644,14 @@ class OpenDAQBro:
                     continue
                 if i >= 8:
                     break
-                    # Amplitude er FloatProperty [0, 10] — _safe_set klampar
-                    self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
-                    # Frequency er FloatProperty [0.1, 10000]
-                    self._safe_set(ch, "Frequency", freq)
-                    # DC er FloatProperty [-10, 10]
-                    self._safe_set(ch, "DC", 0.0)
-                    # Waveform er SelectionProperty (int): 0=Sine
-                    self._safe_set(ch, "Waveform", 0)
+                # Amplitude er FloatProperty [0, 10] — _safe_set klampar
+                self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
+                # Frequency er FloatProperty [0.1, 10000]
+                self._safe_set(ch, "Frequency", freq)
+                # DC er FloatProperty [-10, 10]
+                self._safe_set(ch, "DC", 0.0)
+                # Waveform er SelectionProperty (int): 0=Sine
+                self._safe_set(ch, "Waveform", 0)
                 # CustomRange: Skip — StructProperty (Range) kan forårsake
                 # OPC-UA serialiseringsfeil som krasjar DewesoftX.
                 # Skalering vert handtert av _kanal_skala i oppdater_data().
