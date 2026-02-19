@@ -106,7 +106,7 @@ else:
 
 with open(path, "w") as f:
     f.write(content)
-print("Patch 1/3 komplett: getDomain")
+print("Patch 1/4 komplett: getDomain")
 
 # ---- Patch 2: OPC-UA nil string → tom streng ----
 # VariantConverter<IString>::ToVariant krasjar når input er nullptr.
@@ -196,7 +196,7 @@ else:
 
 with open(path2, "w") as f:
     f.write(content2)
-print("Patch 2/3 komplett: nil string")
+print("Patch 2/4 komplett: nil string")
 PYEOF
 
 # ---- Patch 3: RefDevice DeviceInfo → SIRIUS-verdiar ----
@@ -293,7 +293,45 @@ if patched < 2:
 
 with open(path, "w") as f:
     f.write(content)
-print(f"Patch 3/3 komplett: DeviceInfo ({patched} endringar)")
+print(f"Patch 3/4 komplett: DeviceInfo ({patched} endringar)")
+PYEOF
+
+# ---- Patch 4: createOptionalNode() — tillat MacAddress og SerialNumber ----
+# OPC-UA DAQ Device type definerer MacAddress og SerialNumber som valfrie nodar.
+# TmsServerComponent::createOptionalNode() returnerer false som standard,
+# og TmsServerDevice sin kviteliste inkluderer ikkje desse.
+# Utan denne patchen vert nodane aldri oppretta → DewesoftX viser "Not provided".
+RUN python3 << 'PYEOF'
+import sys
+
+path = "/src/shared/libraries/opcuatms/opcuatms_server/src/objects/tms_server_device.cpp"
+with open(path, "r") as f:
+    content = f.read()
+
+# Legg til MacAddress og SerialNumber i createOptionalNode-kvitelista
+anchor = '    if (name == "ProductInstanceUri" && object.getInfo().getProductInstanceUri() != "")\n        return true;'
+extra = """
+    if (name == "MacAddress" && object.getInfo().getMacAddress() != "")
+        return true;
+    if (name == "SerialNumber" && object.getInfo().getSerialNumber() != "")
+        return true;
+    if (name == "Platform" && object.getInfo().getPlatform() != "")
+        return true;
+    if (name == "HardwareRevision")
+        return true;
+    if (name == "SoftwareRevision")
+        return true;"""
+
+if anchor in content:
+    content = content.replace(anchor, anchor + extra, 1)
+    print("OK: La til MacAddress, SerialNumber, Platform, HW/SW-revision i createOptionalNode")
+else:
+    print("FEIL: Fann ikkje ProductInstanceUri-linja i createOptionalNode!", file=sys.stderr)
+    sys.exit(1)
+
+with open(path, "w") as f:
+    f.write(content)
+print("Patch 4/4 komplett: createOptionalNode")
 PYEOF
 
 RUN cmake -S /src -B /src/build -G Ninja \
