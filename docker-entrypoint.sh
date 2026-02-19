@@ -155,12 +155,16 @@ fi
 
 # OPC-UA endpoint URL:
 # open62541 brukar gethostname() for å lage opc.tcp://hostname:port URL-ar.
-# /etc/hosts-fiksen ovanfor sikrar at hostname resolver til LAN-IP internt.
-# DewesoftX på Windows kan ikkje resolve container-hostname via DNS,
-# men openDAQ mDNS-oppdaging inkluderer IP-adressa i TXT-record.
-# Alternativ: manuell tilkopling med daq.opcua://IP:4840/ i DewesoftX.
-# VIKTIG: Ikkje endre hostname til IP — det bryt mDNS-oppdaging!
-echo "  OPC-UA endpoint: hostname=$(hostname), IP=$OPENDAQ_IP"
+# DewesoftX på Windows kan ikkje resolve container-hostname (t.d. "IOTmanager")
+# via DNS → tilkopling feilar stille (ingen error i log, berre "Disconnected").
+# Løysing: Sett hostname til IP-adressa slik at endpoint-URL vert
+# opc.tcp://192.168.1.160:4840/ som DewesoftX kan nå direkte.
+# mDNS-oppdaging er handtert av add_discovery_server("mdns") i opendaq_bro.py.
+ORIG_HOST=$(hostname)
+hostname "$OPENDAQ_IP" 2>/dev/null || true
+# Oppdater /etc/hosts for det nye hostnavn-et
+echo "$OPENDAQ_IP $OPENDAQ_IP" >> /etc/hosts 2>/dev/null || true
+echo "  OPC-UA endpoint: hostname=$OPENDAQ_IP (var: $ORIG_HOST)"
 echo ""
 
 # Deaktiver modular som ikkje trengst for server-modus og kan foraarsake
