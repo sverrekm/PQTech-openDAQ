@@ -64,6 +64,36 @@ if [ ! -e /sys/kernel/debug/usb ]; then
 fi
 echo ""
 
+# =============================================================
+# Nettverksopprydding: Deaktiver Docker bridge-grensesnitt
+# Med network_mode: host ser OPC-UA-serveren ALLE host-interfaces,
+# inkl. docker0 og br-* (172.x.x.x). DewesoftX listar desse
+# i "Discovered device network settings" og kan proeve aa koble
+# til uoppnabare Docker-IP-ar → "Disconnected".
+# Deaktivering fjernar dei fraa mDNS og OPC-UA-enumerering.
+# =============================================================
+echo "[Nettverksopprydding] Deaktiverer Docker bridge-grensesnitt..."
+RYDDA=0
+for IFACE in $(ls /sys/class/net/ 2>/dev/null); do
+    case "$IFACE" in
+        br-*|docker*|veth*)
+            if ip link set "$IFACE" down 2>/dev/null; then
+                echo "  $IFACE: deaktivert"
+                RYDDA=$((RYDDA + 1))
+            elif $HOST ip link set "$IFACE" down 2>/dev/null; then
+                echo "  $IFACE: deaktivert (via host)"
+                RYDDA=$((RYDDA + 1))
+            fi
+            ;;
+    esac
+done
+if [ $RYDDA -gt 0 ]; then
+    echo "  $RYDDA Docker-grensesnitt deaktivert"
+else
+    echo "  Ingen Docker-grensesnitt aa rydde"
+fi
+echo ""
+
 # Vis tilkobling
 if [ -n "${TILKOBLING}" ]; then
     echo "  Tilkobling: ${TILKOBLING}"
@@ -97,11 +127,25 @@ FELLES_ARGS=(
 # til 127.0.x.x i /etc/hosts, saa OPC-UA annonserer localhost.
 # Fiks: erstatt med faktisk IP slik at DewesoftX kan koble til.
 #
-# IP-prioritet: eth0/LAN fyrst (DewesoftX koplar til via kabel),
-# deretter wlan0, til slutt hostname -I.
+# IP-prioritet: default route fyrst (same interface som mDNS svarar fraa),
+# deretter eth0/lan0/wlan0, til slutt hostname -I.
+# VIKTIG: Default route prioriterast fordi mDNS-multicast svarar fraa same
+# interface — DewesoftX brukar denne IP-en for oppdaging. Viss OPC-UA
+# endpoint-URL har ein annan IP, kan DewesoftX avvise tilkoplinga.
 if [ -z "${OPENDAQ_IP}" ]; then
-    # Prøv eth0 (LAN) fyrst — DewesoftX brukar kabla tilkopling
-    for IFACE in eth0 end0 lan0; do
+    # Metode 1: Default route — same interface som mDNS svarar fraa.
+    DEFAULT_IFACE=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+    if [ -n "$DEFAULT_IFACE" ]; then
+        DEFAULT_IP=$(ip -4 addr show "$DEFAULT_IFACE" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
+        if [ -n "$DEFAULT_IP" ]; then
+            export OPENDAQ_IP="$DEFAULT_IP"
+            echo "  IP fraa default route ($DEFAULT_IFACE): $OPENDAQ_IP"
+        fi
+    fi
+fi
+if [ -z "${OPENDAQ_IP}" ]; then
+    # Metode 2 (fallback): Proev eth0/lan0/wlan0 direkte
+    for IFACE in eth0 end0 lan0 wlan0; do
         ETH_IP=$(ip -4 addr show "$IFACE" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
         if [ -n "$ETH_IP" ]; then
             export OPENDAQ_IP="$ETH_IP"

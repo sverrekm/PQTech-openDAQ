@@ -235,6 +235,8 @@ if serial_line in content:
     idx = content.index(serial_line)
     end_idx = content.index(';', idx) + 1
     extra = """
+    // Namn: DewesoftX viser dette i HW Settings (t.d. "SIRIUSi-HS [DB19106004]")
+    devInfo.setName("SIRIUSi-HS");
     // MAC-adresse: les frå OPENDAQ_MAC miljøvariabel (sett i entrypoint)
     {
         const char* envMac = std::getenv("OPENDAQ_MAC");
@@ -400,6 +402,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcursor1 \
     libxi6 \
     libfreetype6 \
+    iproute2 \
     usbutils \
     usbip \
     procps \
