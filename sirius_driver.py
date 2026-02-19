@@ -1359,6 +1359,7 @@ class SiriusDriver:
         enkel_teller = 0
         feil_teller = 0
         fase = "init"
+        eeprom_data = bytearray()  # Samla EEPROM-data for serienummer-søk
 
         for cmd_hex in INIT_SEKVENS:
             cmd = bytes.fromhex(cmd_hex)
@@ -1432,13 +1433,39 @@ class SiriusDriver:
                         fase = "global_ad"
                     elif opcode == 0xA0:
                         log.info("  A0 01 aktiv modus sett")
-                    elif opcode == 0xA8 and enkel_teller <= 2:
-                        # Logg fyrste EEPROM-lesing
-                        log.info(f"  EEPROM-lesing startar ({cmd[1:].hex()})...")
+                    elif opcode == 0xA8:
+                        # Samla EEPROM-data for serienummer-søk
+                        if svar and len(svar) > 0:
+                            eeprom_data.extend(svar)
+                        if enkel_teller <= 2:
+                            log.info(f"  EEPROM-lesing startar ({cmd[1:].hex()})...")
 
                 except SiriusUSBFeil as e:
                     feil_teller += 1
                     log.warning(f"  Cmd 0x{opcode:02X} feilet: {e}")
+
+        # Søk etter Dewesoft-serienummer i EEPROM-data.
+        # Ekte serienummer er ASCII-streng som "DB19106004" (2 bokstavar + 8 siffer).
+        # USB iSerialNumber (t.d. D019274CF6) er FX2-kontrollaren — ikkje Dewesoft.
+        if eeprom_data:
+            import re
+            log.info(f"  EEPROM: {len(eeprom_data)} bytes samla")
+            # Logg fyrste 64 bytes for feilsøking (hex + ASCII)
+            for offset in range(0, min(len(eeprom_data), 128), 16):
+                chunk = eeprom_data[offset:offset + 16]
+                hex_part = ' '.join(f'{b:02x}' for b in chunk)
+                ascii_part = ''.join(chr(b) if 0x20 <= b < 0x7F else '.' for b in chunk)
+                log.info(f"  EEPROM[{offset:04x}]: {hex_part:<48s} {ascii_part}")
+
+            # Søk etter Dewesoft-serienummer: 2 store bokstavar + 8 siffer
+            eeprom_ascii = eeprom_data.decode('ascii', errors='replace')
+            match = re.search(r'[A-Z]{2}\d{8}', eeprom_ascii)
+            if match:
+                dewesoft_sn = match.group(0)
+                log.info(f"  EEPROM serienummer funne: {dewesoft_sn}")
+                self._enhetsinfo.serienummer = dewesoft_sn
+            else:
+                log.info("  EEPROM: Dewesoft-serienummer ikkje funne (held USB-serial)")
 
         # Flush dataendepunkt
         log.info("  Flush endepunkt...")

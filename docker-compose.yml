@@ -49,7 +49,7 @@ services:
       # (uten openDAQ SDK - bruker reverse-engineered protokoll)
       - NATIVE_SIRIUS=true
       # Serienummer for SIRIUS-eining (vist i DewesoftX)
-      - OPENDAQ_SERIAL=D019274CF6
+      - OPENDAQ_SERIAL=DB19106004
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
       # OPC-UA annonsert IP (tom = auto-detect foerste interface)
