@@ -48,6 +48,8 @@ services:
       # Sett til "true" for aa bruke direkte SIRIUS USB-driver
       # (uten openDAQ SDK - bruker reverse-engineered protokoll)
       - NATIVE_SIRIUS=true
+      # Deaktiver RefDevice intern datagenering (Python injiserer ekte data)
+      - OPENDAQ_DISABLE_ACQ=1
       # Serienummer for SIRIUS-eining (vist i DewesoftX)
       - OPENDAQ_SERIAL=DB19106004
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)

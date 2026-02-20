@@ -336,6 +336,63 @@ with open(path, "w") as f:
 print("Patch 4/4 komplett: createOptionalNode")
 PYEOF
 
+# ---- Patch 5: Disable RefDevice acqLoop data generation ----
+# When OPENDAQ_DISABLE_ACQ env var is set, the RefDevice's internal
+# acquisition loop skips data generation (collectSamples, collectTimeSignalSamples).
+# This allows Python to inject real SIRIUS measurement data via
+# DataPacket + signal.send_packet() without conflicting with synthetic sine waves.
+RUN python3 << 'PYEOF'
+import sys
+
+path = "/src/examples/modules/ref_device_module/src/ref_device_impl.cpp"
+with open(path, "r") as f:
+    content = f.read()
+
+# Patch acqLoop: add env var guard after "if (!stopAcq) {"
+# to skip all data generation (collectTimeSignalSamples + collectSamples)
+old_pattern = """        if (!stopAcq)
+        {
+            const auto curTime = getMicroSecondsSinceDeviceStart();"""
+
+new_pattern = """        if (!stopAcq)
+        {
+            // Patch 5: Skip data generation when OPENDAQ_DISABLE_ACQ is set.
+            // Real SIRIUS data is injected from Python via signal.send_packet().
+            {
+                static const bool disableAcq = std::getenv("OPENDAQ_DISABLE_ACQ") != nullptr;
+                if (disableAcq) continue;
+            }
+
+            const auto curTime = getMicroSecondsSinceDeviceStart();"""
+
+if old_pattern in content:
+    content = content.replace(old_pattern, new_pattern, 1)
+    print("OK: Added OPENDAQ_DISABLE_ACQ guard in acqLoop")
+else:
+    # Fallback: search for getMicroSecondsSinceDeviceStart in acqLoop context
+    import re
+    match = re.search(
+        r'(if\s*\(\s*!stopAcq\s*\)\s*\{)\s*\n(\s*)(const auto curTime = getMicroSecondsSinceDeviceStart)',
+        content
+    )
+    if match:
+        indent = match.group(2)
+        guard = (f"\n{indent}// Patch 5: Skip data generation (OPENDAQ_DISABLE_ACQ)\n"
+                 f"{indent}{{\n"
+                 f"{indent}    static const bool disableAcq = std::getenv(\"OPENDAQ_DISABLE_ACQ\") != nullptr;\n"
+                 f"{indent}    if (disableAcq) continue;\n"
+                 f"{indent}}}\n\n{indent}")
+        content = content[:match.end(1)] + guard + content[match.start(3):]
+        print("OK: Added OPENDAQ_DISABLE_ACQ guard (regex fallback)")
+    else:
+        print("FEIL: Could not find acqLoop pattern to patch!", file=sys.stderr)
+        sys.exit(1)
+
+with open(path, "w") as f:
+    f.write(content)
+print("Patch 5 komplett: disable acqLoop data generation")
+PYEOF
+
 RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \

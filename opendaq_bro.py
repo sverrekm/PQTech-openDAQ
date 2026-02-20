@@ -7,7 +7,7 @@ servere (OPC-UA, Native Streaming, WebSocket) slik at DewesoftX kan
 koble til via openDAQ-protokollen.
 
 Fase 1: Referanse-enhet (daqref://device0) med simulerte kanalar
-Fase 2: Reelle SIRIUS-data injisert via kanal-eigenskapar (Amplitude/Offset)
+Fase 2: Reelle SIRIUS-data injisert via DataPacket + send_packet()
 
 Bruk:
     from opendaq_bro import OpenDAQBro
@@ -68,6 +68,14 @@ class OpenDAQBro:
         self._sirius_ts = 0.0       # Tidsstempel for siste SIRIUS-data
         self._leser_traad = None
         self._stopp_event = threading.Event()
+        # DataPacket-injeksjon (fase 2: reelle SIRIUS-data)
+        self._dom_signal = []      # Domain signal per kanal
+        self._dom_desc = []        # Domain descriptor per kanal
+        self._val_desc = []        # Value descriptor per kanal
+        self._total_samples = []   # Total samples sendt per kanal
+        self._tick_delta = 1000    # Ticks per sample (1MHz / 1kHz)
+        self._start_ticks = 0      # Starttid i ticks
+        self._pakett_klar = False  # True når pakett-injeksjon er klar
         self._status = {
             "tilgjengelig": False,
             "aktiv": False,
@@ -187,6 +195,9 @@ class OpenDAQBro:
                          f"{sum(1 for _, s in self._kanal_signal if s is not None)} med signal")
             except Exception as e:
                 log.warning(f"  Signal-henting feilet: {e}")
+
+            # Initialiser DataPacket-injeksjon for reelle SIRIUS-data
+            self._init_pakett_injeksjon()
 
             # List kanalar og sjekk domain-signal (nil → DewesoftX krasj)
             kanalar = []
@@ -385,13 +396,96 @@ class OpenDAQBro:
         self._enhetsnamn = enhetsnamn or self._enhetsnamn
         log.info(f"  Enhetsinfo oppdatert (intern): sn={self._serienummer}")
 
+    def _init_pakett_injeksjon(self):
+        """Initialiser DataPacket-injeksjon for streaming av reelle SIRIUS-data.
+
+        Hentar domain-signal-referansar og descriptors frå kvar kanal
+        slik at oppdater_data() kan opprette DataPackets med ekte ADC-samples.
+
+        Krev OPENDAQ_DISABLE_ACQ=1 i env for å hindre RefDevice si
+        interne acqLoop frå å generere konfliktande syntetisk data.
+        """
+        self._dom_signal = []
+        self._dom_desc = []
+        self._val_desc = []
+        self._total_samples = []
+        self._pakett_klar = False
+
+        # Sjekk om DataPacket API er tilgjengeleg i Python-bindingane
+        if not hasattr(_daq, 'DataPacket') or not hasattr(_daq, 'DataPacketWithDomain'):
+            log.warning("  DataPacket API ikkje tilgjengeleg — "
+                        "kan ikkje injisere reelle data")
+            return
+
+        # Starttid: mikrosekund sidan epoch (matchar RefDevice-mønster)
+        import time
+        self._start_ticks = int(time.time() * 1_000_000)
+
+        kanalar_klar = 0
+        for idx, (ch, sig) in enumerate(self._kanal_signal):
+            if sig is None:
+                self._dom_signal.append(None)
+                self._dom_desc.append(None)
+                self._val_desc.append(None)
+                self._total_samples.append(0)
+                continue
+            try:
+                dom_sig = sig.domain_signal
+                if dom_sig is None:
+                    raise ValueError("domain_signal er None")
+                dom_desc = dom_sig.descriptor
+                val_desc = sig.descriptor
+                if dom_desc is None or val_desc is None:
+                    raise ValueError("descriptor er None")
+
+                self._dom_signal.append(dom_sig)
+                self._dom_desc.append(dom_desc)
+                self._val_desc.append(val_desc)
+                self._total_samples.append(0)
+                kanalar_klar += 1
+
+                # Hent tick delta frå domain descriptor sin data rule
+                try:
+                    rule = dom_desc.rule
+                    params = rule.parameters
+                    if hasattr(params, 'get'):
+                        delta = params.get('delta', self._tick_delta)
+                    elif hasattr(params, '__getitem__'):
+                        delta = params['delta']
+                    else:
+                        delta = self._tick_delta
+                    self._tick_delta = int(delta)
+                except Exception:
+                    pass  # Behald standard tick_delta
+
+            except Exception as e:
+                ch_name = ch.name if hasattr(ch, 'name') else f"ch{idx}"
+                log.warning(f"  Kanal {ch_name}: pakett-init feilet: {e}")
+                self._dom_signal.append(None)
+                self._dom_desc.append(None)
+                self._val_desc.append(None)
+                self._total_samples.append(0)
+
+        if kanalar_klar > 0:
+            self._pakett_klar = True
+            log.info(f"  Pakett-injeksjon klar: {kanalar_klar} kanalar, "
+                     f"delta={self._tick_delta} ticks/sample")
+            if not os.environ.get("OPENDAQ_DISABLE_ACQ"):
+                log.warning("  ADVARSEL: OPENDAQ_DISABLE_ACQ ikkje sett! "
+                            "RefDevice genererer OGSAA syntetisk data!")
+        else:
+            log.warning("  Pakett-injeksjon IKKJE klar — ingen domain-signal")
+
     def oppdater_data(self, kanal_data):
         """
         Injiser ADC-data frå SIRIUS inn i openDAQ-signalar.
 
-        Oppdaterer kanal-eigenskapar (Amplitude, Offset) basert på reelle
-        ADC-verdiar slik at referanse-eininga reflekterer faktiske maaleverdiar.
-        Lagrar ogsaa siste verdiar for live-visning i web UI.
+        Opprettar DataPacket med reelle maaleverdiar og sender dei
+        direkte til openDAQ-signalane via send_packet(). DewesoftX
+        mottek verdiane via NativeStreaming/OPC-UA.
+
+        Krev OPENDAQ_DISABLE_ACQ=1 for å unngå konflikt med
+        RefDevice si interne datagenering.
 
         Args:
             kanal_data: dict {"kanal_0": np.array(int16), ...} fraa SiriusDriver
@@ -405,15 +499,11 @@ class OpenDAQBro:
 
         try:
             for kanal_idx, (key, data) in enumerate(sorted(kanal_data.items())):
-                if kanal_idx >= len(self._kanal_signal):
-                    break
-
-                # Hopp over tidskanalen (kanal 8) — ikkje eksponert via openDAQ
-                if kanal_idx >= 8:
+                if kanal_idx >= len(self._kanal_signal) or kanal_idx >= 8:
                     break
 
                 ch, sig = self._kanal_signal[kanal_idx]
-                if data is None or len(data) == 0:
+                if sig is None or data is None or len(data) == 0:
                     continue
 
                 # Skaler int16 ADC-verdiar til fysiske einingar (V/A)
@@ -421,7 +511,7 @@ class OpenDAQBro:
                          if kanal_idx < len(self._kanal_skala) else 1.0)
                 fdata = data.astype(np.float64) * skala
 
-                # Berekn statistikk i fysiske einingar
+                # Berekn statistikk for web UI
                 snitt = float(np.mean(fdata))
                 rms = float(np.sqrt(np.mean(fdata ** 2)))
                 topp = float(np.max(np.abs(fdata)))
@@ -436,16 +526,45 @@ class OpenDAQBro:
                     "kjelde": "sirius",
                 }
 
-                # Oppdater referanse-eininga sine kanal-eigenskapar
-                # slik at genererte signal matchar reelle verdiar.
-                # Amplitude: FloatProperty [0, 10] — klampa av _safe_set
-                # DC:        FloatProperty [-10, 10] — brukt for DC-offset
-                #            (ikkje "Offset" som er IntProperty for sample-offset)
-                try:
-                    self._safe_set(ch, "Amplitude", topp)
-                    self._safe_set(ch, "DC", snitt)
-                except Exception:
-                    pass
+                # Send reelle data som DataPacket via openDAQ-signal
+                if (self._pakett_klar and
+                        kanal_idx < len(self._dom_signal) and
+                        self._dom_signal[kanal_idx] is not None):
+                    try:
+                        dom_sig = self._dom_signal[kanal_idx]
+                        dom_desc = self._dom_desc[kanal_idx]
+                        val_desc = self._val_desc[kanal_idx]
+
+                        num_samples = len(fdata)
+                        offset = (self._start_ticks +
+                                  self._total_samples[kanal_idx] * self._tick_delta)
+
+                        # Opprett domain- (tid) og verdi-pakke
+                        time_pkt = _daq.DataPacket(dom_desc, num_samples, offset)
+                        val_pkt = _daq.DataPacketWithDomain(
+                            time_pkt, val_desc, num_samples, 0)
+
+                        # Fyll verdibufferen med reelle SIRIUS-data
+                        try:
+                            buf = np.frombuffer(
+                                val_pkt.raw_data, dtype=np.float64)
+                            np.copyto(buf, fdata[:num_samples])
+                        except (ValueError, TypeError):
+                            # Fallback: ctypes for ikkje-skrivbar buffer
+                            import ctypes
+                            arr = (ctypes.c_double * num_samples).from_address(
+                                int(val_pkt.raw_data))
+                            for i in range(min(num_samples, len(fdata))):
+                                arr[i] = fdata[i]
+
+                        # Send: domain fyrst, deretter verdi
+                        dom_sig.send_packet(time_pkt)
+                        sig.send_packet(val_pkt)
+
+                        self._total_samples[kanal_idx] += num_samples
+                    except Exception as e:
+                        if self._data_teller % 1000 == 0:
+                            log.warning(f"  Pakett kanal {kanal_idx}: {e}")
 
             self._data_teller += 1
 
@@ -556,6 +675,11 @@ class OpenDAQBro:
         self._kanal_signal = []   # Kanal/signal-referansar
         self._kanal_skala = []
         self._siste_verdiar = {}
+        self._dom_signal = []     # DataPacket-injeksjon referansar
+        self._dom_desc = []
+        self._val_desc = []
+        self._total_samples = []
+        self._pakett_klar = False
         self._device = None       # Same objekt som _instance — fjern fyrst
         inst = self._instance     # Lokal referanse for eksplisitt del
         self._instance = None     # Fjern instansreferanse
