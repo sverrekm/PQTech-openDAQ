@@ -20,7 +20,7 @@ FROM debian:bookworm AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PARALLELLE_JOBBER=2
-ARG OPENDAQ_BRANCH=v3.30.0
+ARG OPENDAQ_BRANCH=v3.20.6
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -207,7 +207,7 @@ PYEOF
 RUN python3 << 'PYEOF'
 import sys
 
-path = "/src/examples/modules/ref_device_module/src/ref_device_impl.cpp"
+path = "/src/modules/ref_device_module/src/ref_device_impl.cpp"
 with open(path, "r") as f:
     content = f.read()
 
@@ -249,7 +249,7 @@ if serial_line in content:
             devInfo.setSerialNumber(envSerial);
     }
     devInfo.setPlatform("RPi5-Docker");
-    devInfo.setSoftwareRevision("1.0.0-opendaq3.30");
+    devInfo.setSoftwareRevision("1.0.0-opendaq3.20");
     devInfo.setHardwareRevision("");
     devInfo.setDeviceManual("");
     devInfo.setDeviceClass("");
@@ -344,7 +344,7 @@ PYEOF
 RUN python3 << 'PYEOF'
 import sys
 
-path = "/src/examples/modules/ref_device_module/src/ref_device_impl.cpp"
+path = "/src/modules/ref_device_module/src/ref_device_impl.cpp"
 with open(path, "r") as f:
     content = f.read()
 
