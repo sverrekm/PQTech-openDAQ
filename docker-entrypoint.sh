@@ -65,34 +65,13 @@ fi
 echo ""
 
 # =============================================================
-# Nettverksopprydding: Deaktiver Docker bridge-grensesnitt
-# Med network_mode: host ser OPC-UA-serveren ALLE host-interfaces,
-# inkl. docker0 og br-* (172.x.x.x). DewesoftX listar desse
-# i "Discovered device network settings" og kan proeve aa koble
-# til uoppnabare Docker-IP-ar → "Disconnected".
-# Deaktivering fjernar dei fraa mDNS og OPC-UA-enumerering.
+# Nettverksopprydding: DEAKTIVERT
+# Tidlegare tok dette ned Docker bridge-grensesnitt (br-*, docker0, veth*)
+# for aa hindre OPC-UA fraa aa annonsere 172.x.x.x-adresser.
+# FJERNA fordi det og tar ned nettverk for andre containerar (Gitea, Portainer).
+# Problemet er no løyst av _fiks_server_capabilities() i opendaq_bro.py
+# som eksplisitt set riktig IP i alle OPC-UA/mDNS-annonseringar.
 # =============================================================
-echo "[Nettverksopprydding] Deaktiverer Docker bridge-grensesnitt..."
-RYDDA=0
-for IFACE in $(ls /sys/class/net/ 2>/dev/null); do
-    case "$IFACE" in
-        br-*|docker*|veth*)
-            if ip link set "$IFACE" down 2>/dev/null; then
-                echo "  $IFACE: deaktivert"
-                RYDDA=$((RYDDA + 1))
-            elif $HOST ip link set "$IFACE" down 2>/dev/null; then
-                echo "  $IFACE: deaktivert (via host)"
-                RYDDA=$((RYDDA + 1))
-            fi
-            ;;
-    esac
-done
-if [ $RYDDA -gt 0 ]; then
-    echo "  $RYDDA Docker-grensesnitt deaktivert"
-else
-    echo "  Ingen Docker-grensesnitt aa rydde"
-fi
-echo ""
 
 # Vis tilkobling
 if [ -n "${TILKOBLING}" ]; then
