@@ -411,10 +411,14 @@ class OpenDAQBro:
         self._total_samples = []
         self._pakett_klar = False
 
-        # Sjekk om DataPacket API er tilgjengeleg i Python-bindingane
+        # Sjekk om DataPacket API og ISignalConfig er tilgjengelege
         if not hasattr(_daq, 'DataPacket') or not hasattr(_daq, 'DataPacketWithDomain'):
             log.warning("  DataPacket API ikkje tilgjengeleg — "
                         "kan ikkje injisere reelle data")
+            return
+        if not hasattr(_daq, 'ISignalConfig'):
+            log.warning("  ISignalConfig ikkje tilgjengeleg — "
+                        "kan ikkje sende pakkar")
             return
 
         # Starttid: mikrosekund sidan epoch (matchar RefDevice-mønster)
@@ -430,19 +434,29 @@ class OpenDAQBro:
                 self._total_samples.append(0)
                 continue
             try:
+                # Cast ISignal → ISignalConfig for å få tilgang til send_packet()
+                # ch.signals returnerer ISignal (read-only), men underliggande
+                # C++-objekt er SignalConfig og støttar ISignalConfig-interfacet.
+                sig_config = _daq.ISignalConfig.cast_from(sig)
+
                 dom_sig = sig.domain_signal
                 if dom_sig is None:
                     raise ValueError("domain_signal er None")
+                dom_sig_config = _daq.ISignalConfig.cast_from(dom_sig)
+
                 dom_desc = dom_sig.descriptor
                 val_desc = sig.descriptor
                 if dom_desc is None or val_desc is None:
                     raise ValueError("descriptor er None")
 
-                self._dom_signal.append(dom_sig)
+                self._dom_signal.append(dom_sig_config)
                 self._dom_desc.append(dom_desc)
                 self._val_desc.append(val_desc)
                 self._total_samples.append(0)
                 kanalar_klar += 1
+
+                # Lagre ogsaa value signal config for send_packet
+                self._kanal_signal[idx] = (ch, sig_config)
 
                 # Hent tick delta frå domain descriptor sin data rule
                 try:
