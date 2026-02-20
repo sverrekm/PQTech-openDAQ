@@ -491,7 +491,7 @@ RUN git clone --depth 1 https://github.com/mvp/uhubctl /tmp/uhubctl \
     && apt-get purge -y --auto-remove git build-essential libusb-1.0-0-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir numpy flask pyusb zeroconf
+RUN pip install --no-cache-dir numpy flask pyusb
 
 COPY --from=builder /opt/opendaq/lib/ /usr/local/lib/
 COPY --from=builder /opt/opendaq/python/ /usr/local/lib/python3.11/site-packages/opendaq/
