@@ -47,7 +47,7 @@ class OpenDAQBro:
 
     Opprettar openDAQ Instance med referanse-enhet som ROOT DEVICE
     og startar OPC-UA + Native Streaming + WebSocket servere.
-    DewesoftX finn eininga via openDAQ mDNS-oppdaging.
+    DewesoftX finn eininga via mDNS (Python zeroconf, berre LAN-IP).
     """
 
     def __init__(self, module_path=None, serienummer="", enhetsnamn=""):
@@ -76,6 +76,8 @@ class OpenDAQBro:
         self._tick_delta = 1000    # Ticks per sample (1MHz / 1kHz)
         self._start_ticks = 0      # Starttid i ticks
         self._pakett_klar = False  # True når pakett-injeksjon er klar
+        self._zeroconf = None      # Python zeroconf for eksplisitt mDNS-kontroll
+        self._mdns_services = []   # Registrerte ServiceInfo-objekt
         self._status = {
             "tilgjengelig": False,
             "aktiv": False,
@@ -124,9 +126,11 @@ class OpenDAQBro:
             # (Patch 3: ref_device_impl.cpp). Python-bindingane har ikkje
             # set_default_root_device_info(), so alt skjer i C++-kjelda.
 
-            # mDNS discovery server: annonserer eininga på nettverket slik at
-            # DewesoftX finn den automatisk (same som offisielt eksempel).
-            builder.add_discovery_server("mdns")
+            # mDNS discovery: brukar Python zeroconf i staden for innebygd mDNS.
+            # openDAQ si innebygde mDNS (builder.add_discovery_server("mdns"))
+            # inkluderer ALLE host-IP-ar (inkl. Docker bridges 172.x.x.x) som
+            # DewesoftX prøver å koble til → "Disconnected" / 0x80000014.
+            # Python zeroconf gjev oss kontroll over kva IP som vert annonsert.
 
             builder.set_root_device("daqref://device0")
             self._instance = builder.build()
@@ -256,11 +260,9 @@ class OpenDAQBro:
             # Server-oppstart i 3 fasar:
             #   1) add_server() — start servere og bind portar
             #   2) _fiks_server_capabilities() — sett korrekt IP i capabilities
-            #   3) enable_discovery() — publiser mDNS med riktige adresser
+            #   3) _registrer_mdns() — Python zeroconf med berre LAN-IP
             #
-            # VIKTIG: Capabilities MÅ fiksast FØR enable_discovery()!
-            # Elles vert mDNS-recorden publisert med feil/tomme IP-adresser
-            # og DewesoftX kan ikkje koble til (viser "Disconnected").
+            # VIKTIG: Capabilities MÅ fiksast FØR mDNS-registrering!
             # ============================================================
 
             # Fase 1: Legg til servere (bind portar)
@@ -314,8 +316,8 @@ class OpenDAQBro:
             ip = self._hent_ip()
 
             # Fase 2: Fiks server capabilities med korrekt IP
-            # MÅ skje FØR enable_discovery() slik at mDNS-recorden
-            # inneheld riktig IP som DewesoftX kan koble til.
+            # MÅ skje FØR mDNS-registrering slik at OPC-UA
+            # annonserer riktig IP som DewesoftX kan koble til.
             self._fiks_server_capabilities(ip)
 
             # Logg server capabilities etter fiks
@@ -329,13 +331,9 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Listing server capabilities feilet: {e}")
 
-            # Fase 3: Aktiver mDNS-discovery (NÅ med korrekte adresser)
-            for srv_type, server in servers_added:
-                try:
-                    server.enable_discovery()
-                    log.info(f"  {srv_type}: discovery aktivert")
-                except Exception as e_disc:
-                    log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
+            # Fase 3: Registrer mDNS med Python zeroconf (berre LAN-IP)
+            # Erstattar openDAQ enable_discovery() som brukar alle host-IP-ar
+            self._registrer_mdns(ip)
 
             with self._lock:
                 self._status.update({
@@ -411,14 +409,10 @@ class OpenDAQBro:
         self._total_samples = []
         self._pakett_klar = False
 
-        # Sjekk om DataPacket API og ISignalConfig er tilgjengelege
+        # Sjekk om DataPacket API er tilgjengeleg i Python-bindingane
         if not hasattr(_daq, 'DataPacket') or not hasattr(_daq, 'DataPacketWithDomain'):
             log.warning("  DataPacket API ikkje tilgjengeleg — "
                         "kan ikkje injisere reelle data")
-            return
-        if not hasattr(_daq, 'ISignalConfig'):
-            log.warning("  ISignalConfig ikkje tilgjengeleg — "
-                        "kan ikkje sende pakkar")
             return
 
         # Starttid: mikrosekund sidan epoch (matchar RefDevice-mønster)
@@ -434,29 +428,19 @@ class OpenDAQBro:
                 self._total_samples.append(0)
                 continue
             try:
-                # Cast ISignal → ISignalConfig for å få tilgang til send_packet()
-                # ch.signals returnerer ISignal (read-only), men underliggande
-                # C++-objekt er SignalConfig og støttar ISignalConfig-interfacet.
-                sig_config = _daq.ISignalConfig.cast_from(sig)
-
                 dom_sig = sig.domain_signal
                 if dom_sig is None:
                     raise ValueError("domain_signal er None")
-                dom_sig_config = _daq.ISignalConfig.cast_from(dom_sig)
-
                 dom_desc = dom_sig.descriptor
                 val_desc = sig.descriptor
                 if dom_desc is None or val_desc is None:
                     raise ValueError("descriptor er None")
 
-                self._dom_signal.append(dom_sig_config)
+                self._dom_signal.append(dom_sig)
                 self._dom_desc.append(dom_desc)
                 self._val_desc.append(val_desc)
                 self._total_samples.append(0)
                 kanalar_klar += 1
-
-                # Lagre ogsaa value signal config for send_packet
-                self._kanal_signal[idx] = (ch, sig_config)
 
                 # Hent tick delta frå domain descriptor sin data rule
                 try:
@@ -669,6 +653,9 @@ class OpenDAQBro:
         with self._lock:
             self._status["aktiv"] = False
 
+        # Stopp mDNS-annonsering (zeroconf)
+        self._stopp_mdns()
+
         # Fjern serverane eksplisitt FØR instance-destruksjon.
         # remove_server() stoppar nettverks-lyttarar og frigjer portar.
         if self._instance is not None:
@@ -694,6 +681,8 @@ class OpenDAQBro:
         self._val_desc = []
         self._total_samples = []
         self._pakett_klar = False
+        self._zeroconf = None     # Allereie stengt i _stopp_mdns()
+        self._mdns_services = []
         self._device = None       # Same objekt som _instance — fjern fyrst
         inst = self._instance     # Lokal referanse for eksplisitt del
         self._instance = None     # Fjern instansreferanse
@@ -1034,6 +1023,86 @@ class OpenDAQBro:
                     log.info(f"  {label}{prop.name}: (feil: {e2})")
         except Exception as e:
             log.warning(f"  _logg_eigenskapar({label}): {e}")
+
+    def _registrer_mdns(self, ip):
+        """Registrer mDNS-tenester med Python zeroconf (berre LAN-IP).
+
+        Erstattar openDAQ si innebygde mDNS som inkluderer ALLE host-IP-ar
+        (inkl. Docker bridge 172.x.x.x) og forårsaker at DewesoftX prøver
+        å koble til uoppnåelege adresser → "Disconnected" / 0x80000014.
+
+        Registrerer:
+          - _opcua-tcp._tcp (OPC-UA, port 4840) — hovud-discovery for DewesoftX
+          - _opendaq-streaming-native._tcp (NativeStreaming, port 7420)
+        """
+        try:
+            from zeroconf import Zeroconf, ServiceInfo
+        except ImportError:
+            log.warning("  zeroconf ikkje installert — mDNS deaktivert!")
+            log.warning("  DewesoftX vil ikkje finne eininga automatisk.")
+            return
+
+        try:
+            # Bind KUN til LAN-interfacet (ikkje Docker bridges)
+            self._zeroconf = Zeroconf(interfaces=[ip])
+            self._mdns_services = []
+
+            addr = socket.inet_aton(ip)
+            sn = self._serienummer or os.environ.get("OPENDAQ_SERIAL", "unknown")
+            server_host = f"opendaq-{sn}.local."
+            inst_base = f"openDAQ-{sn}"
+
+            # OPC-UA discovery (_opcua-tcp._tcp)
+            # DewesoftX søkjer etter denne tenesta for å finne openDAQ-einingar.
+            opcua_info = ServiceInfo(
+                type_="_opcua-tcp._tcp.local.",
+                name=f"{inst_base}._opcua-tcp._tcp.local.",
+                addresses=[addr],
+                port=4840,
+                properties={
+                    'path': '/',
+                    'caps': 'DA',
+                },
+                server=server_host,
+            )
+            self._zeroconf.register_service(opcua_info)
+            self._mdns_services.append(opcua_info)
+            log.info(f"  mDNS: _opcua-tcp._tcp → {ip}:4840 ({inst_base})")
+
+            # Native Streaming discovery
+            ns_info = ServiceInfo(
+                type_="_opendaq-streaming-native._tcp.local.",
+                name=f"{inst_base}._opendaq-streaming-native._tcp.local.",
+                addresses=[addr],
+                port=7420,
+                properties={
+                    'path': '/',
+                },
+                server=server_host,
+            )
+            self._zeroconf.register_service(ns_info)
+            self._mdns_services.append(ns_info)
+            log.info(f"  mDNS: _opendaq-streaming-native._tcp → {ip}:7420")
+
+        except Exception as e:
+            log.warning(f"  mDNS-registrering feilet: {e}")
+            import traceback
+            log.warning(f"  {traceback.format_exc()}")
+
+    def _stopp_mdns(self):
+        """Avregistrer mDNS-tenester og steng zeroconf."""
+        if self._zeroconf is not None:
+            try:
+                for svc in self._mdns_services:
+                    try:
+                        self._zeroconf.unregister_service(svc)
+                    except Exception:
+                        pass
+                self._zeroconf.close()
+            except Exception:
+                pass
+            self._zeroconf = None
+            self._mdns_services = []
 
     @staticmethod
     def _hent_ip():

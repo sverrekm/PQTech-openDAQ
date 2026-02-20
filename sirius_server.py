@@ -457,7 +457,6 @@ def hent_opendaq_status():
             port_sjekk = {
                 'opcua': 4840,
                 'native_streaming': 7420,
-                'websocket': 7414,
             }
             port_status = {}
             for namn, port in port_sjekk.items():
@@ -525,7 +524,7 @@ def restart_opendaq_bro():
     # Viss C++ destruktorane ikkje køyrde, er portane framleis opptekne
     # og den einaste løysinga er container-restart.
     import socket as _sock
-    portar = [4840, 7420, 7414]
+    portar = [4840, 7420]
     alle_ledige = False
     opptekne = []
     for forsok in range(10):

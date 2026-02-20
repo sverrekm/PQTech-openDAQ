@@ -65,12 +65,11 @@ fi
 echo ""
 
 # =============================================================
-# Nettverksopprydding: DEAKTIVERT
-# Tidlegare tok dette ned Docker bridge-grensesnitt (br-*, docker0, veth*)
-# for aa hindre OPC-UA fraa aa annonsere 172.x.x.x-adresser.
-# FJERNA fordi det og tar ned nettverk for andre containerar (Gitea, Portainer).
-# Problemet er no løyst av _fiks_server_capabilities() i opendaq_bro.py
-# som eksplisitt set riktig IP i alle OPC-UA/mDNS-annonseringar.
+# Nettverksopprydding: IKKJE MOGLEG paa host-nettverk
+# Docker-bridges (172.x.x.x) er synlege for openDAQ mDNS, men vi
+# kan ikkje fjerne IP-ane (bryt Gitea/Portainer gateway-routing).
+# Loysinga er Python zeroconf i opendaq_bro.py som registrerer
+# mDNS-tenester med BERRE eth0-IP (ikkje Docker-bridge IP-ar).
 # =============================================================
 
 # Vis tilkobling
