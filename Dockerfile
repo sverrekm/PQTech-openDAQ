@@ -348,6 +348,22 @@ path = "/src/examples/modules/ref_device_module/src/ref_device_impl.cpp"
 with open(path, "r") as f:
     content = f.read()
 
+# Sikre at <cstdlib> er inkludert (for std::getenv)
+# Patch 3 legg den berre til viss device_type_factory.h manglar,
+# men v3.30.0 har den allereie → cstdlib vert aldri lagt til.
+if '#include <cstdlib>' not in content:
+    # Legg til etter fyrste #include-blokk
+    import re
+    last_inc = None
+    for m in re.finditer(r'^#include\s+.*$', content, re.MULTILINE):
+        last_inc = m
+    if last_inc:
+        content = content[:last_inc.end()] + '\n#include <cstdlib>' + content[last_inc.end():]
+        print("OK: La til #include <cstdlib>")
+    else:
+        print("FEIL: Ingen #include funne!", file=sys.stderr)
+        sys.exit(1)
+
 # Patch acqLoop: add env var guard after "if (!stopAcq) {"
 # to skip all data generation (collectTimeSignalSamples + collectSamples)
 old_pattern = """        if (!stopAcq)
