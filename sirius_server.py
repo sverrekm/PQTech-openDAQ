@@ -452,7 +452,12 @@ def hent_opendaq_status():
         # Hyppigare probing skapar "Failed to read connect request headers"
         # i NativeStreaming-serveren og kan forstyrre DewesoftX-tilkoplinga.
         now = time.time()
-        if now - _port_probe_cache["ts"] > 10.0:
+        # Kortare TTL (2s) for negative resultat — unngår at "Inaktiv"
+        # vert vist i 10s under oppstart pga cache av ikkje-klare portar.
+        # Positive resultat (alle oppe) brukast med full 10s TTL.
+        cached_positive = all(_port_probe_cache["result"].values()) if _port_probe_cache["result"] else False
+        ttl = 10.0 if cached_positive else 2.0
+        if now - _port_probe_cache["ts"] > ttl:
             import socket as _sock
             port_sjekk = {
                 'opcua': 4840,

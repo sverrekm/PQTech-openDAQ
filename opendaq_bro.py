@@ -140,9 +140,9 @@ class OpenDAQBro:
                 enhet_namn = "RefDevice0"
             log.info(f"  Root device: {enhet_namn}")
 
-            # DeviceInfo er sett via InstanceBuilder ovanfor (set_default_root_device_info).
-            # Etter build er info frosen — prøv likevel å oppdatere som fallback.
-            self._sett_sirius_device_info()
+            # DeviceInfo er sett via C++ Patch 3 i Dockerfile.
+            # Python kan ikkje endre frosen DeviceInfo — hopp over.
+            # self._sett_sirius_device_info()
 
             # Diagnostikk: List tilgjengelege eigenskapar på referanse-eininga
             try:
@@ -253,14 +253,12 @@ class OpenDAQBro:
             ip = self._hent_ip()
 
             # ============================================================
-            # Server-oppstart i 3 fasar:
+            # Server-oppstart i 2 fasar:
             #   1) add_server() — start servere og bind portar
-            #   2) _fiks_server_capabilities() — sett korrekt IP i capabilities
-            #   3) enable_discovery() — publiser mDNS med riktige adresser
+            #   2) enable_discovery() — publiser mDNS
             #
-            # VIKTIG: Capabilities MÅ fiksast FØR enable_discovery()!
-            # Elles vert mDNS-recorden publisert med feil/tomme IP-adresser
-            # og DewesoftX kan ikkje koble til (viser "Disconnected").
+            # ServerCapabilities vert IKKJE modifisert frå Python.
+            # Med network_mode:host brukar openDAQ riktig host-IP.
             # ============================================================
 
             # Fase 1: Legg til servere (bind portar)
@@ -311,25 +309,28 @@ class OpenDAQBro:
                         servere.remove(srv_type)
             log.info(f"  Verifiserte serverar: {faktisk_aktive}")
 
-            ip = self._hent_ip()
-
-            # Fase 2: Fiks server capabilities med korrekt IP
-            # MÅ skje FØR enable_discovery() slik at mDNS-recorden
-            # inneheld riktig IP som DewesoftX kan koble til.
-            self._fiks_server_capabilities(ip)
-
-            # Logg server capabilities etter fiks
+            # Fase 2: Logg server capabilities (IKKJE modifiser).
+            # Zeroconf-test beviste at Docker bridge-IP ikkje er årsak til
+            # "Disconnected" — _fiks_server_capabilities() er difor fjerna.
+            # openDAQ sin innebygde mDNS + network_mode:host gjer at
+            # riktige IP-adresser vert publisert automatisk.
             try:
                 for cap in self._instance.info.server_capabilities:
                     try:
-                        pcs = cap.get_property_value("PrimaryConnectionString")
-                        log.info(f"  Cap {cap.protocol_id}: {pcs}")
+                        props_info = []
+                        for p in cap.visible_properties:
+                            try:
+                                v = cap.get_property_value(p.name)
+                                props_info.append(f"{p.name}={v!r}")
+                            except Exception:
+                                props_info.append(f"{p.name}=?")
+                        log.info(f"  Cap {cap.protocol_id}: {', '.join(props_info)}")
                     except Exception:
                         log.info(f"  Cap {cap.protocol_id}: port={cap.port}")
             except Exception as e:
                 log.warning(f"  Listing server capabilities feilet: {e}")
 
-            # Fase 3: Aktiver mDNS-discovery (NÅ med korrekte adresser)
+            # Fase 2: Aktiver mDNS-discovery
             for srv_type, server in servers_added:
                 try:
                     server.enable_discovery()
