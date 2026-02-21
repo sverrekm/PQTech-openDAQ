@@ -56,7 +56,7 @@ services:
       #- OPENDAQ_MAC=
       # OPC-UA annonsert IP (tom = auto-detect foerste interface)
       # Sett til spesifikk IP viss Pi har fleire nettverk
-      - OPENDAQ_IP=192.168.1.53
+      - OPENDAQ_IP=192.168.1.160
 
     deploy:
       resources:
