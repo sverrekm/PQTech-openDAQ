@@ -409,6 +409,122 @@ with open(path, "w") as f:
 print("Patch 5 komplett: disable acqLoop data generation")
 PYEOF
 
+# ---- Patch 6: OPC-UA DataType coercion in writeValue ----
+# open62541 rejects writes when the variant type mismatches the node's
+# DataType (e.g., Int64 written to UInt16 node). TMS VariantConverter
+# always produces Int64/Double because targetType=nullptr, but OPC-UA
+# TypeDefinition child nodes expect narrower types (UInt16, UInt32, Float).
+# Fix: Read the node's DataType before writing and coerce the variant.
+# This eliminates ~90 "DataType of the value is incompatible" warnings.
+RUN python3 << 'PYEOF'
+import sys, re
+
+path = "/src/shared/libraries/opcua/opcuaserver/src/opcuaserver.cpp"
+with open(path, "r") as f:
+    content = f.read()
+
+new_code = '''// Patch 6: Coerce scalar variants to match OPC-UA node DataType.
+// TMS VariantConverter produces Int64/Double (targetType=nullptr) but
+// TypeDefinition child nodes may expect UInt16, UInt32, Float, etc.
+// open62541 rejects writes with mismatched types ("DataType incompatible").
+static bool coerceVariantToNodeType(UA_Server* srv, const UA_NodeId& nid,
+                                    const UA_Variant& src, UA_Variant& dst)
+{
+    if (src.type == nullptr || !UA_Variant_isScalar(&src))
+        return false;
+
+    UA_NodeId expectedId;
+    UA_NodeId_init(&expectedId);
+    if (UA_Server_readDataType(srv, nid, &expectedId) != UA_STATUSCODE_GOOD)
+        return false;
+
+    if (UA_NodeId_equal(&src.type->typeId, &expectedId)) {
+        UA_NodeId_clear(&expectedId);
+        return false;
+    }
+
+    if (expectedId.namespaceIndex != 0 ||
+        expectedId.identifierType != UA_NODEIDTYPE_NUMERIC) {
+        UA_NodeId_clear(&expectedId);
+        return false;
+    }
+
+    const UA_UInt32 tid = expectedId.identifier.numeric;
+    UA_NodeId_clear(&expectedId);
+    bool ok = false;
+
+    if (src.type == &UA_TYPES[UA_TYPES_INT64]) {
+        UA_Int64 v = *(UA_Int64*)src.data;
+        if      (tid==UA_NS0ID_UINT64)  { UA_UInt64  c=(UA_UInt64)v;  UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_UINT64]);  ok=true; }
+        else if (tid==UA_NS0ID_UINT32)  { UA_UInt32  c=(UA_UInt32)v;  UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_UINT32]);  ok=true; }
+        else if (tid==UA_NS0ID_INT32)   { UA_Int32   c=(UA_Int32)v;   UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_INT32]);   ok=true; }
+        else if (tid==UA_NS0ID_UINT16)  { UA_UInt16  c=(UA_UInt16)v;  UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_UINT16]);  ok=true; }
+        else if (tid==UA_NS0ID_INT16)   { UA_Int16   c=(UA_Int16)v;   UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_INT16]);   ok=true; }
+        else if (tid==UA_NS0ID_BYTE)    { UA_Byte    c=(UA_Byte)v;    UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_BYTE]);    ok=true; }
+        else if (tid==UA_NS0ID_SBYTE)   { UA_SByte   c=(UA_SByte)v;   UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_SBYTE]);   ok=true; }
+        else if (tid==UA_NS0ID_BOOLEAN) { UA_Boolean c=(v!=0);        UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_BOOLEAN]); ok=true; }
+        else if (tid==UA_NS0ID_DOUBLE)  { UA_Double  c=(UA_Double)v;  UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_DOUBLE]);  ok=true; }
+        else if (tid==UA_NS0ID_FLOAT)   { UA_Float   c=(UA_Float)v;   UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_FLOAT]);   ok=true; }
+    }
+    else if (src.type == &UA_TYPES[UA_TYPES_DOUBLE]) {
+        if (tid == UA_NS0ID_FLOAT) {
+            UA_Float c = (UA_Float)(*(UA_Double*)src.data);
+            UA_Variant_setScalarCopy(&dst, &c, &UA_TYPES[UA_TYPES_FLOAT]);
+            ok = true;
+        }
+    }
+    else if (src.type == &UA_TYPES[UA_TYPES_UINT32]) {
+        UA_UInt32 v = *(UA_UInt32*)src.data;
+        if      (tid==UA_NS0ID_UINT16) { UA_UInt16 c=(UA_UInt16)v; UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_UINT16]); ok=true; }
+        else if (tid==UA_NS0ID_BYTE)   { UA_Byte   c=(UA_Byte)v;   UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_BYTE]);   ok=true; }
+        else if (tid==UA_NS0ID_INT64)  { UA_Int64  c=(UA_Int64)v;  UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_INT64]);  ok=true; }
+        else if (tid==UA_NS0ID_UINT64) { UA_UInt64 c=(UA_UInt64)v; UA_Variant_setScalarCopy(&dst,&c,&UA_TYPES[UA_TYPES_UINT64]); ok=true; }
+    }
+
+    return ok;
+}
+
+void OpcUaServer::writeValue(const OpcUaNodeId& nodeId, const OpcUaVariant& value)
+{
+    UA_Variant coerced;
+    UA_Variant_init(&coerced);
+    if (coerceVariantToNodeType(server, *nodeId, *value, coerced))
+    {
+        UA_StatusCode sc = UA_Server_writeValue(server, *nodeId, coerced);
+        UA_Variant_clear(&coerced);
+        CheckStatusCodeException(sc);
+    }
+    else
+    {
+        CheckStatusCodeException(UA_Server_writeValue(server, *nodeId, *value));
+    }
+}'''
+
+# Find and replace writeValue
+old_exact = """void OpcUaServer::writeValue(const OpcUaNodeId& nodeId, const OpcUaVariant& value)
+{
+    CheckStatusCodeException(UA_Server_writeValue(server, *nodeId, *value));
+}"""
+
+if old_exact in content:
+    content = content.replace(old_exact, new_code, 1)
+    print("OK: Patcha writeValue med type coercion")
+else:
+    # Regex fallback: match writeValue with flexible whitespace
+    pattern = r'void\s+OpcUaServer::writeValue\s*\(\s*const\s+OpcUaNodeId\s*&\s*\w+\s*,\s*const\s+OpcUaVariant\s*&\s*\w+\s*\)\s*\{[^}]*UA_Server_writeValue[^}]*\}'
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        content = content[:match.start()] + new_code + content[match.end():]
+        print("OK: Patcha writeValue med type coercion (regex)")
+    else:
+        print("FEIL: Fann ikkje writeValue å patche!", file=sys.stderr)
+        sys.exit(1)
+
+with open(path, "w") as f:
+    f.write(content)
+print("Patch 6 komplett: writeValue type coercion")
+PYEOF
+
 RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
