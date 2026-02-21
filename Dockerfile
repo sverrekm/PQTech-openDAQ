@@ -20,7 +20,7 @@ FROM debian:bookworm AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PARALLELLE_JOBBER=2
-ARG OPENDAQ_BRANCH=v3.20.6
+ARG OPENDAQ_BRANCH=3.20.6
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
