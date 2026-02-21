@@ -174,7 +174,7 @@ class OpenDAQBro:
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
             # NB: ch.signals returnerer ISignal (read-only), men send_packet()
-            # krev ISignalConfig. Cast via _daq.ISignalConfig().
+            # krev ISignalConfig. Cast via _daq.ISignalConfig.cast_from().
             self._kanal_signal = []
             try:
                 for ch in self._device.channels:
@@ -182,7 +182,7 @@ class OpenDAQBro:
                     if sigs:
                         # Cast til ISignalConfig for send_packet()-tilgang
                         try:
-                            sig_config = _daq.ISignalConfig(sigs[0])
+                            sig_config = _daq.ISignalConfig.cast_from(sigs[0])
                         except Exception:
                             sig_config = sigs[0]  # fallback
                         self._kanal_signal.append((ch, sig_config))
@@ -450,7 +450,7 @@ class OpenDAQBro:
                     raise ValueError("domain_signal er None")
                 # Cast domain-signal til ISignalConfig for send_packet()
                 try:
-                    dom_sig = _daq.ISignalConfig(dom_sig_raw)
+                    dom_sig = _daq.ISignalConfig.cast_from(dom_sig_raw)
                 except Exception:
                     dom_sig = dom_sig_raw
                 dom_desc = dom_sig.descriptor
