@@ -253,12 +253,14 @@ class OpenDAQBro:
             ip = self._hent_ip()
 
             # ============================================================
-            # Server-oppstart i 2 fasar:
+            # Server-oppstart i 3 fasar:
             #   1) add_server() — start servere og bind portar
-            #   2) enable_discovery() — publiser mDNS
+            #   2) _fiks_primary_connection_strings() — sett riktig IP
+            #   3) enable_discovery() — publiser mDNS
             #
-            # ServerCapabilities vert IKKJE modifisert frå Python.
-            # Med network_mode:host brukar openDAQ riktig host-IP.
+            # Fase 2 er naudsynt når Pi har fleire nettverksinterface
+            # (WiFi + LAN) — utan dette kan NativeStreaming peike til
+            # feil IP og DewesoftX feilar AddDevice.
             # ============================================================
 
             # Fase 1: Legg til servere (bind portar)
@@ -309,11 +311,7 @@ class OpenDAQBro:
                         servere.remove(srv_type)
             log.info(f"  Verifiserte serverar: {faktisk_aktive}")
 
-            # Fase 2: Logg server capabilities (IKKJE modifiser).
-            # Zeroconf-test beviste at Docker bridge-IP ikkje er årsak til
-            # "Disconnected" — _fiks_server_capabilities() er difor fjerna.
-            # openDAQ sin innebygde mDNS + network_mode:host gjer at
-            # riktige IP-adresser vert publisert automatisk.
+            # Logg server capabilities FØR fiks (diagnostikk)
             try:
                 for cap in self._instance.info.server_capabilities:
                     try:
@@ -324,13 +322,22 @@ class OpenDAQBro:
                                 props_info.append(f"{p.name}={v!r}")
                             except Exception:
                                 props_info.append(f"{p.name}=?")
-                        log.info(f"  Cap {cap.protocol_id}: {', '.join(props_info)}")
+                        log.info(f"  Cap FØR fiks {cap.protocol_id}: {', '.join(props_info)}")
                     except Exception:
-                        log.info(f"  Cap {cap.protocol_id}: port={cap.port}")
+                        log.info(f"  Cap FØR fiks {cap.protocol_id}: port={cap.port}")
             except Exception as e:
                 log.warning(f"  Listing server capabilities feilet: {e}")
 
-            # Fase 2: Aktiver mDNS-discovery
+            # Fase 2: Fiks PrimaryConnectionString i ServerCapabilities.
+            # Pi med to IP-adresser (WiFi + LAN) kan føre til at
+            # NativeStreaming-serveren vel ein annan IP enn OPC-UA.
+            # DewesoftX finn eininga via mDNS (WiFi-IP), les OPC-UA (WiFi-IP),
+            # men NativeStreaming-cap kan peike til LAN-IP → AddDevice feilar.
+            # Berre PrimaryConnectionString vert sett — Addresses/ConnectionStrings
+            # er ListProperty som kan trigge DataType-åtvaringar.
+            self._fiks_primary_connection_strings(ip)
+
+            # Fase 3: Aktiver mDNS-discovery
             for srv_type, server in servers_added:
                 try:
                     server.enable_discovery()
@@ -882,6 +889,42 @@ class OpenDAQBro:
 
         except Exception as e:
             log.warning(f"  Fiks server capabilities feilet: {e}")
+
+    def _fiks_primary_connection_strings(self, ip):
+        """Sett PrimaryConnectionString på alle ServerCapabilities til riktig IP.
+
+        Når Pi har to nettverksinterface (t.d. WiFi + LAN) kan openDAQ sine
+        serverar velje ulike IP-adresser. DewesoftX finn eininga via mDNS
+        (éin IP) men NativeStreaming-cap kan peike til ein annan IP.
+
+        BERRE PrimaryConnectionString vert sett — Addresses og ConnectionStrings
+        er ListProperty<IString> som kan trigge OPC-UA "DataType incompatible"-
+        åtvaringar i v3.20.6. DewesoftX brukar PrimaryConnectionString.
+        """
+        try:
+            caps = self._instance.info.server_capabilities
+            for cap in caps:
+                proto_id = cap.protocol_id
+                prefix = cap.prefix
+                port = cap.port
+                ny_conn = f"{prefix}://{ip}:{port}/"
+
+                # Les noverande verdi for å sjekke om den allereie er riktig
+                try:
+                    noverande = cap.get_property_value("PrimaryConnectionString")
+                except Exception:
+                    noverande = ""
+
+                if ip in str(noverande):
+                    log.info(f"  Cap {proto_id}: PrimaryConnectionString OK ({noverande})")
+                    continue
+
+                if self._safe_set(cap, "PrimaryConnectionString", ny_conn):
+                    log.info(f"  Cap {proto_id}: PrimaryConnectionString {noverande!r} → {ny_conn}")
+                else:
+                    log.warning(f"  Cap {proto_id}: Kunne ikkje sette PrimaryConnectionString")
+        except Exception as e:
+            log.warning(f"  _fiks_primary_connection_strings feilet: {e}")
 
     def _safe_set(self, obj, namn, verdi):
         """Sett eigenskap med automatisk type-konvertering og range-klamping.
