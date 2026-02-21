@@ -173,12 +173,19 @@ class OpenDAQBro:
                 log.warning(f"  DeviceInfo tilgang feilet: {e}")
 
             # Hent signal-referansar frå kvar kanal for data-injeksjon
+            # NB: ch.signals returnerer ISignal (read-only), men send_packet()
+            # krev ISignalConfig. Cast via _daq.ISignalConfig().
             self._kanal_signal = []
             try:
                 for ch in self._device.channels:
                     sigs = list(ch.signals)
                     if sigs:
-                        self._kanal_signal.append((ch, sigs[0]))
+                        # Cast til ISignalConfig for send_packet()-tilgang
+                        try:
+                            sig_config = _daq.ISignalConfig(sigs[0])
+                        except Exception:
+                            sig_config = sigs[0]  # fallback
+                        self._kanal_signal.append((ch, sig_config))
                         # Diagnostikk: logg signal-info for fyrste kanal
                         if len(self._kanal_signal) == 1:
                             sig = sigs[0]
@@ -438,9 +445,14 @@ class OpenDAQBro:
                 self._total_samples.append(0)
                 continue
             try:
-                dom_sig = sig.domain_signal
-                if dom_sig is None:
+                dom_sig_raw = sig.domain_signal
+                if dom_sig_raw is None:
                     raise ValueError("domain_signal er None")
+                # Cast domain-signal til ISignalConfig for send_packet()
+                try:
+                    dom_sig = _daq.ISignalConfig(dom_sig_raw)
+                except Exception:
+                    dom_sig = dom_sig_raw
                 dom_desc = dom_sig.descriptor
                 val_desc = sig.descriptor
                 if dom_desc is None or val_desc is None:
