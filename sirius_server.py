@@ -459,7 +459,7 @@ def hent_opendaq_status():
         ttl = 10.0 if cached_positive else 2.0
         if now - _port_probe_cache["ts"] > ttl:
             import socket as _sock
-            probe_host = os.environ.get("OPENDAQ_IP", "127.0.0.1")
+            probe_host = (status.get("ip", "") or os.environ.get("OPENDAQ_IP", "")).strip() or "127.0.0.1"
             port_sjekk = {
                 'opcua': 4840,
                 'native_streaming': 7420,
