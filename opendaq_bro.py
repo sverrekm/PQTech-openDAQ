@@ -527,6 +527,12 @@ class OpenDAQBro:
         self._sirius_aktiv = True
         self._sirius_ts = time.time()
 
+        # Eingongs-diagnostikk: logg fyrste gong data kjem inn
+        if self._data_teller == 0:
+            log.info(f"  oppdater_data: fyrste kall, kanalar={list(kanal_data.keys())}, "
+                     f"signal_count={len(self._kanal_signal)}, "
+                     f"pakett_klar={self._pakett_klar}")
+
         try:
             for kanal_idx, (key, data) in enumerate(sorted(kanal_data.items())):
                 if kanal_idx >= len(self._kanal_signal) or kanal_idx >= 8:

@@ -590,17 +590,23 @@ def restart_opendaq_bro():
         return False, _opendaq_feil
 
 
+_callback_feil_teller = 0
+
+
 def _global_data_callback(kanal_data):
     """Global callback for kontinuerleg streaming.
 
     Matar openDAQ-brua med data slik at DewesoftX ser verdiar.
     Streaming køyrer alltid - aldri stopp/start-syklus.
     """
+    global _callback_feil_teller
     if _opendaq_bro and _opendaq_bro.tilgjengelig:
         try:
             _opendaq_bro.oppdater_data(kanal_data)
-        except Exception:
-            pass
+        except Exception as e:
+            _callback_feil_teller += 1
+            if _callback_feil_teller <= 3 or _callback_feil_teller % 1000 == 0:
+                log.warning(f"oppdater_data feil #{_callback_feil_teller}: {e}")
 
 
 def gjenoppliv_ep2():
