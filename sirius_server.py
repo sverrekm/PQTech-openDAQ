@@ -459,6 +459,7 @@ def hent_opendaq_status():
         ttl = 10.0 if cached_positive else 2.0
         if now - _port_probe_cache["ts"] > ttl:
             import socket as _sock
+            probe_host = os.environ.get("OPENDAQ_IP", "127.0.0.1")
             port_sjekk = {
                 'opcua': 4840,
                 'native_streaming': 7420,
@@ -468,7 +469,7 @@ def hent_opendaq_status():
                 try:
                     s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
                     s.settimeout(0.5)
-                    s.connect(("127.0.0.1", port))
+                    s.connect((probe_host, port))
                     s.close()
                     port_status[namn] = True
                 except (ConnectionRefusedError, OSError):

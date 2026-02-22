@@ -298,6 +298,7 @@ class OpenDAQBro:
 
             # Verifiser at serverane faktisk lyttar på portane.
             import socket as _sock
+            probe_host = ip or os.environ.get("OPENDAQ_IP", "127.0.0.1")
             port_map = {
                 'OpenDAQNativeStreaming': 7420,
                 'OpenDAQOPCUA': 4840,
@@ -309,7 +310,7 @@ class OpenDAQBro:
                     try:
                         s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
                         s.settimeout(1.0)
-                        s.connect(("127.0.0.1", port))
+                        s.connect((probe_host, port))
                         s.close()
                         faktisk_aktive.append(srv_type)
                     except (ConnectionRefusedError, OSError):
