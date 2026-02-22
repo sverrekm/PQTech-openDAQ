@@ -175,17 +175,22 @@ class OpenDAQBro:
             # Hent signal-referansar frå kvar kanal for data-injeksjon
             # NB: ch.signals returnerer ISignal (read-only), men send_packet()
             # krev ISignalConfig. Cast via _daq.ISignalConfig.cast_from().
-            self._kanal_signal = []
+            # VIKTIG: ISignalConfig har berre setter for domain_signal/descriptor,
+            # so me lagrar BÅDE ISignal (for lesing) og ISignalConfig (for sending).
+            self._kanal_signal = []     # (ch, ISignalConfig) for send_packet
+            self._kanal_signal_ro = []  # (ch, ISignal) for lesing av descriptor/domain
             try:
                 for ch in self._device.channels:
                     sigs = list(ch.signals)
                     if sigs:
+                        raw_sig = sigs[0]  # ISignal (read-only)
                         # Cast til ISignalConfig for send_packet()-tilgang
                         try:
-                            sig_config = _daq.ISignalConfig.cast_from(sigs[0])
+                            sig_config = _daq.ISignalConfig.cast_from(raw_sig)
                         except Exception:
-                            sig_config = sigs[0]  # fallback
+                            sig_config = raw_sig  # fallback
                         self._kanal_signal.append((ch, sig_config))
+                        self._kanal_signal_ro.append((ch, raw_sig))
                         # Diagnostikk: logg signal-info for fyrste kanal
                         if len(self._kanal_signal) == 1:
                             sig = sigs[0]
@@ -198,6 +203,7 @@ class OpenDAQBro:
                                 log.info(f"  Signal[0] namn={sig.name} (ingen descriptor)")
                     else:
                         self._kanal_signal.append((ch, None))
+                        self._kanal_signal_ro.append((ch, None))
                 log.info(f"  Signal-referansar: {len(self._kanal_signal)} kanalar, "
                          f"{sum(1 for _, s in self._kanal_signal if s is not None)} med signal")
             except Exception as e:
@@ -446,7 +452,10 @@ class OpenDAQBro:
                 self._total_samples.append(0)
                 continue
             try:
-                dom_sig_raw = sig.domain_signal
+                # Les domain_signal og descriptor via ISignal (read-only).
+                # ISignalConfig har berre setter for desse — ikkje getter.
+                _, sig_ro = self._kanal_signal_ro[idx]
+                dom_sig_raw = sig_ro.domain_signal
                 if dom_sig_raw is None:
                     raise ValueError("domain_signal er None")
                 # Cast domain-signal til ISignalConfig for send_packet()
@@ -454,8 +463,8 @@ class OpenDAQBro:
                     dom_sig = _daq.ISignalConfig.cast_from(dom_sig_raw)
                 except Exception:
                     dom_sig = dom_sig_raw
-                dom_desc = dom_sig.descriptor
-                val_desc = sig.descriptor
+                dom_desc = sig_ro.domain_signal.descriptor
+                val_desc = sig_ro.descriptor
                 if dom_desc is None or val_desc is None:
                     raise ValueError("descriptor er None")
 
