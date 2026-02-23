@@ -849,11 +849,10 @@ class OpenDAQBro:
         Eigenskapnamnet er singularis ("Rate" ikkje "Rates") — truleg ein
         enkeltverdi (maks mogleg rate), ikkje ei liste.
 
-        ListProperty ga 0x80004002 (E_NOINTERFACE) — openDAQ ListProperty
-        over OPC-UA fungerer ikkje mot DewesoftX sin SmartPtr-casting.
-        Prøver IntProperty i staden.
+        ListProperty og IntProperty ga begge 0x80004002 (E_NOINTERFACE).
+        Prøver FloatProperty (same type som GlobalSampleRate).
         """
-        max_rate = 200000  # SIRIUSi-HS maks: 200 kHz
+        max_rate = 200000.0  # SIRIUSi-HS maks: 200 kHz
 
         targets = [("Device", self._device)]
         try:
@@ -872,8 +871,7 @@ class OpenDAQBro:
                 except Exception:
                     pass
 
-                prop = _daq.IntPropertyBuilder("GetPossibleSampleRate", max_rate)
-                prop.read_only = True
+                prop = _daq.FloatPropertyBuilder("GetPossibleSampleRate", max_rate)
                 obj.add_property(prop.build())
                 log.info(f"  {label}: GetPossibleSampleRate = {max_rate} Hz")
             except Exception as e:
