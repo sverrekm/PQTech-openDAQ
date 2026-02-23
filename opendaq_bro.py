@@ -845,11 +845,15 @@ class OpenDAQBro:
         for å bestemme tilgjengelege sample rates. Utan den feilar det med
         openDAQ Error 0x80000006 og alle kanalar viser "Invalid or no data".
 
-        SIRIUSi-HS støttar sample rates frå 200 Hz til 200 kHz.
+        SIRIUSi-HS maks sample rate: 200 kHz.
+        Eigenskapnamnet er singularis ("Rate" ikkje "Rates") — truleg ein
+        enkeltverdi (maks mogleg rate), ikkje ei liste.
+
+        ListProperty ga 0x80004002 (E_NOINTERFACE) — openDAQ ListProperty
+        over OPC-UA fungerer ikkje mot DewesoftX sin SmartPtr-casting.
+        Prøver IntProperty i staden.
         """
-        # Moglege sample rates for SIRIUSi-HS (Hz)
-        rates = [200.0, 500.0, 1000.0, 2000.0, 5000.0,
-                 10000.0, 20000.0, 50000.0, 100000.0, 200000.0]
+        max_rate = 200000  # SIRIUSi-HS maks: 200 kHz
 
         targets = [("Device", self._device)]
         try:
@@ -868,10 +872,10 @@ class OpenDAQBro:
                 except Exception:
                     pass
 
-                prop = _daq.ListPropertyBuilder("GetPossibleSampleRate", rates)
+                prop = _daq.IntPropertyBuilder("GetPossibleSampleRate", max_rate)
                 prop.read_only = True
                 obj.add_property(prop.build())
-                log.info(f"  {label}: GetPossibleSampleRate lagt til ({len(rates)} rates)")
+                log.info(f"  {label}: GetPossibleSampleRate = {max_rate} Hz")
             except Exception as e:
                 log.warning(f"  {label}: GetPossibleSampleRate feilet: {e}")
 
