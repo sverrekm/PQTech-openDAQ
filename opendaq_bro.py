@@ -155,6 +155,12 @@ class OpenDAQBro:
             # Konfigurer 9 kanalar (8 ADC + 1 tid) som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
 
+            # Legg til GetPossibleSampleRate eigenskapen.
+            # DewesoftX sin TDSOpenDaqAI.CalcADCSampleRate spør etter denne
+            # eigenskapen. Utan den feilar det med 0x80000006 og kanalane
+            # viser "Invalid or no data". Legg til på device og kvar kanal.
+            self._legg_til_sample_rate_eigenskap()
+
             # Fiks nil string-eigenskapar som krasjar DewesoftX
             self._fiks_alle_nil_strings()
 
@@ -831,6 +837,43 @@ class OpenDAQBro:
         for idx, ch in enumerate(channels):
             if idx < len(kanal_konfig):
                 self._logg_eigenskapar(ch, f"Ch{idx}.")
+
+    def _legg_til_sample_rate_eigenskap(self):
+        """Legg til GetPossibleSampleRate på device og kanalar.
+
+        DewesoftX sin TDSOpenDaqAI.CalcADCSampleRate les denne eigenskapen
+        for å bestemme tilgjengelege sample rates. Utan den feilar det med
+        openDAQ Error 0x80000006 og alle kanalar viser "Invalid or no data".
+
+        SIRIUSi-HS støttar sample rates frå 200 Hz til 200 kHz.
+        """
+        # Moglege sample rates for SIRIUSi-HS (Hz)
+        rates = [200.0, 500.0, 1000.0, 2000.0, 5000.0,
+                 10000.0, 20000.0, 50000.0, 100000.0, 200000.0]
+
+        targets = [("Device", self._device)]
+        try:
+            for i, ch in enumerate(self._device.channels):
+                targets.append((f"Ch{i}", ch))
+        except Exception:
+            pass
+
+        for label, obj in targets:
+            try:
+                # Sjekk om eigenskapen allereie finst
+                try:
+                    obj.get_property("GetPossibleSampleRate")
+                    log.info(f"  {label}: GetPossibleSampleRate finst allereie")
+                    continue
+                except Exception:
+                    pass
+
+                prop = _daq.ListPropertyBuilder("GetPossibleSampleRate", rates)
+                prop.read_only = True
+                obj.add_property(prop.build())
+                log.info(f"  {label}: GetPossibleSampleRate lagt til ({len(rates)} rates)")
+            except Exception as e:
+                log.warning(f"  {label}: GetPossibleSampleRate feilet: {e}")
 
     def _sett_sirius_device_info(self):
         """Sett DeviceInfo til å matche ekte Dewesoft SIRIUS.

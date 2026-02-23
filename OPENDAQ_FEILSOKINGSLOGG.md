@@ -371,7 +371,7 @@ OPC-UA-serveren annonserer same serial via C++ patch.
 - openDAQ v3.20.6 kompilert med 6 C++ patchar
 - OPC-UA server (:4840) + NativeStreaming (:7420)
 - mDNS-oppdaging via `add_discovery_server("mdns")`
-- DewesoftX **oppdagar eininga** i HW Settings
+- DewesoftX **oppdagar og koplar til eininga** i HW Settings
 - DataPacket-injeksjon av reelle SIRIUS-data
 - Web UI med live status, debug, kanalkonfig
 - MCP-server for Claude-tilgang til alle API-endepunkt
@@ -382,9 +382,37 @@ OPC-UA-serveren annonserer same serial via C++ patch.
 - `system.ini` med `[Settings]`-seksjon (`DisplayName`, `DeviceBehaviour`)
 - `system_ds.lic` lisensfil
 
+### 7.6 DewesoftX "Invalid or no data" på kanalar
+
+**Symptom:** DewesoftX koplar til, men alle kanalar viser "Invalid or no data".
+
+**Feilmeldingar i DewesoftX Event Viewer:**
+1. `openDAQ Error 0x80000006: Property with name GetPossibleSampleRate does not exist.`
+   - Kjelde: `TDSOpenDaqAI.CalcADCSampleRate`
+2. `ID is missing in license: .0"-?> <-Lice-nse>`
+   - Kjelde: `GetUncompressedLicense`
+
+**Analyse — GetPossibleSampleRate:**
+Binæranalyse av DEWEsoft.exe viser at `TDSOpenDaqAI.CalcADCSampleRate` spør etter
+eigenskapen `GetPossibleSampleRate` på openDAQ-kanalane. RefDevice har ikkje denne
+eigenskapen → 0x80000006 ("property does not exist") → DewesoftX kan ikkje konfigurere
+sample rate → kanalane viser "Invalid or no data".
+
+**Analyse — Lisens-feil:**
+Ekte Dewesoft-lisens (`system_ds.lic`) er komprimert/kryptert binær, ikkje plain XML.
+`GetUncompressedLicense` prøver å dekomprimere vår XML og får søppel-output.
+Lisensfeilmelding er truleg berre ei åtvaring, ikkje årsak til "Invalid or no data".
+
+**Løysing:**
+1. Legg til `GetPossibleSampleRate` som `ListProperty` på device + kvar kanal i
+   `opendaq_bro.py` med SIRIUSi-HS sample rates (200–200000 Hz).
+2. Gjer `system_ds.lic` tom (0 bytes) for å unngå parse-feil.
+
+**Filar endra:** `opendaq_bro.py`, `docker-entrypoint.sh`
+
 ### Uløyst / neste steg
-- **Deploy og test** ny system.xml + system.ini + system_ds.lic
-- **"Different device"** — kan vere serienummer-mismatch mellom OPC-UA og system.xml (etter GetDisplayName-krasjen er fiksa)
+- **Verifisere at GetPossibleSampleRate fiksar "Invalid or no data"**
+- Lisens-formatet er ukjent (komprimert binær) — tom fil er workaround
 - openDAQ bridge startar ikkje automatisk (port-kollisjon eller import-feil)
 
 ---

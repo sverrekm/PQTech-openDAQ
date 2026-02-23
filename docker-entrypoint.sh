@@ -171,13 +171,10 @@ SYSINI
 
 # --- system_ds.lic: lisensfil ---
 # DewesoftX lastar ned denne (IKKJE license.xml) frå /opt/dewesoft/software/system/.
-cat > /opt/dewesoft/software/system/system_ds.lic <<LICEOF
-<?xml version="1.0"?>
-<License>
-  <SerialNumber>${SERIAL}</SerialNumber>
-  <Type>RT</Type>
-</License>
-LICEOF
+# Ekte Dewesoft-lisensar er komprimert/kryptert binær (ikkje plain XML).
+# DewesoftX sin GetUncompressedLicense prøver å dekomrimere, og plain XML
+# gir parse-feil ("ID is missing in license"). Tom fil = ingen lisens-åtvaring.
+: > /opt/dewesoft/software/system/system_ds.lic
 
 echo "  SSH: root-tilgang for DewesoftX aktivert"
 echo "  system.xml + system.ini + system_ds.lic: serienummer=${SERIAL}"
