@@ -68,21 +68,50 @@ mkdir -p /run/sshd
 ssh-keygen -A 2>/dev/null
 /usr/sbin/sshd
 
-# Pre-generer system.xml — DewesoftX SCP-lastar denne fila direkte
-# (køyrer ikkje platform_control.sh, berre les fila)
+# Pre-generer system.xml — DewesoftX SCP-lastar denne fila direkte.
+# DewesoftX parsar denne for aa identifisere eininga (TSystemSettings).
+# Alle felt som DewesoftRT normalt genererer maa vere med,
+# elles krasjar GetDisplayName med nil-peikar.
 SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
+CONTAINER_IP="${OPENDAQ_IP:-192.168.1.161}"
 cat > /opt/dewesoft/scripts/system.xml <<SYSXML
 <?xml version="1.0"?>
 <System>
   <SerialNumber>${SERIAL}</SerialNumber>
+  <DisplayName>SIRIUSi-HS [${SERIAL}]</DisplayName>
+  <Name>SIRIUSi-HS 8xHV 8xLV</Name>
   <Model>SIRIUSi-HS 8xHV 8xLV</Model>
+  <DeviceType>SIRIUSi-HS</DeviceType>
   <Manufacturer>Dewesoft</Manufacturer>
   <HardwareVersion>1.0</HardwareVersion>
+  <HardwareRevision>1.0</HardwareRevision>
   <FirmwareVersion>1.0.0-opendaq</FirmwareVersion>
-  <Platform>RPi5-Docker</Platform>
   <SoftwareVersion>3.20.6</SoftwareVersion>
+  <Platform>RPi5-Docker</Platform>
+  <IPAddress>${CONTAINER_IP}</IPAddress>
+  <MACAddress>${OPENDAQ_MAC:-00:00:00:00:00:00}</MACAddress>
+  <ProductCode></ProductCode>
+  <Location></Location>
+  <Description>openDAQ SIRIUS via RPi5 Docker</Description>
+  <SlotCount>1</SlotCount>
+  <Slot0>
+    <SerialNumber>${SERIAL}</SerialNumber>
+    <Name>SIRIUSi-HS 8xHV 8xLV</Name>
+    <Model>SIRIUSi-HS</Model>
+    <Channels>8</Channels>
+  </Slot0>
 </System>
 SYSXML
+
+# Opprett tom lisensfil (DewesoftX prøver å lese denne via SCP)
+mkdir -p /opt/dewesoft/software/system
+touch /opt/dewesoft/software/system/license.xml
+cat > /opt/dewesoft/software/system/license.xml <<LICXML
+<?xml version="1.0"?>
+<License>
+  <SerialNumber>${SERIAL}</SerialNumber>
+</License>
+LICXML
 echo "  SSH: root-tilgang for DewesoftX aktivert"
 echo "  system.xml: serienummer=${SERIAL}"
 echo ""
