@@ -60,10 +60,31 @@ fi
 echo "root:D3W3Soft30112018" | chpasswd
 sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+
+# Eksporter miljøvariablar til SSH-sesjonar (DewesoftX sin SSH arvar ikkje Docker env)
+env | grep -E '^(OPENDAQ_|TILKOBLING|NATIVE_SIRIUS|WEB_PORT)' > /etc/environment 2>/dev/null || true
+
 mkdir -p /run/sshd
 ssh-keygen -A 2>/dev/null
 /usr/sbin/sshd
+
+# Pre-generer system.xml — DewesoftX SCP-lastar denne fila direkte
+# (køyrer ikkje platform_control.sh, berre les fila)
+SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
+cat > /opt/dewesoft/scripts/system.xml <<SYSXML
+<?xml version="1.0"?>
+<System>
+  <SerialNumber>${SERIAL}</SerialNumber>
+  <Model>SIRIUSi-HS 8xHV 8xLV</Model>
+  <Manufacturer>Dewesoft</Manufacturer>
+  <HardwareVersion>1.0</HardwareVersion>
+  <FirmwareVersion>1.0.0-opendaq</FirmwareVersion>
+  <Platform>RPi5-Docker</Platform>
+  <SoftwareVersion>3.20.6</SoftwareVersion>
+</System>
+SYSXML
 echo "  SSH: root-tilgang for DewesoftX aktivert"
+echo "  system.xml: serienummer=${SERIAL}"
 echo ""
 
 # =============================================================
