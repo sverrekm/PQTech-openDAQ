@@ -425,8 +425,34 @@ with open(path, "r") as f:
 
 new_code = '''// Patch 6: Coerce scalar variants to match OPC-UA node DataType.
 // TMS VariantConverter produces Int64/Double (targetType=nullptr) but
-// TypeDefinition child nodes may expect UInt16, UInt32, Float, etc.
+// OPC-UA nodes may expect custom openDAQ types in non-zero namespaces.
+// These custom types have the same binary layout as standard types.
 // open62541 rejects writes with mismatched types ("DataType incompatible").
+
+// Look up a custom DataType registered in the server's type system.
+static const UA_DataType* findRegisteredDataType(UA_Server* srv,
+                                                  const UA_NodeId& typeId)
+{
+    // Check standard types first (namespace 0)
+    for (size_t i = 0; i < UA_TYPES_COUNT; i++) {
+        if (UA_NodeId_equal(&UA_TYPES[i].typeId, &typeId))
+            return &UA_TYPES[i];
+    }
+    // Check custom types registered in server config
+    UA_ServerConfig* config = UA_Server_getConfig(srv);
+    if (config) {
+        const UA_DataTypeArray* arr = config->customDataTypes;
+        while (arr) {
+            for (size_t i = 0; i < arr->typesSize; i++) {
+                if (UA_NodeId_equal(&arr->types[i].typeId, &typeId))
+                    return &arr->types[i];
+            }
+            arr = arr->next;
+        }
+    }
+    return nullptr;
+}
+
 static bool coerceVariantToNodeType(UA_Server* srv, const UA_NodeId& nid,
                                     const UA_Variant& src, UA_Variant& dst)
 {
@@ -440,11 +466,25 @@ static bool coerceVariantToNodeType(UA_Server* srv, const UA_NodeId& nid,
 
     if (UA_NodeId_equal(&src.type->typeId, &expectedId)) {
         UA_NodeId_clear(&expectedId);
+        return false;  // Types already match
+    }
+
+    // For custom namespace types (openDAQ TMS registers types in ns>=1),
+    // look up the registered DataType and use it directly if the memory
+    // layout matches (same memSize). openDAQ custom types alias standard
+    // OPC-UA types with the same binary representation.
+    if (expectedId.namespaceIndex != 0) {
+        const UA_DataType* expectedType = findRegisteredDataType(srv, expectedId);
+        if (expectedType && expectedType->memSize == src.type->memSize && src.data) {
+            UA_Variant_setScalarCopy(&dst, src.data, expectedType);
+            UA_NodeId_clear(&expectedId);
+            return true;
+        }
+        UA_NodeId_clear(&expectedId);
         return false;
     }
 
-    if (expectedId.namespaceIndex != 0 ||
-        expectedId.identifierType != UA_NODEIDTYPE_NUMERIC) {
+    if (expectedId.identifierType != UA_NODEIDTYPE_NUMERIC) {
         UA_NodeId_clear(&expectedId);
         return false;
     }
