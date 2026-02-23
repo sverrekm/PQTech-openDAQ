@@ -34,23 +34,53 @@ if [ ! -f /opt/dewesoft/scripts/platform_control.sh ]; then
              /opt/dewesoft/software/app/log /opt/dewesoft/software/temp
     cat > /opt/dewesoft/scripts/platform_control.sh << 'STUBEOF'
 #!/bin/bash
+# DewesoftRT stub — DewesoftX køyrer desse via SSH:
+#   platform_control.sh sysinfo > /opt/dewesoft/scripts/system.xml
+#   platform_control.sh info booting
+#   platform_control.sh date get/set
+#   platform_control.sh shutdown/reboot cleanly
+SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
 case "$1" in
   sysinfo)
-    cat > /opt/dewesoft/scripts/system.xml <<XML
+    cat <<XML
 <?xml version="1.0"?>
-<System>
-  <SerialNumber>${OPENDAQ_SERIAL:-DB19106004}</SerialNumber>
-  <Model>SIRIUSi-HS 8xHV 8xLV</Model>
-  <Manufacturer>Dewesoft</Manufacturer>
+<SystemProperties>
+  <DeviceId>SIRIUSi-HS</DeviceId>
+  <DeviceDisplayName>SIRIUSi-HS [${SERIAL}]</DeviceDisplayName>
+  <DeviceName>SIRIUSi-HS 8xHV 8xLV</DeviceName>
+  <SerialNumber>${SERIAL}</SerialNumber>
+  <SystemSerialNumber>${SERIAL}</SystemSerialNumber>
+  <PlatformVersion>1.0</PlatformVersion>
+  <BitstreamVersion>1.0</BitstreamVersion>
+  <ApplicationVersion>3.20.6</ApplicationVersion>
+  <ApplicationPath>/opt/dewesoft/software/app</ApplicationPath>
+  <LinuxVersion>5.15.0</LinuxVersion>
+  <UbootVersion>2024.01</UbootVersion>
+  <Version>3.20.6</Version>
   <HardwareVersion>1.0</HardwareVersion>
-  <FirmwareVersion>1.0.0-opendaq</FirmwareVersion>
-  <Platform>RPi5-Docker</Platform>
-  <SoftwareVersion>3.20.6</SoftwareVersion>
-</System>
+  <StructVersion>1</StructVersion>
+  <DSVersion>3.20.6</DSVersion>
+  <BootType>0</BootType>
+  <BundleVersion>3.20.6</BundleVersion>
+  <BundleBuild>0</BundleBuild>
+  <AmplifiersList>
+    <Amplifier>
+      <SerialNumber>${SERIAL}</SerialNumber>
+      <HWVersion>1.0</HWVersion>
+      <FWVersion>1.0</FWVersion>
+      <ModuleConnectorType>SIRIUSi-HS</ModuleConnectorType>
+    </Amplifier>
+  </AmplifiersList>
+</SystemProperties>
 XML
     ;;
   info) echo "ready" ;;
-  date) [ "$2" = "get" ] && date "+%Y-%m-%d %H:%M:%S" ;;
+  date)
+    if [ "$2" = "get" ]; then
+      date "+%Y-%m-%d %H:%M:%S"
+    fi
+    ;;
+  shutdown|reboot) echo "OK" ;;
   *) echo "OK" ;;
 esac
 STUBEOF
@@ -68,52 +98,89 @@ mkdir -p /run/sshd
 ssh-keygen -A 2>/dev/null
 /usr/sbin/sshd
 
-# Pre-generer system.xml — DewesoftX SCP-lastar denne fila direkte.
-# DewesoftX parsar denne for aa identifisere eininga (TSystemSettings).
-# Alle felt som DewesoftRT normalt genererer maa vere med,
-# elles krasjar GetDisplayName med nil-peikar.
+# =============================================================
+# DewesoftX SCP-filar
+# DewesoftX lastar ned desse filane via SCP under tilkopling:
+#   1. /opt/dewesoft/scripts/system.xml       — einingsidentitet (TDSRTSystemProperties)
+#   2. /opt/dewesoft/software/system/system.ini — innstillingar (TSystemSettings: DisplayName, etc.)
+#   3. /opt/dewesoft/software/system/system_ds.lic — lisens
+# DewesoftX køyrer ogsaa SSH-kommando:
+#   platform_control.sh sysinfo > /opt/dewesoft/scripts/system.xml
+# Viss system.ini manglar: TSystemSettings vert nil → GetDisplayName krasjar.
+# Viss system.xml har feil element-namn: TDSRTSystemProperties parsar feil.
+# =============================================================
 SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
 CONTAINER_IP="${OPENDAQ_IP:-192.168.1.161}"
+mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system
+
+# --- system.xml: einingsidentitet ---
+# Element-namn MÅ matche TDSRTSystemProperties sine property-namn i DewesoftX.
+# Funne via binæranalyse av DEWEsoft.exe (DSRTSystemProperties-eininga).
 cat > /opt/dewesoft/scripts/system.xml <<SYSXML
 <?xml version="1.0"?>
-<System>
+<SystemProperties>
+  <DeviceId>SIRIUSi-HS</DeviceId>
+  <DeviceDisplayName>SIRIUSi-HS [${SERIAL}]</DeviceDisplayName>
+  <DeviceName>SIRIUSi-HS 8xHV 8xLV</DeviceName>
   <SerialNumber>${SERIAL}</SerialNumber>
-  <DisplayName>SIRIUSi-HS [${SERIAL}]</DisplayName>
-  <Name>SIRIUSi-HS 8xHV 8xLV</Name>
-  <Model>SIRIUSi-HS 8xHV 8xLV</Model>
-  <DeviceType>SIRIUSi-HS</DeviceType>
-  <Manufacturer>Dewesoft</Manufacturer>
+  <SystemSerialNumber>${SERIAL}</SystemSerialNumber>
+  <PlatformVersion>1.0</PlatformVersion>
+  <BitstreamVersion>1.0</BitstreamVersion>
+  <ApplicationVersion>3.20.6</ApplicationVersion>
+  <ApplicationPath>/opt/dewesoft/software/app</ApplicationPath>
+  <LinuxVersion>5.15.0</LinuxVersion>
+  <UbootVersion>2024.01</UbootVersion>
+  <Version>3.20.6</Version>
   <HardwareVersion>1.0</HardwareVersion>
-  <HardwareRevision>1.0</HardwareRevision>
-  <FirmwareVersion>1.0.0-opendaq</FirmwareVersion>
-  <SoftwareVersion>3.20.6</SoftwareVersion>
-  <Platform>RPi5-Docker</Platform>
-  <IPAddress>${CONTAINER_IP}</IPAddress>
-  <MACAddress>${OPENDAQ_MAC:-00:00:00:00:00:00}</MACAddress>
-  <ProductCode></ProductCode>
-  <Location></Location>
-  <Description>openDAQ SIRIUS via RPi5 Docker</Description>
-  <SlotCount>1</SlotCount>
-  <Slot0>
-    <SerialNumber>${SERIAL}</SerialNumber>
-    <Name>SIRIUSi-HS 8xHV 8xLV</Name>
-    <Model>SIRIUSi-HS</Model>
-    <Channels>8</Channels>
-  </Slot0>
-</System>
+  <StructVersion>1</StructVersion>
+  <DSVersion>3.20.6</DSVersion>
+  <BootType>0</BootType>
+  <BundleVersion>3.20.6</BundleVersion>
+  <BundleBuild>0</BundleBuild>
+  <UpdatePackageName></UpdatePackageName>
+  <DxuBranch></DxuBranch>
+  <DxuCommit></DxuCommit>
+  <DxuDate></DxuDate>
+  <AdjustmentDate></AdjustmentDate>
+  <CalibrationDate></CalibrationDate>
+  <VCXOValue>0</VCXOValue>
+  <StructKey></StructKey>
+  <ExtCalRef></ExtCalRef>
+  <AmplifiersList>
+    <Amplifier>
+      <SerialNumber>${SERIAL}</SerialNumber>
+      <HWVersion>1.0</HWVersion>
+      <FWVersion>1.0</FWVersion>
+      <ModuleConnectorType>SIRIUSi-HS</ModuleConnectorType>
+    </Amplifier>
+  </AmplifiersList>
+</SystemProperties>
 SYSXML
 
-# Opprett tom lisensfil (DewesoftX prøver å lese denne via SCP)
-mkdir -p /opt/dewesoft/software/system
-touch /opt/dewesoft/software/system/license.xml
-cat > /opt/dewesoft/software/system/license.xml <<LICXML
+# --- system.ini: TSystemSettings (INI-format) ---
+# Seksjon [Settings] med DisplayName, DisplayLocation, DeviceBehaviour.
+# KRITISK: Utan denne fila vert TSystemSettings nil → GetDisplayName krasjar
+# med "Access violation Read of address 0000000000000008".
+cat > /opt/dewesoft/software/system/system.ini <<SYSINI
+[Settings]
+DisplayName=SIRIUSi-HS [${SERIAL}]
+DisplayLocation=
+DeviceBehaviour=DewesoftDAQ
+GroupLogicalID=
+SYSINI
+
+# --- system_ds.lic: lisensfil ---
+# DewesoftX lastar ned denne (IKKJE license.xml) frå /opt/dewesoft/software/system/.
+cat > /opt/dewesoft/software/system/system_ds.lic <<LICEOF
 <?xml version="1.0"?>
 <License>
   <SerialNumber>${SERIAL}</SerialNumber>
+  <Type>RT</Type>
 </License>
-LICXML
+LICEOF
+
 echo "  SSH: root-tilgang for DewesoftX aktivert"
-echo "  system.xml: serienummer=${SERIAL}"
+echo "  system.xml + system.ini + system_ds.lic: serienummer=${SERIAL}"
 echo ""
 
 # =============================================================

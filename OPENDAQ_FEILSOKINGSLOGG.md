@@ -288,6 +288,77 @@ sudo ip link set macvlan-bridge up
 sudo ip route add 192.168.1.161/32 dev macvlan-bridge
 ```
 
+### 7.4 DewesoftX "Different device" + GetDisplayName-krasj
+
+**Symptom:** DewesoftX koplar til SSH OK, men krasjar med:
+```
+Access violation at address 000000000198EB3D in module 'DEWEsoft.exe'. Read of address 0000000000000008
+DSRTLinuxUnit.TSystemSettings.GetDisplayName (Line 1354)
+```
+Etterfølgt av: `Error(268435464) Different device - Device serial-numbers do not match`
+
+**Analyse (binæranalyse av DEWEsoft.exe):**
+
+DewesoftX lastar ned **tre filer** via SCP under tilkopling:
+1. `/opt/dewesoft/scripts/system.xml` — einingsidentitet (`TDSRTSystemProperties`)
+2. `/opt/dewesoft/software/system/system.ini` — innstillingar (`TSystemSettings`)
+3. `/opt/dewesoft/software/system/system_ds.lic` — lisens
+
+DewesoftX køyrer også SSH-kommandoen:
+```
+/opt/dewesoft/scripts/platform_control.sh sysinfo > /opt/dewesoft/scripts/system.xml
+```
+
+**Rotårsak 1: Manglande `system.ini`**
+`TSystemSettings` les frå `system.ini` (INI-format med `[Settings]`-seksjon).
+Utan denne fila vert `TSystemSettings`-objektet nil → `GetDisplayName` prøver å lese felt
+på offset 8 frå nil-peikar → Access Violation. Fila krevst med:
+```ini
+[Settings]
+DisplayName=SIRIUSi-HS [DB19106004]
+DisplayLocation=
+DeviceBehaviour=DewesoftDAQ
+GroupLogicalID=
+```
+
+**Rotårsak 2: Feil element-namn i `system.xml`**
+Vi brukte element-namn som `<Model>`, `<Manufacturer>`, `<FirmwareVersion>` — men
+`TDSRTSystemProperties` brukar heilt andre namn. Funne via binæranalyse:
+- `DeviceId`, `DeviceDisplayName`, `DeviceName`
+- `SerialNumber`, `SystemSerialNumber`
+- `PlatformVersion`, `BitstreamVersion`, `ApplicationVersion`
+- `LinuxVersion`, `UbootVersion`, `HardwareVersion`
+- `DSVersion`, `BootType`, `BundleVersion`, `BundleBuild`
+- `AmplifiersList` → `Amplifier` → `SerialNumber`, `HWVersion`, `FWVersion`, `ModuleConnectorType`
+
+**Rotårsak 3: Feil lisensfilnamn**
+Vi oppretta `license.xml` men DewesoftX lastar ned `system_ds.lic`.
+
+**Binæranalyse-metode:**
+- Las DEWEsoft.exe (95.6 MB) med Python
+- Fann `TSystemSettings`, `TDSRTSystemProperties` klasse-RTTI og felt-namn
+- Fann alle `/opt/dewesoft/`-stiar som UTF-16LE-strengar
+- Identifiserte `[Settings]`-seksjon og `DisplayName`-nøkkel nær `TSystemSettings`-kode
+- Fann `GenerateSystemXML`-metode og `ReadSystemProperties` med `Path`-parameter
+- Oppdaga `system.ini`-sti med feilmelding "Failed to download system settings file"
+
+**Løysing:**
+- Oppretta `/opt/dewesoft/software/system/system.ini` med `[Settings]`-seksjon
+- Fiksa `system.xml` med korrekte `TDSRTSystemProperties`-element-namn
+- Endra lisensfil til `system_ds.lic`
+
+### 7.5 Serienummer-forvirring
+
+To ulike serienummer:
+- `D019274CF6` = Cypress FX2 USB-kontroller serial (USB descriptor, det pyusb ser)
+- `DB19106004` = Dewesoft instrument-serial (produksjons-ID: DB=produktlinje, 19=år, 10=veke, 6004=eining)
+
+Desse er uavhengige — lagra i ulike EEPROM-ar. Ingen matematisk samanheng
+(hex-verdiar: 893 775 203 574 vs 941 018 341 380).
+
+DewesoftX brukar `DB19106004` som einings-ID når instrumentet er tilkobla direkte.
+OPC-UA-serveren annonserer same serial via C++ patch.
+
 ---
 
 ## Noverande status (2026-02-23)
@@ -305,12 +376,15 @@ sudo ip route add 192.168.1.161/32 dev macvlan-bridge
 - Web UI med live status, debug, kanalkonfig
 - MCP-server for Claude-tilgang til alle API-endepunkt
 - macvlan-nettverk med eigen container-IP (192.168.1.161)
-- SSH-server i containeren med DewesoftX-legitimasjon
-- DewesoftRT stub-skript for SSH-kommandoar
+- SSH-server i containeren med DewesoftX-legitimasjon (`root`/`D3W3Soft30112018`)
+- DewesoftRT stub-skript (`platform_control.sh`) for SSH-kommandoar
+- `system.xml` med korrekte `TDSRTSystemProperties`-element-namn
+- `system.ini` med `[Settings]`-seksjon (`DisplayName`, `DeviceBehaviour`)
+- `system_ds.lic` lisensfil
 
 ### Uløyst / neste steg
-- **Verifisere DewesoftX SSH-tilkopling** — krev deploy til Pi + macvlan-bridge setup
-- **DewesoftX "Disconnected"** etter tilkobling — mogleg årsak: versjonsmismatch eller subtil eigenskapsfeil
+- **Deploy og test** ny system.xml + system.ini + system_ds.lic
+- **"Different device"** — kan vere serienummer-mismatch mellom OPC-UA og system.xml (etter GetDisplayName-krasjen er fiksa)
 - openDAQ bridge startar ikkje automatisk (port-kollisjon eller import-feil)
 
 ---
@@ -332,4 +406,5 @@ sudo ip route add 192.168.1.161/32 dev macvlan-bridge
 - **6 C++ kildekode-patchar** på openDAQ SDK
 - **1 SDK-nedgradering** (v3.31 → v3.20.6)
 - **~15 revert-commits** (forsøk som forverra situasjonen)
-- **1 Wireshark pcapng-analyse** (73 657 USB-frames)
+- **2 Wireshark pcapng-analysar** (73 657 USB-frames + direkte USB-capture)
+- **1 binæranalyse av DEWEsoft.exe** (95.6 MB, UTF-16LE strengsøk)
