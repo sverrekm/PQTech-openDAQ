@@ -597,6 +597,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     git \
     build-essential \
+    openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Bygg uhubctl fraa kildekode (for USB port power-cycling)
@@ -649,5 +650,12 @@ ENV TILKOBLING=""
 
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
     CMD pgrep -f "opendaq_server.py\|sirius_server.py" > /dev/null || exit 1
+
+# DewesoftRT-kompatibilitet (SSH-kommandoar fraa DewesoftX)
+RUN mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system \
+    /opt/dewesoft/software/app/log /opt/dewesoft/software/temp \
+    /run/sshd
+COPY dewesoft_stubs/platform_control.sh /opt/dewesoft/scripts/
+RUN chmod +x /opt/dewesoft/scripts/platform_control.sh
 
 ENTRYPOINT ["./docker-entrypoint.sh"]

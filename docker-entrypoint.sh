@@ -16,6 +16,57 @@ echo "=============================================="
 echo ""
 
 # =============================================================
+# SSH for DewesoftX-tilkopling
+# DewesoftX krev root SSH med kjende legitimasjon for full tilgang.
+# Installerer openssh-server ved oppstart viss det manglar (rask deploy
+# utan full image-rebuild). ~30s ekstra oppstartstid foerste gong.
+# =============================================================
+if ! command -v sshd &>/dev/null; then
+    echo "[SSH] Installerer openssh-server (foerste oppstart)..."
+    apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-server >/dev/null 2>&1
+    rm -rf /var/lib/apt/lists/*
+fi
+
+# Opprett DewesoftRT stub-skript viss dei manglar (rask deploy utan rebuild)
+if [ ! -f /opt/dewesoft/scripts/platform_control.sh ]; then
+    echo "[SSH] Opprettar DewesoftRT stub-skript..."
+    mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system \
+             /opt/dewesoft/software/app/log /opt/dewesoft/software/temp
+    cat > /opt/dewesoft/scripts/platform_control.sh << 'STUBEOF'
+#!/bin/bash
+case "$1" in
+  sysinfo)
+    cat > /opt/dewesoft/scripts/system.xml <<XML
+<?xml version="1.0"?>
+<System>
+  <SerialNumber>${OPENDAQ_SERIAL:-DB19106004}</SerialNumber>
+  <Model>SIRIUSi-HS 8xHV 8xLV</Model>
+  <Manufacturer>Dewesoft</Manufacturer>
+  <HardwareVersion>1.0</HardwareVersion>
+  <FirmwareVersion>1.0.0-opendaq</FirmwareVersion>
+  <Platform>RPi5-Docker</Platform>
+  <SoftwareVersion>3.20.6</SoftwareVersion>
+</System>
+XML
+    ;;
+  info) echo "ready" ;;
+  date) [ "$2" = "get" ] && date "+%Y-%m-%d %H:%M:%S" ;;
+  *) echo "OK" ;;
+esac
+STUBEOF
+    chmod +x /opt/dewesoft/scripts/platform_control.sh
+fi
+
+echo "root:D3W3Soft30112018" | chpasswd
+sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+mkdir -p /run/sshd
+ssh-keygen -A 2>/dev/null
+/usr/sbin/sshd
+echo "  SSH: root-tilgang for DewesoftX aktivert"
+echo ""
+
+# =============================================================
 # Host-oppsett (kernel-moduler + udev)
 # Kjorer automatisk ved oppstart — erstatter setup_host.sh
 # Krever: privileged=true og /sys montert

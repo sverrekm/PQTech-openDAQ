@@ -302,27 +302,29 @@ class OpenDAQBro:
                     log.warning(f"  {srv_type} feilet: {e2}")
                     log.warning(f"  {srv_type} traceback: {traceback.format_exc()}")
 
-            # Verifiser at serverane faktisk lyttar på portane.
+            # Verifiser at OPC-UA faktisk lyttar (port 4840).
+            # IKKJE probe NativeStreaming (port 7420) — TCP connect/disconnect
+            # forårsakar "Failed to read connect request headers" og kan
+            # opprette ein stale "exclusive control"-sesjon som blokkerer
+            # DewesoftX si daq.nd:// tilkopling.
             import socket as _sock
             probe_host = ip or os.environ.get("OPENDAQ_IP", "127.0.0.1")
-            port_map = {
-                'OpenDAQNativeStreaming': 7420,
-                'OpenDAQOPCUA': 4840,
-            }
             faktisk_aktive = []
             for srv_type in list(servere):
-                port = port_map.get(srv_type)
-                if port:
+                if srv_type == 'OpenDAQOPCUA':
                     try:
                         s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
                         s.settimeout(1.0)
-                        s.connect((probe_host, port))
+                        s.connect((probe_host, 4840))
                         s.close()
                         faktisk_aktive.append(srv_type)
                     except (ConnectionRefusedError, OSError):
                         log.warning(f"  {srv_type} rapporterte OK men lyttar "
-                                    f"IKKJE på port {port}!")
+                                    f"IKKJE på port 4840!")
                         servere.remove(srv_type)
+                else:
+                    # NativeStreaming: stol på add_server() — ikkje TCP-probe
+                    faktisk_aktive.append(srv_type)
             log.info(f"  Verifiserte serverar: {faktisk_aktive}")
 
             # Logg server capabilities FØR fiks (diagnostikk)
@@ -935,6 +937,16 @@ class OpenDAQBro:
                 proto_id = cap.protocol_id
                 prefix = cap.prefix
                 port = cap.port
+
+                # Hopp over NativeConfiguration (daq.nd://) — protokollen
+                # feiler mellom ulike openDAQ-versjonar (3.30.0 klient →
+                # 3.20.6 server). La PrimaryConnectionString stå tom slik
+                # at klientar ikkje prøver daq.nd:// og fell tilbake til
+                # daq.opcua:// + daq.ns:// som begge fungerer.
+                if proto_id == "OpenDAQNativeConfiguration":
+                    log.info(f"  Cap {proto_id}: HOPPA OVER (daq.nd:// deaktivert)")
+                    continue
+
                 ny_conn = f"{prefix}://{ip}:{port}/"
 
                 # Les noverande verdi for å sjekke om den allereie er riktig

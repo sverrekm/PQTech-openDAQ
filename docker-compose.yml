@@ -11,8 +11,10 @@ services:
     # USB-tilgang til SIRIUS
     privileged: true
 
-    # Host-nettverk for openDAQ-servere og web UI
-    network_mode: host
+    # macvlan-nettverk: eigen IP paa LAN (DewesoftX SSH-ar hit)
+    networks:
+      daqnet:
+        ipv4_address: ${CONTAINER_IP:-192.168.1.161}
 
     # PID host-namespace: nsenter -t 1 treng tilgang til hostens PID 1
     pid: host
@@ -24,7 +26,7 @@ services:
       - /sys:/sys
       # debugfs - usbmon for passiv USB-trafikkfangst
       - /sys/kernel/debug:/sys/kernel/debug
-      # Maalinger (persistente)
+      # Maalingar (persistente)
       - ./maalinger:/data/maalinger
       # Konfigurasjon (lagres mellom omstarter)
       - ./konfig:/data/konfig
@@ -54,9 +56,8 @@ services:
       - OPENDAQ_SERIAL=DB19106004
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
-      # OPC-UA annonsert IP (tom = auto-detect foerste interface)
-      # Sett til spesifikk IP viss Pi har fleire nettverk
-      - OPENDAQ_IP=192.168.1.160
+      # OPC-UA annonsert IP — sett til container-IP (macvlan)
+      - OPENDAQ_IP=${CONTAINER_IP:-192.168.1.161}
 
     deploy:
       resources:
@@ -68,3 +69,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  daqnet:
+    driver: macvlan
+    driver_opts:
+      parent: eth0
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
+          ip_range: ${CONTAINER_IP:-192.168.1.161}/32

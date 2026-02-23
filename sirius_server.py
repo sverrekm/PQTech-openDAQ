@@ -14,6 +14,14 @@ Bruk:
 """
 
 import sys
+# Fiks dual-modul-problem: `python3 -m sirius_server` lastar modulen som
+# `__main__`, men `web_ui.py` importerer `from sirius_server import ...`
+# som skapar ein ANDRE modul med separate globale variablar (_driver,
+# _opendaq_bro, server_status osv). Denne linja sikrar at begge brukar
+# same modul-instans.
+if __name__ == '__main__':
+    sys.modules.setdefault('sirius_server', sys.modules[__name__])
+
 import os
 import json
 import csv
@@ -448,32 +456,29 @@ def hent_opendaq_status():
     if _opendaq_bro is not None:
         status = _opendaq_bro.hent_status()
 
-        # Live port-verifisering — maks kvar 10. sekund.
-        # Hyppigare probing skapar "Failed to read connect request headers"
-        # i NativeStreaming-serveren og kan forstyrre DewesoftX-tilkoplinga.
+        # Live port-verifisering — BERRE OPC-UA (4840).
+        # TCP-probe mot port 7420 forstyrrar NativeStreaming-serveren:
+        #   - Skapar "Failed to read connect request headers" kvar gong
+        #   - Kan blokkere DewesoftX si daq.nd:// tilkopling
+        # NativeStreaming-status vert utleidd frå at broen køyrer.
         now = time.time()
-        # Kortare TTL (2s) for negative resultat — unngår at "Inaktiv"
-        # vert vist i 10s under oppstart pga cache av ikkje-klare portar.
-        # Positive resultat (alle oppe) brukast med full 10s TTL.
         cached_positive = all(_port_probe_cache["result"].values()) if _port_probe_cache["result"] else False
         ttl = 10.0 if cached_positive else 2.0
         if now - _port_probe_cache["ts"] > ttl:
             import socket as _sock
             probe_host = (status.get("ip", "") or os.environ.get("OPENDAQ_IP", "")).strip() or "127.0.0.1"
-            port_sjekk = {
-                'opcua': 4840,
-                'native_streaming': 7420,
-            }
             port_status = {}
-            for namn, port in port_sjekk.items():
-                try:
-                    s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-                    s.settimeout(0.5)
-                    s.connect((probe_host, port))
-                    s.close()
-                    port_status[namn] = True
-                except (ConnectionRefusedError, OSError):
-                    port_status[namn] = False
+            # Berre probe OPC-UA — NativeStreaming antas oppe viss broen er aktiv
+            try:
+                s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect((probe_host, 4840))
+                s.close()
+                port_status['opcua'] = True
+            except (ConnectionRefusedError, OSError):
+                port_status['opcua'] = False
+            # NativeStreaming: antar same status som broen (unngår TCP-probe)
+            port_status['native_streaming'] = status.get("aktiv", False)
             _port_probe_cache.update({"ts": now, "result": port_status})
 
         port_status = _port_probe_cache["result"]
