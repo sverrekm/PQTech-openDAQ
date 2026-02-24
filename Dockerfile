@@ -565,11 +565,20 @@ with open(path, "w") as f:
 print("Patch 6 komplett: writeValue type coercion")
 PYEOF
 
-RUN cmake -S /src -B /src/build -G Ninja \
+# Arkitektur-spesifikke optimaliseringsflagg:
+#   aarch64 (Pi 5): -O3 -mcpu=cortex-a76 (NEON SIMD, aggressiv vektorisering)
+#   x86_64:         -O3 -march=native
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        OPT_FLAGS="-O3 -mcpu=cortex-a76"; \
+    else \
+        OPT_FLAGS="-O3 -march=native"; \
+    fi && \
+    cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DCMAKE_CXX_FLAGS="-Wno-error=stringop-overflow -O3 -mcpu=cortex-a76" \
-    -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a76" \
+    -DCMAKE_CXX_FLAGS="-Wno-error=stringop-overflow $OPT_FLAGS" \
+    -DCMAKE_C_FLAGS="$OPT_FLAGS" \
     -DCMAKE_INSTALL_PREFIX=/opt/opendaq \
     -DOPENDAQ_ENABLE_OPCUA=ON \
     -DOPENDAQ_ENABLE_NATIVE_STREAMING=ON \
