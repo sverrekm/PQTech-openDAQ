@@ -1267,16 +1267,25 @@ class SiriusDriver:
             slot = kk.indeks
             if slot > 7:
                 continue  # Berre fysiske ADC-slotter
+            if slot < 4:
+                continue  # Hi-LV slotter har ikkje excitation
 
             if kk.excitation_v > 0:
                 # Enable unipolar excitation (0x04 = 5V)
-                volt_code = 0x04 if kk.excitation_v >= 5.0 else 0x04
                 try:
                     proto.a5_set_mode(slot, REG_EXC_ENABLE, 0x01)
                     proto.commit(slot)
-                    proto.a5_set_mode(slot, REG_EXC_VOLT, volt_code)
+                    proto.a5_set_mode(slot, REG_EXC_VOLT, 0x04)
                     proto.commit(slot)
                     log.info(f"  Slot {slot} ({kk.namn}): excitation {kk.excitation_v}V ON")
+                except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                    log.warning(f"  Slot {slot} excitation feil: {e}")
+            else:
+                # Disable excitation
+                try:
+                    proto.a5_set_mode(slot, REG_EXC_OFF, 0x00)
+                    proto.commit(slot)
+                    log.info(f"  Slot {slot} ({kk.namn}): excitation OFF")
                 except (SiriusPollTimeout, SiriusUSBFeil) as e:
                     log.warning(f"  Slot {slot} excitation feil: {e}")
 
@@ -1306,6 +1315,39 @@ class SiriusDriver:
         self._treng_heartbeat = True
         log.info("Start-acquisition sekvens...")
 
+        # Steg 0: Lo-LV slot-init FØR A4 pre-start (same rekkefølgje som DewesoftX)
+        # Slot-spesifikke register (0x13) MÅ settast før pre-start modus.
+        # Inkluderer kalibrering, filter, modus og excitation-spenning.
+        from sirius_init_sekvens import (
+            LV_SLOT4_INIT, LV_SLOT5_INIT, LV_SLOT6_INIT, LV_SLOT7_INIT,
+        )
+        lv_slotter = [
+            (4, LV_SLOT4_INIT),
+            (5, LV_SLOT5_INIT),
+            (6, LV_SLOT6_INIT),
+            (7, LV_SLOT7_INIT),
+        ]
+        lv_teller = 0
+        lv_feil = 0
+        for slot_nr, init_seq in lv_slotter:
+            log.info(f"  Lo-LV slot {slot_nr} init ({len(init_seq)} cmd)...")
+            for cmd_hex in init_seq:
+                cmd = bytes.fromhex(cmd_hex)
+                try:
+                    proto.send_ad_raa_og_poll(
+                        cmd[:15], er_skriving=True, maks_forsok=50
+                    )
+                    lv_teller += 1
+                except SiriusPollTimeout:
+                    lv_feil += 1
+                except SiriusUSBFeil as e:
+                    lv_feil += 1
+                    log.warning(f"    Slot {slot_nr} USB-feil: {e}")
+        log.info(f"  Lo-LV init: {lv_teller} cmd OK, {lv_feil} feil")
+
+        # Sett excitation per brukar-konfig (kan overstyre init-defaults)
+        self._sett_excitation()
+
         # Steg 1: A4 00 (pre-start modus)
         log.info("  A4 00 (pre-start)")
         proto.send_prestart()
@@ -1313,9 +1355,6 @@ class SiriusDriver:
         # Steg 2: AC (hent slot-typar)
         log.info("  AC (slot-typar)")
         proto.hent_slot_typer()
-
-        # Steg 2b: Sett excitation-spenning for Lo-LV slotter
-        self._sett_excitation()
 
         # Steg 3-34: Globale register-skrivingar
         # Eksakte verdiar fraa DewesoftX sirius2.pcapng
@@ -1398,7 +1437,10 @@ class SiriusDriver:
 
         Totalt ~1000+ AD-kommandoar med B1-poll per stykke.
         """
-        from sirius_init_sekvens import INIT_SEKVENS
+        from sirius_init_sekvens import (
+            INIT_SEKVENS,
+            LV_SLOT4_INIT, LV_SLOT5_INIT, LV_SLOT6_INIT, LV_SLOT7_INIT,
+        )
 
         log.info("Initialiserer SIRIUS (pcapng replay)...")
         proto = self._proto
@@ -1514,6 +1556,42 @@ class SiriusDriver:
                 self._enhetsinfo.serienummer = dewesoft_sn
             else:
                 log.info("  EEPROM: Dewesoft-serienummer ikkje funne (held USB-serial)")
+
+        # ---- Lo-LV slot-initialisering (slot 4-7) ----
+        # INIT_SEKVENS over initialiserer berre Hi-LV slot 0-3.
+        # Lo-LV slot 4-7 treng eigen init for kalibrering, filter, modus
+        # og excitation-spenning (5V til Rogowski-integrator via pin 1/Exc+).
+        # Utan denne init-sekvensen ignorerer SIRIUS excitation-kommandoar.
+        lv_slotter = [
+            (4, LV_SLOT4_INIT),
+            (5, LV_SLOT5_INIT),
+            (6, LV_SLOT6_INIT),
+            (7, LV_SLOT7_INIT),
+        ]
+
+        lv_teller = 0
+        lv_feil = 0
+        for slot_nr, init_seq in lv_slotter:
+            log.info(f"  Lo-LV slot {slot_nr} init ({len(init_seq)} kommandoar)...")
+            for cmd_hex in init_seq:
+                cmd = bytes.fromhex(cmd_hex)
+                try:
+                    proto.send_ad_raa_og_poll(
+                        cmd[:15], er_skriving=True, maks_forsok=50
+                    )
+                    lv_teller += 1
+                except SiriusPollTimeout:
+                    lv_feil += 1
+                    if lv_feil <= 5:
+                        log.debug(f"    Slot {slot_nr} poll timeout (held fram)")
+                except SiriusUSBFeil as e:
+                    lv_feil += 1
+                    log.warning(f"    Slot {slot_nr} USB-feil: {e}")
+            log.info(f"  Lo-LV slot {slot_nr} ferdig")
+
+        log.info(f"  Lo-LV init: {lv_teller} kommandoar ({lv_feil} feil)")
+        ad_teller += lv_teller
+        feil_teller += lv_feil
 
         # Flush dataendepunkt
         log.info("  Flush endepunkt...")

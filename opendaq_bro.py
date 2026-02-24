@@ -63,6 +63,12 @@ class OpenDAQBro:
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
         self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
         self._kanal_offset = []     # Offset per kanal (for sensor-skalering)
+        # ADC nullpunkt auto-kalibrering: måler DC-offset frå fyrste ~2s data
+        self._adc_nullpunkt = {}    # key → float (raw int16 counts)
+        self._nullpunkt_sum = {}    # Akkumulert sum for kalibrering
+        self._nullpunkt_count = {}  # Antal samples for kalibrering
+        self._nullpunkt_n = 0       # Antal datablokker brukt
+        self._NULLPUNKT_BLOKKER = 40  # ~2s ved 20 pkt/sek
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
@@ -551,6 +557,27 @@ class OpenDAQBro:
                      f"signal_count={len(self._kanal_signal)}, "
                      f"pakett_klar={self._pakett_klar}")
 
+        # ADC nullpunkt auto-kalibrering: samle DC-offset frå fyrste ~2s
+        # Gjennomsnittet over ~40 blokker (40×1024 = 40960 samples = 2.05s ved 20kHz)
+        # fjerner AC-komponent og isolerer DC-offset.
+        if self._nullpunkt_n < self._NULLPUNKT_BLOKKER:
+            for key, data in kanal_data.items():
+                if data is not None and len(data) > 0:
+                    if key not in self._nullpunkt_sum:
+                        self._nullpunkt_sum[key] = 0.0
+                        self._nullpunkt_count[key] = 0
+                    self._nullpunkt_sum[key] += float(np.sum(data))
+                    self._nullpunkt_count[key] += len(data)
+            self._nullpunkt_n += 1
+            if self._nullpunkt_n == self._NULLPUNKT_BLOKKER:
+                for key in sorted(self._nullpunkt_sum):
+                    cnt = self._nullpunkt_count.get(key, 1)
+                    self._adc_nullpunkt[key] = (
+                        self._nullpunkt_sum[key] / cnt if cnt > 0 else 0.0
+                    )
+                    log.info(f"  ADC nullpunkt {key}: "
+                             f"{self._adc_nullpunkt[key]:.1f} raw counts")
+
         # Berekn statistikk berre kvar 20. pakke (~1 Hz ved 20 pkt/sek)
         berekn_stats = (self._data_teller % 20 == 0)
 
@@ -572,6 +599,8 @@ class OpenDAQBro:
                          if kanal_idx < len(self._kanal_skala) else 1.0)
                 offset = (self._kanal_offset[kanal_idx]
                           if kanal_idx < len(self._kanal_offset) else 0.0)
+                nullpunkt = self._adc_nullpunkt.get(key, 0.0)
+
                 # Gjenbruk pre-allokert buffer viss storleiken matchar
                 n = len(data)
                 if n <= len(self._fdata_buf):
@@ -579,6 +608,9 @@ class OpenDAQBro:
                     np.multiply(data, skala, out=fdata, casting='unsafe')
                 else:
                     fdata = data.astype(np.float64) * skala
+                # Trekk frå ADC DC-offset (i skalerte einingar)
+                if nullpunkt != 0.0:
+                    fdata -= nullpunkt * skala
                 if offset != 0.0:
                     fdata += offset
 
@@ -592,7 +624,7 @@ class OpenDAQBro:
                         "snitt": round(snitt, 4),
                         "rms": round(rms, 4),
                         "topp": round(topp, 4),
-                        "siste": round(float(data[-1]) * skala + offset, 4),
+                        "siste": round((float(data[-1]) - nullpunkt) * skala + offset, 4),
                         "antall": len(data),
                         "kjelde": "sirius",
                     }
@@ -747,6 +779,10 @@ class OpenDAQBro:
         self._kanal_skala = []
         self._kanal_offset = []
         self._siste_verdiar = {}
+        self._adc_nullpunkt = {}
+        self._nullpunkt_sum = {}
+        self._nullpunkt_count = {}
+        self._nullpunkt_n = 0
         self._dom_signal = []     # DataPacket-injeksjon referansar
         self._dom_desc = []
         self._val_desc = []
@@ -829,6 +865,11 @@ class OpenDAQBro:
         # Med sensor:  physical_value = raw_int16 * (amp_range / 32768) * slope + offset
         self._kanal_skala = []
         self._kanal_offset = []
+        # Nullstill auto-kalibrering slik at den køyrer på nytt
+        self._adc_nullpunkt = {}
+        self._nullpunkt_sum = {}
+        self._nullpunkt_count = {}
+        self._nullpunkt_n = 0
 
         channels = list(self._device.channels)
         for i, ch in enumerate(channels):
