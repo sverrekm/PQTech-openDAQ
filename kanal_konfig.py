@@ -175,8 +175,8 @@ def valider_konfig(data: list) -> tuple:
     if not isinstance(data, list):
         return None, "Forventa ein liste med 8 kanalar"
 
-    if len(data) != 8:
-        return None, f"Forventa 8 kanalar, fekk {len(data)}"
+    if len(data) not in (8, 9):
+        return None, f"Forventa 8 eller 9 kanalar, fekk {len(data)}"
 
     konfig = []
     for i, d in enumerate(data):
