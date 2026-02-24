@@ -568,7 +568,8 @@ PYEOF
 RUN cmake -S /src -B /src/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DCMAKE_CXX_FLAGS="-Wno-error=stringop-overflow" \
+    -DCMAKE_CXX_FLAGS="-Wno-error=stringop-overflow -O3 -mcpu=cortex-a76" \
+    -DCMAKE_C_FLAGS="-O3 -mcpu=cortex-a76" \
     -DCMAKE_INSTALL_PREFIX=/opt/opendaq \
     -DOPENDAQ_ENABLE_OPCUA=ON \
     -DOPENDAQ_ENABLE_NATIVE_STREAMING=ON \

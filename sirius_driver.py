@@ -26,6 +26,7 @@ import time
 import subprocess
 import threading
 import logging
+from collections import deque
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Callable
@@ -176,7 +177,7 @@ class EnhetsInfo:
 @dataclass
 class MaaleKonfig:
     """Konfigurasjon for ei maaling."""
-    sample_rate: int = 1000
+    sample_rate: int = 20000
     aktive_kanaler: list = field(default_factory=lambda: list(range(ADC_KANALER)))
     varighet_sek: float = 5.0
 
@@ -204,7 +205,7 @@ class SiriusDriver:
         self._adc_traad: Optional[threading.Thread] = None
         self._heartbeat_traad: Optional[threading.Thread] = None
         self._data_callback: Optional[Callable] = None
-        self._data_buffer = []
+        self._data_buffer = deque(maxlen=1000)
         self._buffer_lock = threading.Lock()
         self._buffer_storrelse = 1000
         self._enhetsinfo = EnhetsInfo()
@@ -1548,8 +1549,9 @@ class SiriusDriver:
                 data = list(self._data_buffer)
                 self._data_buffer.clear()
             else:
-                data = self._data_buffer[:antall_rammer]
-                self._data_buffer = self._data_buffer[antall_rammer:]
+                data = list(self._data_buffer)[:antall_rammer]
+                for _ in range(min(antall_rammer, len(self._data_buffer))):
+                    self._data_buffer.popleft()
         return data
 
     def _adc_leser_loop(self):
@@ -1596,11 +1598,9 @@ class SiriusDriver:
                         except Exception as e:
                             log.warning(f"Callback-feil: {e}")
 
-                    # Buffer
+                    # Buffer (deque med maxlen handterer eviction automatisk)
                     with self._buffer_lock:
                         self._data_buffer.append(kanal_data)
-                        while len(self._data_buffer) > self._buffer_storrelse:
-                            self._data_buffer.pop(0)
 
                     if timeout_teller > 0:
                         log.info(f"ADC: data att etter {timeout_teller} timeouts "
@@ -1745,13 +1745,15 @@ class SiriusDriver:
         antall_samples = len(raa_bytes) // 2
         alle = np.frombuffer(raa_bytes[:antall_samples * 2], dtype=np.int16)
 
-        # Deinterlev
-        resultat = {}
-        trim = (len(alle) // antall_kanaler) * antall_kanaler
+        # Deinterlev med numpy reshape (raskare enn per-kanal slice)
+        n_frames = len(alle) // antall_kanaler
+        trim = n_frames * antall_kanaler
         interlev = alle[:trim]
+        reshaped = interlev.reshape(n_frames, antall_kanaler).T
 
+        resultat = {}
         for k in range(antall_kanaler):
-            resultat[f'kanal_{k}'] = interlev[k::antall_kanaler].copy()
+            resultat[f'kanal_{k}'] = reshaped[k].copy()
 
         return resultat
 

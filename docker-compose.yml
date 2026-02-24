@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        PARALLELLE_JOBBER: 2
+        PARALLELLE_JOBBER: 4
     image: opendaq-sirius:latest
     container_name: opendaq-sirius
     restart: unless-stopped
@@ -45,7 +45,7 @@ services:
       # Autonom maaling
       - MAALE_INTERVALL=60
       - MAALE_VARIGHET=5
-      - SAMPLE_RATE=1000
+      - SAMPLE_RATE=20000
       - MAALE_PREFIKS=maaling
       # Sett til "true" for aa bruke direkte SIRIUS USB-driver
       # (uten openDAQ SDK - bruker reverse-engineered protokoll)
@@ -62,7 +62,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
 
     logging:
       driver: json-file

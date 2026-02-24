@@ -48,13 +48,13 @@ class KanalKonfig:
             range_min=float(d.get("range_min", -10.0)),
             range_max=float(d.get("range_max", 10.0)),
             enhet=str(d.get("enhet", "V")),
-            sample_rate=int(d.get("sample_rate", 1000)),
+            sample_rate=int(d.get("sample_rate", 20000)),
         )
 
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 6  # v6: Tid-kanal range fiksa (0-3600s, ikkje 0-1M)
+KONFIG_VERSJON = 7  # v7: Sample rate 1000→20000 Hz (matchar SIRIUS hardware)
 
 # Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
 #
@@ -70,15 +70,15 @@ KONFIG_VERSJON = 6  # v6: Tid-kanal range fiksa (0-3600s, ikkje 0-1M)
 #
 # Kanal 8: Lo-LV, ikkje tilkobla
 STANDARD_KONFIG: List[KanalKonfig] = [
-    KanalKonfig(0, "AI 0", True,  "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(1, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(2, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(3, "AI 3", False, "voltage", -1600.0, 1600.0, "V", 1000),
-    KanalKonfig(4, "AI 4", True,  "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(5, "AI 5", True,  "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(6, "AI 6", True,  "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(7, "AI 7", False, "current", -10000.0, 10000.0, "A", 1000),
-    KanalKonfig(8, "Tid",  True,  "generic", 0.0, 3600.0, "s", 1000),
+    KanalKonfig(0, "AI 0", True,  "voltage", -1600.0, 1600.0, "V", 20000),
+    KanalKonfig(1, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 20000),
+    KanalKonfig(2, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 20000),
+    KanalKonfig(3, "AI 3", False, "voltage", -1600.0, 1600.0, "V", 20000),
+    KanalKonfig(4, "AI 4", True,  "current", -10000.0, 10000.0, "A", 20000),
+    KanalKonfig(5, "AI 5", True,  "current", -10000.0, 10000.0, "A", 20000),
+    KanalKonfig(6, "AI 6", True,  "current", -10000.0, 10000.0, "A", 20000),
+    KanalKonfig(7, "AI 7", False, "current", -10000.0, 10000.0, "A", 20000),
+    KanalKonfig(8, "Tid",  True,  "generic", 0.0, 3600.0, "s", 20000),
 ]
 
 

@@ -73,9 +73,11 @@ class OpenDAQBro:
         self._dom_desc = []        # Domain descriptor per kanal
         self._val_desc = []        # Value descriptor per kanal
         self._total_samples = []   # Total samples sendt per kanal
-        self._tick_delta = 1000    # Ticks per sample (1MHz / 1kHz)
+        self._tick_delta = 50      # Ticks per sample (1MHz / 20kHz)
         self._start_ticks = 0      # Starttid i ticks
         self._pakett_klar = False  # True når pakett-injeksjon er klar
+        # Pre-allokert buffer for float64-konvertering (992 frames = typisk EP2-pakke)
+        self._fdata_buf = np.empty(992, dtype=np.float64)
         self._status = {
             "tilgjengelig": False,
             "aktiv": False,
@@ -541,34 +543,47 @@ class OpenDAQBro:
                      f"signal_count={len(self._kanal_signal)}, "
                      f"pakett_klar={self._pakett_klar}")
 
+        # Berekn statistikk berre kvar 20. pakke (~1 Hz ved 20 pkt/sek)
+        berekn_stats = (self._data_teller % 20 == 0)
+
         try:
-            for kanal_idx, (key, data) in enumerate(sorted(kanal_data.items())):
-                if kanal_idx >= len(self._kanal_signal) or kanal_idx >= 8:
+            for kanal_idx, key in enumerate(self._KANAL_KEYS):
+                if kanal_idx >= len(self._kanal_signal):
                     break
 
+                data = kanal_data.get(key)
+                if data is None or len(data) == 0:
+                    continue
+
                 ch, sig = self._kanal_signal[kanal_idx]
-                if sig is None or data is None or len(data) == 0:
+                if sig is None:
                     continue
 
                 # Skaler int16 ADC-verdiar til fysiske einingar (V/A)
                 skala = (self._kanal_skala[kanal_idx]
                          if kanal_idx < len(self._kanal_skala) else 1.0)
-                fdata = data.astype(np.float64) * skala
+                # Gjenbruk pre-allokert buffer viss storleiken matchar
+                n = len(data)
+                if n <= len(self._fdata_buf):
+                    fdata = self._fdata_buf[:n]
+                    np.multiply(data, skala, out=fdata, casting='unsafe')
+                else:
+                    fdata = data.astype(np.float64) * skala
 
-                # Berekn statistikk for web UI
-                snitt = float(np.mean(fdata))
-                rms = float(np.sqrt(np.mean(fdata ** 2)))
-                topp = float(np.max(np.abs(fdata)))
+                # Berekn statistikk for web UI (kvar 20. pakke = ~1 Hz)
+                if berekn_stats:
+                    snitt = float(np.mean(fdata))
+                    rms = float(np.sqrt(np.mean(fdata ** 2)))
+                    topp = float(np.max(np.abs(fdata)))
 
-                # Lagre siste verdiar for web UI
-                self._siste_verdiar[key] = {
-                    "snitt": round(snitt, 4),
-                    "rms": round(rms, 4),
-                    "topp": round(topp, 4),
-                    "siste": round(float(data[-1]) * skala, 4),
-                    "antall": len(data),
-                    "kjelde": "sirius",
-                }
+                    self._siste_verdiar[key] = {
+                        "snitt": round(snitt, 4),
+                        "rms": round(rms, 4),
+                        "topp": round(topp, 4),
+                        "siste": round(float(data[-1]) * skala, 4),
+                        "antall": len(data),
+                        "kjelde": "sirius",
+                    }
 
                 # Send reelle data som DataPacket via openDAQ-signal
                 if (self._pakett_klar and
@@ -739,6 +754,9 @@ class OpenDAQBro:
         gc.collect()
         log.info("openDAQ nettverksbro stoppa")
 
+    # Fast kanal-nøklar for hot loop (unngår sorted() og list-oppretting per kall)
+    _KANAL_KEYS = [f"kanal_{i}" for i in range(8)]
+
     # Kanalopsett (SIRIUSi-HS, 4×Hi-LV + 4×Lo-LV)
     # AI 1-3: Hi-LV, spenning 230V RMS (325V topp), 50 Hz
     # AI 4:   Hi-LV, ikkje tilkobla
@@ -781,8 +799,10 @@ class OpenDAQBro:
         log.info("  NumberOfChannels sett til 8 (utan tidskanal)")
 
         # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
-        if self._safe_set(self._device, "GlobalSampleRate", 1000.0):
-            log.info("  GlobalSampleRate sett til 1000.0 Hz")
+        # Les frå SAMPLE_RATE env var (default 20000 = SIRIUS hardware rate)
+        sample_rate = float(os.environ.get("SAMPLE_RATE", "20000"))
+        if self._safe_set(self._device, "GlobalSampleRate", sample_rate):
+            log.info(f"  GlobalSampleRate sett til {sample_rate} Hz")
 
         # Logg device-eigenskapar for feilsøking
         self._logg_eigenskapar(self._device, "Dev.")
