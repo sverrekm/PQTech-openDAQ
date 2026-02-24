@@ -6,12 +6,22 @@ interface Props {
   kanalar: KanalKonfig[] | null
   liveData: KanalLive | null
   onChannelClick: (index: number) => void
+  loading?: boolean
 }
 
-export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClick }: Props) {
+export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClick, loading = false }: Props) {
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
 
-  if (!kanalar) return null
+  if (loading || !kanalar) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm flex justify-center items-center h-48">
+        <svg className="animate-spin h-8 w-8 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+    )
+  }
 
   const getChannelValue = (idx: number) => {
     const key = `kanal_${idx}`
@@ -31,17 +41,17 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
   }
 
   return (
-    <div className="kort">
-      <h2>Kanalar - Live</h2>
-      <table className="kanal-tabell">
+    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Kanalar - Live</h2>
+      <table className="w-full border-collapse text-sm mt-3">
         <thead>
           <tr>
-            <th style={{ width: 30 }}>#</th>
-            <th>Namn</th>
-            <th style={{ width: 55 }}>Eining</th>
-            <th style={{ width: 45 }}>Aktiv</th>
-            <th style={{ width: 100 }}>Verdi</th>
-            <th style={{ width: 80 }}>Trend</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 30 }}>#</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">Namn</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 55 }}>Eining</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 45 }}>Aktiv</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 100 }}>Verdi</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 80 }}>Trend</th>
           </tr>
         </thead>
         <tbody>
@@ -61,26 +71,26 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
             return (
               <tr
                 key={i}
-                className={`${k.aktiv ? '' : 'inaktiv'} ${k.aktiv ? 'kanal-rad-klikkbar' : ''}`}
+                className={`transition-colors duration-100 ease-in-out ${k.aktiv ? 'cursor-pointer hover:bg-gray-50' : 'opacity-50'}`}
                 onClick={k.aktiv ? () => onChannelClick(i) : undefined}
               >
-                <td style={{ color: '#6b6b6b', fontWeight: 600 }}>{i + 1}</td>
-                <td>{k.namn}</td>
-                <td>{k.enhet}</td>
-                <td>
-                  <span className={`tag ${k.aktiv ? 'tag-aktiv' : 'tag-usb'}`}>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle text-gray-500 font-semibold">{i + 1}</td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">{k.namn}</td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">{k.enhet}</td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                  <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${k.aktiv ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
                     {k.aktiv ? 'Ja' : 'Nei'}
                   </span>
                 </td>
-                <td className="kanal-live" style={{ color: cv?.color || '#6b6b6b' }}>
+                <td className="font-mono text-sm text-right px-1 py-1 border-b border-gray-100 align-middle" style={{ color: cv?.color || '#6b6b6b' }}>
                   {cv ? (
                     <>
                       {typeof cv.value === 'number' ? cv.value.toFixed(2) : cv.value}
-                      <span style={{ fontSize: '0.65rem', opacity: 0.7, marginLeft: 3 }}>{cv.source}</span>
+                      <span className="text-xs opacity-70 ml-1">{cv.source}</span>
                     </>
                   ) : '-'}
                 </td>
-                <td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">
                   <SparklineChart data={[...sparkArr]} />
                 </td>
               </tr>

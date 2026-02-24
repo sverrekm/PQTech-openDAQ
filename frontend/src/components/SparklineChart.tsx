@@ -13,14 +13,22 @@ export default function SparklineChart({ data }: Props) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const w = canvas.width
-    const h = canvas.height
+    // Use clientWidth/clientHeight for responsive canvas sizing
+    const w = canvas.clientWidth
+    const h = canvas.clientHeight
     const min = Math.min(...data)
     const max = Math.max(...data)
     const range = max - min || 1
 
+    // Scale for high-DPI displays
+    const dpi = window.devicePixelRatio
+    canvas.width = w * dpi
+    canvas.height = h * dpi
+    ctx.scale(dpi, dpi)
+
+
     ctx.clearRect(0, 0, w, h)
-    ctx.strokeStyle = '#D76428'
+    ctx.strokeStyle = '#D76428' // Original color
     ctx.lineWidth = 1.5
     ctx.beginPath()
     for (let i = 0; i < data.length; i++) {
@@ -33,8 +41,8 @@ export default function SparklineChart({ data }: Props) {
   }, [data])
 
   return (
-    <span className="sparkline-container">
-      <canvas ref={canvasRef} width={80} height={24} />
+    <span className="inline-block w-20 h-6 align-middle">
+      <canvas ref={canvasRef} className="w-full h-full" />
     </span>
   )
 }

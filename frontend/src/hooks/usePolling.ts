@@ -4,18 +4,22 @@ export function usePolling<T>(
   fetcher: () => Promise<T>,
   intervalMs: number,
   enabled = true,
-): { data: T | null; error: string | null; refresh: () => void } {
+): { data: T | null; error: string | null; loading: boolean; refresh: () => void } {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const doFetch = useCallback(async () => {
+    setLoading(true)
     try {
       const result = await fetcher()
       setData(result)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
     }
   }, [fetcher])
 
@@ -28,5 +32,5 @@ export function usePolling<T>(
     }
   }, [doFetch, intervalMs, enabled])
 
-  return { data, error, refresh: doFetch }
+  return { data, error, loading, refresh: doFetch }
 }

@@ -30,63 +30,51 @@ export default function ProbeAnalysisCard() {
   }
 
   return (
-    <div className="kort">
-      <h2>SIRIUS USB-analyse</h2>
+    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">SIRIUS USB-analyse</h2>
 
-      <div style={{
-        padding: '0.5rem 0.75rem',
-        background: '#FDF2EC',
-        border: '1px solid #E8753A',
-        borderRadius: '0.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.75rem',
-        marginBottom: '0.75rem',
-      }}>
+      <div className="p-3 bg-orange-50 border border-orange-300 rounded-lg flex items-center gap-3 mb-3">
         <button
-          className="btn"
+          className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out whitespace-nowrap"
           disabled={running}
           onClick={() => run('sniffer', () => kjorSniffer(15))}
-          style={{ background: '#D76428', color: '#fff', fontWeight: 600, whiteSpace: 'nowrap' }}
         >
           Fang DewesoftX-trafikk (15s)
         </button>
-        <span style={{ color: '#B85420', fontSize: '0.8rem' }}>
+        <span className="text-orange-700 text-xs">
           Passiv fangst via usbmon — forstyrrar IKKJE USB/IP eller DewesoftX.
         </span>
       </div>
 
-      <details style={{ marginBottom: '0.75rem' }}>
-        <summary style={{ cursor: 'pointer', color: '#6b6b6b', fontSize: '0.85rem' }}>
+      <details className="mb-3">
+        <summary className="cursor-pointer text-gray-500 text-sm">
           Direkte USB-tester (stopper USB/IP-deling!)
         </summary>
-        <p style={{ color: '#991b1b', fontSize: '0.8rem', margin: '0.5rem 0' }}>
+        <p className="text-red-700 text-xs my-2">
           Desse verktøya tek kontroll over SIRIUS USB og avbryt USB/IP.
           DewesoftX mistar tilkoplinga. Bruk berre når USB/IP er stoppa.
         </p>
-        <div className="usbip-knapper">
-          <button className="btn btn-blaa" disabled={running} onClick={() => run('probe', kjorProbe)}>
+        <div className="flex flex-wrap gap-2">
+          <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={running} onClick={() => run('probe', kjorProbe)}>
             USB Deskriptorer
           </button>
-          <button className="btn btn-blaa" disabled={running} onClick={() => run('protokoll', () => kjorProtokoll('scan'))}>
+          <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={running} onClick={() => run('protokoll', () => kjorProtokoll('scan'))}>
             Skann kommandoer
           </button>
-          <button className="btn btn-blaa" disabled={running} onClick={() => run('dekoder', () => kjorDekoder('info'))}>
+          <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={running} onClick={() => run('dekoder', () => kjorDekoder('info'))}>
             Dekod enhetsinfo
           </button>
           <button
-            className="btn"
+            className="bg-orange-500 hover:bg-orange-600 text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={running}
             onClick={() => run('ADC', () => kjorAdc(5))}
-            style={{ background: '#E8753A', color: '#fff', fontWeight: 600 }}
           >
             Les ADC (5s)
           </button>
           <button
-            className="btn"
+            className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={running}
             onClick={() => run('ADC+lagre', () => kjorAdc(10, true))}
-            style={{ background: '#D76428', color: '#fff', fontWeight: 600 }}
           >
             Les + Lagre (10s)
           </button>
@@ -94,7 +82,7 @@ export default function ProbeAnalysisCard() {
       </details>
 
       {statusMsg && (
-        <div className={`melding ${status === 'error' ? 'melding-feil' : 'melding-ok'}`}>
+        <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${status === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
           {status === 'done' ? 'Fullført' : status === 'error' ? 'Feil' : statusMsg}
         </div>
       )}

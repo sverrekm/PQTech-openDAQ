@@ -10,9 +10,20 @@ interface Props {
 
 export default function UsbIpCard({ ip }: Props) {
   const fetcher = useCallback(() => fetchUsbIpStatus(), [])
-  const { data: u, refresh } = usePolling(fetcher, 5000)
+  const { data: u, refresh, loading } = usePolling(fetcher, 5000)
   const [feil, setFeil] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  if (loading) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm flex justify-center items-center h-48">
+        <svg className="animate-spin h-8 w-8 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+    )
+  }
 
   if (!u) return null
 
@@ -42,10 +53,10 @@ export default function UsbIpCard({ ip }: Props) {
   }
 
   return (
-    <div className="kort">
-      <h2>USB/IP — Del SIRIUS</h2>
-      <div className="usbip-status-rad">
-        <span className={`dot ${u.deling_aktiv ? 'dot-gronn' : 'dot-rod'}`} />
+    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">USB/IP — Del SIRIUS</h2>
+      <div className="flex items-center gap-2 mb-3 text-sm">
+        <span className={`w-2 h-2 rounded-full ${u.deling_aktiv ? 'bg-green-500' : 'bg-red-500'}`} />
         <span>
           {u.deling_aktiv
             ? 'Deling aktiv på port 3240'
@@ -66,12 +77,14 @@ export default function UsbIpCard({ ip }: Props) {
         },
       ]} />
       {(feil || u.feil) && (
-        <div className="melding melding-feil">{feil || u.feil}</div>
+        <div className="mt-3 px-3 py-2 rounded-lg text-sm bg-red-100 text-red-800">
+          {feil || u.feil}
+        </div>
       )}
-      <div className="usbip-knapper">
+      <div className="flex flex-wrap gap-2 mt-3">
         {!u.deling_aktiv && (
           <button
-            className="btn btn-gronn"
+            className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={busy || !u.sirius_paa_usb || !u.tilgjengelig}
             onClick={handleDel}
           >
@@ -79,31 +92,31 @@ export default function UsbIpCard({ ip }: Props) {
           </button>
         )}
         {u.deling_aktiv && (
-          <button className="btn btn-rod" disabled={busy} onClick={handleStopp}>
+          <button className="bg-red-100 hover:bg-red-200 text-red-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy} onClick={handleStopp}>
             Stopp deling
           </button>
         )}
       </div>
       {u.deling_aktiv && (
-        <div className="usbip-instruksjoner">
-          <h3>På Windows-PC</h3>
-          <ol>
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-4">
+          <h3 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">På Windows-PC</h3>
+          <ol className="list-decimal pl-5 text-sm text-gray-700">
             <li>
               Installer{' '}
-              <a href="https://github.com/cezanne/usbip-win2/releases" target="_blank" rel="noreferrer" style={{ color: '#D76428' }}>
+              <a href="https://github.com/cezanne/usbip-win2/releases" target="_blank" rel="noreferrer" className="text-[#D76428] hover:underline">
                 usbip-win2
               </a>
             </li>
             <li>Opne PowerShell som Administrator</li>
             <li>
               List enheter:
-              <CopyableCommand text={`usbip list -r ${ip}`} style={{ marginTop: '0.35rem' }} />
+              <CopyableCommand text={`usbip list -r ${ip}`} className="mt-1" />
             </li>
             <li>
               Koble til SIRIUS:
               <CopyableCommand
                 text={`usbip attach -r ${ip} -b ${u.busid || 'X-Y'}`}
-                style={{ marginTop: '0.35rem' }}
+                className="mt-1"
               />
             </li>
             <li>Opne DewesoftX — SIRIUS visest som lokal USB-eining</li>

@@ -29,26 +29,26 @@ export default function DebugConsoleCard() {
   }
 
   return (
-    <div className="kort">
-      <h2>Debug-konsoll</h2>
-      <p style={{ color: '#6b6b6b', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Debug-konsoll</h2>
+      <p className="text-gray-500 text-xs mb-2">
         Send rå USB hex-kommandoar til SIRIUS.
       </p>
-      <div className="debug-input-row">
+      <div className="flex gap-2">
         <input
           type="text"
-          className="debug-input"
+          className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 font-mono text-sm text-orange-400 outline-none focus:border-[#D76428]"
           placeholder="f.eks. 55aa0100..."
           value={kommando}
           onChange={e => setKommando(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && send()}
         />
-        <button className="btn btn-gronn" disabled={busy} onClick={send}>
+        <button className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy} onClick={send}>
           {busy ? 'Sender...' : 'Send'}
         </button>
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', fontSize: '0.8rem', color: '#6b6b6b' }}>
-        <input type="checkbox" checked={poll} onChange={e => setPoll(e.target.checked)} />
+      <label className="flex items-center gap-2 mt-2 text-sm text-gray-500">
+        <input type="checkbox" checked={poll} onChange={e => setPoll(e.target.checked)} className="h-4 w-4 accent-[#D76428] rounded focus:ring-[#D76428]" />
         Poll for svar (EP2)
       </label>
       <OutputTerminal text={output} />

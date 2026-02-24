@@ -91,7 +91,7 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
   }, [cv?.value])
 
   if (!kanal) {
-    return <div className="kort">Kanal ikkje funnen.</div>
+    return <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">Kanal ikkje funnen.</div>
   }
 
   const typeLabel = kanal.type === 'voltage' ? 'Spenning' : kanal.type === 'current' ? 'Straum' : kanal.type
@@ -104,63 +104,63 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
 
   return (
     <>
-      <div className="kort">
-        <div className="kanal-detalj-header">
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+        <div className="flex items-center gap-3 mb-4">
           {onBack && (
-            <button className="kanal-detalj-tilbake" onClick={onBack}>
+            <button className="text-sm text-gray-500 hover:text-[#D76428] cursor-pointer bg-transparent border-none" onClick={onBack}>
               &#8592; Tilbake
             </button>
           )}
-          <div className="kanal-detalj-tittel">
+          <div className="text-lg font-semibold text-gray-900">
             {kanal.namn} — {typeLabel}
-            <span className="kanal-eining">{kanal.enhet}</span>
+            <span className="text-sm text-gray-500 font-normal ml-1">{kanal.enhet}</span>
           </div>
         </div>
 
-        <div className="kanal-detalj-live">
-          <div className="kanal-detalj-verdi" style={{ color: cv?.color || '#6b6b6b' }}>
+        <div className="flex items-baseline gap-6 mb-4">
+          <div className="text-4xl font-bold tabular-nums" style={{ color: cv?.color || '#6b6b6b' }}>
             {cv ? Number(cv.value).toFixed(2) : '—'}
-            <span className="verdi-eining">{kanal.enhet}</span>
+            <span className="text-lg font-normal text-gray-500 ml-1">{kanal.enhet}</span>
           </div>
           {stats && (
-            <div className="kanal-detalj-stats">
-              <div className="stat-rad">RMS: <strong>{stats.rms.toFixed(2)} {kanal.enhet}</strong></div>
-              <div className="stat-rad">Topp: <strong>{stats.topp.toFixed(2)} {kanal.enhet}</strong></div>
-              <div className="stat-rad">Snitt: <strong>{stats.snitt.toFixed(2)} {kanal.enhet}</strong></div>
+            <div className="flex gap-4 text-sm text-gray-600">
+              <div>RMS: <strong>{stats.rms.toFixed(2)} {kanal.enhet}</strong></div>
+              <div>Topp: <strong>{stats.topp.toFixed(2)} {kanal.enhet}</strong></div>
+              <div>Snitt: <strong>{stats.snitt.toFixed(2)} {kanal.enhet}</strong></div>
             </div>
           )}
         </div>
 
-        <div className="kanal-detalj-sparkline">
-          <canvas ref={canvasRef} />
+        <div className="mt-4 h-24 w-full">
+          <canvas ref={canvasRef} className="w-full h-full block" />
         </div>
       </div>
 
-      <div className="kort">
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
         <h2>Konfigurasjon</h2>
-        <div className="kanal-detalj-konfig">
-          <div className="info-boks">
-            <div className="label">Range</div>
-            <div className="verdi">{kanal.range_min} / {kanal.range_max}</div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-xs text-gray-500">Range</div>
+            <div className="mt-1 font-semibold text-gray-900">{kanal.range_min} / {kanal.range_max}</div>
           </div>
-          <div className="info-boks">
-            <div className="label">Eining</div>
-            <div className="verdi">{kanal.enhet}</div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-xs text-gray-500">Eining</div>
+            <div className="mt-1 font-semibold text-gray-900">{kanal.enhet}</div>
           </div>
-          <div className="info-boks">
-            <div className="label">Type</div>
-            <div className="verdi">{typeLabel}</div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-xs text-gray-500">Type</div>
+            <div className="mt-1 font-semibold text-gray-900">{typeLabel}</div>
           </div>
-          <div className="info-boks">
-            <div className="label">Sample rate</div>
-            <div className="verdi">{kanal.sample_rate} Hz</div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-xs text-gray-500">Sample rate</div>
+            <div className="mt-1 font-semibold text-gray-900">{kanal.sample_rate} Hz</div>
           </div>
         </div>
       </div>
 
-      <div className="kort">
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
         <h2>Innstillingar</h2>
-        <div className="kanal-detalj-plassholder">
+        <div className="text-sm text-gray-500">
           Per-kanal innstillingar — bruk Innstillingar-sida for å endre kanalkonfigurasjon.
         </div>
       </div>

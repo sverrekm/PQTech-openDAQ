@@ -18,29 +18,29 @@ export default function ReportList() {
   }
 
   return (
-    <div style={{ marginTop: '0.75rem' }}>
-      <button className="btn btn-blaa" onClick={hent} style={{ fontSize: '0.8rem' }}>
+    <div className="mt-3">
+      <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out" onClick={hent}>
         Vis rapporter
       </button>
       {loaded && (
-        <ul className="enhet-liste" style={{ marginTop: '0.5rem' }}>
+        <ul className="list-none p-0 mt-2">
           {rapporter.length > 0 ? (
             rapporter.map((r, i) => (
-              <li key={i} style={{ fontFamily: "'Consolas', monospace", fontSize: '0.85rem', color: '#6b6b6b' }}>
+              <li key={i} className="font-mono text-sm text-gray-500 py-1">
                 <a
                   href={`/api/probe/last-ned/${r.filnavn}`}
                   download
-                  style={{ color: '#D76428' }}
+                  className="text-[#D76428] hover:underline"
                 >
                   {r.filnavn}
                 </a>
-                <span style={{ marginLeft: '0.5rem' }}>
+                <span className="ml-2">
                   ({(r.storrelse / 1024).toFixed(1)} KB)
                 </span>
               </li>
             ))
           ) : (
-            <li style={{ color: '#6b6b6b' }}>Ingen rapporter</li>
+            <li className="text-gray-500">Ingen rapporter</li>
           )}
         </ul>
       )}

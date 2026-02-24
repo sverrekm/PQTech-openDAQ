@@ -39,39 +39,39 @@ export default function DeviceConnectionCard() {
   }
 
   return (
-    <div className="kort">
-      <h2>Koble til enhet</h2>
-      <div className="koble-rad">
+    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Koble til enhet</h2>
+      <div className="flex gap-2 mt-3">
         <input
           type="text"
-          className="koble-input"
+          className="flex-1 bg-white border border-gray-300 rounded-lg p-2 font-mono text-sm text-gray-900 outline-none focus:border-[#D76428] focus:ring-2 focus:ring-[#D76428]"
           placeholder="daq.opcua://192.168.1.X"
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && kobleTil()}
         />
-        <button className="btn btn-gronn" disabled={kobler} onClick={() => kobleTil()}>
+        <button className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={kobler} onClick={() => kobleTil()}>
           {kobler ? 'Kobler...' : 'Koble til'}
         </button>
-        <button className="btn btn-blaa" disabled={soker} onClick={sokEnheter}>
+        <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={soker} onClick={sokEnheter}>
           {soker ? 'Søkjer...' : 'Søk'}
         </button>
       </div>
       {melding && (
-        <div className={`melding ${melding.ok ? 'melding-ok' : 'melding-feil'}`}>
+        <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${melding.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
           {melding.text}
         </div>
       )}
       {enheter.length > 0 && (
-        <ul className="enhet-liste">
+        <ul className="list-none p-0 mt-3">
           {enheter.map((e, i) => (
-            <li key={i}>
-              <div className="enhet-info">
-                <span className="enhet-navn">{e.navn}</span>
-                <span className="enhet-conn">{e.tilkobling}</span>
+            <li key={i} className="flex items-center justify-between py-2 px-3 border-b border-gray-100 text-sm">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-gray-900 font-medium">{e.navn}</span>
+                <span className="text-gray-500 font-mono text-xs">{e.tilkobling}</span>
               </div>
               <button
-                className="btn btn-gronn"
+                className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out"
                 onClick={() => { setInput(e.tilkobling); kobleTil(e.tilkobling) }}
               >
                 Koble til
@@ -80,11 +80,11 @@ export default function DeviceConnectionCard() {
           ))}
         </ul>
       )}
-      <p style={{ color: '#6b6b6b', fontSize: '0.8rem', marginTop: '0.75rem' }}>
+      <p className="text-gray-500 text-xs mt-3">
         Skriv inn tilkoplingsstreng eller klikk Søk for å finne einingar på nettverket.
-        Eksempel: <code style={{ color: '#B85420' }}>daq.opcua://IP</code>,{' '}
-        <code style={{ color: '#B85420' }}>daq.ns://IP</code>,{' '}
-        <code style={{ color: '#B85420' }}>daqref://device0</code>
+        Eksempel: <code className="text-orange-700">daq.opcua://IP</code>,{' '}
+        <code className="text-orange-700">daq.ns://IP</code>,{' '}
+        <code className="text-orange-700">daqref://device0</code>
       </p>
     </div>
   )
