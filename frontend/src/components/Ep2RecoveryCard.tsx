@@ -27,10 +27,10 @@ export default function Ep2RecoveryCard() {
     <div className="kort">
       <h2>EP2 Gjenoppliving</h2>
       <p style={{ color: '#991b1b', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
-        EP2 (data-endepunkt) er nede. Proev aa gjenopplive med ulike strategiar.
+        EP2 (data-endepunkt) er nede. Prøv å gjenopplive med ulike strategiar.
       </p>
       <button className="btn btn-gul" disabled={busy} onClick={handle}>
-        {busy ? 'Proever strategiar...' : 'Gjenoppliv EP2'}
+        {busy ? 'Prøver strategiar...' : 'Gjenoppliv EP2'}
       </button>
       {melding && (
         <div className={`melding ${melding.ok ? 'melding-ok' : 'melding-feil'}`}>

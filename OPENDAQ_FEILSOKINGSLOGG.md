@@ -458,14 +458,124 @@ Alle 4 fasar deploya og testa:
 
 ---
 
+## Fase 9: DewesoftX-paritet — metadata, descriptors og Access Violation (2026-02-24)
+
+### 9.1 DewesoftX Access Violation i OpenDAQSettingsFrame
+
+**Symptom:** DewesoftX krasjar med Access Violation når ein opnar device settings:
+```
+Access violation at address 00007FFD22208101 in module 'COMCTL32.dll'
+Read of address 000000000000000C
+  OpenDAQSettingsFrame.TOpenDAQFrame.Initialize (Line 482)
+  → SettingsChanged (Line 1453)
+    → Reconnect (Line 1448)
+      → RebootDeviceItemButtonClick (Line 1439)
+        → DeviceLogLevelItemComboSelect (Line 1326)
+```
+
+**Rotårsak:** DewesoftX si `OpenDAQSettingsFrame` forventer eigenskapar som `DeviceLogLevel`
+og `RebootDevice` på eininga. Vår RefDevice har ikkje desse → null pointer dereference
+(les av adresse `0x0C` og `0xA9` = nil interface + struct offset).
+
+**Fix:** La til dummy-eigenskapar i `_legg_til_dewesoftx_eigenskapar()`:
+- `DeviceLogLevel` (IntProperty, default=2 → Info)
+- `DeviceLogPath` (StringProperty, default="")
+
+**Notat:** `DeviceLogLevel` OPC-UA write gjev "DataType incompatible" — same som
+`GlobalSampleRate` (kjent Patch 6-avgrensing). Verdien er sett internt.
+
+### 9.2 CustomRange-fix for kanalrangar
+
+**Symptom:** DewesoftX viste "Setup is not available for this channel" og feil Min/Max-rangar.
+Berre AI0 viste korrekte målingar — resten hadde RefDevice default [-10, 10].
+
+**Rotårsak:** RefDevice sin `CustomRange` eigenskap defaultar til [-10, 10] frå
+Amplitude-eigenskapen (maks 10). SIRIUS-kanalane har mykje større rangar (±1600V, ±10000A).
+
+**Fix:** Sett `ch.set_property_value("CustomRange", _daq.Range(range_min, range_max))`
+per kanal i `_konfig_kanalar()`. Brukar range-verdiar frå `kanal_konfig.py`:
+- AI 0-3: [-1600, 1600] (voltage, Hi-LV)
+- AI 4-7: [-10000, 10000] (current, Lo-LV)
+
+### 9.3 Analyse: openDAQ vs direkte USB — funksjonalitetsgap
+
+Samanlikna DewesoftX-opplevinga ved direkte USB-tilkobling vs openDAQ-strøyming:
+
+| Eigenskap | Direkte USB | openDAQ-strøyming | Gap |
+|-----------|-------------|-------------------|-----|
+| Ampl. name | SIRIUS-HS-HVv2 / LVv2 | (tomt) | Manglar |
+| Range | 1600 V / 100 V | ±1600 / ±10000 | ✅ Fiksa |
+| Measurement | Voltage | (ikkje sett) | Manglar |
+| Physical quantity | (vises) | (tomt) | Manglar |
+| Units | V / A | (ikkje sett) | Manglar |
+| Setup-knapp | Fungerer | "Not available" | Krev Nivå 3 |
+| Device info | FW, temp, HW ver | Berre namn+serial | Delvis |
+| Channel actions | Balance, Short, Zero | Ikkje tilgjengeleg | Krev Nivå 3 |
+
+### 9.4 USB-fangstanalyse (sirius1.pcapng, sirius2.pcapng)
+
+Analyserte USB-fangar (73 657 frames, 104.9 sek) av DewesoftX ↔ SIRIUS-kommunikasjon:
+
+**Device info frå register-lesingar:**
+- Reg 0x1E00: `DEWEUSB7` (enheitsidentifikasjon)
+- Reg 0x1E10: HW versjon 9.4
+- Reg 0x1EA0: FW versjon 7.x
+- Reg 0x2148+: EEPROM med serienummer, kryptonøklar, motherboard-ID
+
+**Protokollflyt:**
+1. USB enumeration (GET_DESCRIPTOR)
+2. A1 (slot-kart), A0 (aktiv modus), 00 (FW-versjon), AC (slot-typar)
+3. A8 (EEPROM register-lesingar for device info)
+4. B0 (init/config-modus), AD 3F 0C (globale register-skrivingar)
+5. Register 0x02 trigger → EP2 ADC-streaming
+
+**Innsikt:** DewesoftX hentar amplifier card type, firmware, hardware version, temperature
+og EtherCAT product code frå SIRIUS-register. Denne infoen er tilgjengeleg i vår
+`sirius_driver.py` (`EnhetsInfo`, `SlotInfo`) men ikkje eksponert via openDAQ.
+
+### 9.5 Tre-nivå plan for funksjonalitetsparitet
+
+**Nivå 1 — Signal descriptors med einingar og metadata (implementert)**
+- `DataDescriptorBuilder` med `UnitBuilder` (Volt/Ampere) per kanal
+- `value_range` på descriptor for korrekt Min/Max
+- Amplifier name som kanal-eigenskap
+- Effekt: Korrekte einingar, physical quantity, ampl. name i DewesoftX kanalliste
+
+**Nivå 2 — Utvida DeviceInfo (delvis mogleg)**
+- FW/HW versjon, temperatur frå `sirius_driver.py` `EnhetsInfo`
+- Krev ekstra eigenskapar på device (DeviceInfo er frosen frå C++ patch)
+- Avgrensing: DeviceInfo er read-only frå Python — treng C++ patch-oppdatering
+
+**Nivå 3 — Setup-dialog og kanalkontroll (stor arkitekturendring)**
+- Input range, coupling, filter, zero/balance per kanal
+- Krev toveis-kommunikasjon: DewesoftX → openDAQ → SIRIUS USB
+- Enten eige openDAQ device module (C++) eller property-write-proxy
+- Kvar property-endring må omsetjast til SIRIUS USB register-skriving (AD-kommando)
+
+### 9.6 Nivå 1 implementering: Signal descriptors
+
+La til `_sett_signal_descriptors()` i `opendaq_bro.py` som:
+1. Opprettar `UnitBuilder` med namn/symbol/quantity per kanaltype (Volt/Ampere/sekund)
+2. Opprettar `DataDescriptorBuilder` med unit, sample_type (Float64), og value_range
+3. Sett ny descriptor på signal via `ISignalConfig.set_descriptor()`
+4. Legg til `AmplifierName` som StringProperty per kanal
+
+**Amplifier-namn basert på SIRIUS Sundet-oppsett:**
+- AI 0-3: `SIRIUS-HS-HVv2` (Hi-LV, ±1600V)
+- AI 4-7: `SIRIUS-HS-LVv2` (Lo-LV, ±5V → ±10000A via integrator)
+
+**Filar endra:** `opendaq_bro.py`
+
+---
+
 ## Noverande status (2026-02-24)
 
 ### Fungerer
 - SIRIUS USB-driver med reverse-engineered protokoll
-- EP2 ADC-streaming med 8 kanalar, **20 kHz**, ~317 kB/s
+- EP2 ADC-streaming med 8 kanalar, **20 kHz**, ~312.5 kB/s
 - Start Acquisition-sekvens (34 register + reg 0x02 trigger)
 - 7-strategis EP2 recovery (kommando → dev.reset → uhubctl)
-- openDAQ v3.20.6 kompilert med 6 C++ patchar
+- openDAQ v3.20.6 kompilert med 6 C++ patchar + `-O3 -mcpu=cortex-a76`
 - OPC-UA server (:4840) + NativeStreaming (:7420)
 - mDNS-oppdaging via `add_discovery_server("mdns")`
 - DewesoftX **oppdagar eininga** under "Detected devices" i Setup > Devices
@@ -473,14 +583,14 @@ Alle 4 fasar deploya og testa:
 - Web UI med live status, debug, kanalkonfig
 - MCP-server for Claude-tilgang til alle API-endepunkt
 - macvlan-nettverk med eigen container-IP (192.168.1.161)
-- SSH-server i containeren med DewesoftX-legitimasjon (`root`/`D3W3Soft30112018`)
-- DewesoftRT stub-skript (`platform_control.sh`) for SSH-kommandoar
-- `system.xml` med korrekte `TDSRTSystemProperties`-element-namn
-- `system.ini` med `[Settings]`-seksjon (`DisplayName`, `DeviceBehaviour`)
-- `system_ds.lic` lisensfil (tom — unngår parse-feil)
-- **DewesoftX mottek data** ved Dynamic acquisition rate opptil **20000 Hz** (Setup > Analog in)
+- SSH-server i containeren med DewesoftX-legitimasjon
+- `system.xml`, `system.ini`, `system_ds.lic` for DewesoftRT-emulering
+- **DewesoftX mottek data** ved Dynamic acquisition rate opptil **20000 Hz**
 - `GetPossibleSampleRate` eigenskapen lagt til på device + kanalar
-- Optimalisert hot path: stats 1 Hz, deque, numpy reshape, pre-allokert buffer
+- Optimalisert hot path: stats 1 Hz, deque, numpy reshape, pre-allokert buffer (CPU 8.3%)
+- `CustomRange` sett per kanal (±1600V voltage, ±10000A current)
+- `DeviceLogLevel` / `DeviceLogPath` dummy-eigenskapar (hindrar Access Violation)
+- Signal descriptors med einingar (V/A), physical quantity, amplifier name per kanal
 
 ### 7.6 DewesoftX "Invalid or no data" på kanalar
 
@@ -558,10 +668,11 @@ ved høge ratar, og DewesoftX tolkar timeout/manglande pakkar som ugyldig data.
 
 ## Git-statistikk
 
-- **~111 commits** relatert til openDAQ-integrasjon
+- **~115 commits** relatert til openDAQ-integrasjon
 - **6 C++ kildekode-patchar** på openDAQ SDK
 - **1 SDK-nedgradering** (v3.31 → v3.20.6)
 - **~15 revert-commits** (forsøk som forverra situasjonen)
 - **2 Wireshark pcapng-analysar** (73 657 USB-frames + direkte USB-capture)
 - **1 binæranalyse av DEWEsoft.exe** (95.6 MB, UTF-16LE strengsøk)
 - **1 acquisition rate-optimalisering** (2 kHz → 20 kHz, 4 fasar)
+- **1 signal descriptor-implementering** (einingar, physical quantity, amplifier name)

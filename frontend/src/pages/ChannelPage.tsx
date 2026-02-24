@@ -5,9 +5,10 @@ interface Props {
   index: number
   kanalar: KanalKonfig[]
   liveData: KanalLive | null
+  onBack?: () => void
 }
 
-export default function ChannelPage({ index, kanalar, liveData }: Props) {
+export default function ChannelPage({ index, kanalar, liveData, onBack }: Props) {
   const kanal = kanalar.find(k => k.indeks === index)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sparkBuf = useRef<number[]>([])
@@ -105,6 +106,11 @@ export default function ChannelPage({ index, kanalar, liveData }: Props) {
     <>
       <div className="kort">
         <div className="kanal-detalj-header">
+          {onBack && (
+            <button className="kanal-detalj-tilbake" onClick={onBack}>
+              &#8592; Tilbake
+            </button>
+          )}
           <div className="kanal-detalj-tittel">
             {kanal.namn} — {typeLabel}
             <span className="kanal-eining">{kanal.enhet}</span>
@@ -155,7 +161,7 @@ export default function ChannelPage({ index, kanalar, liveData }: Props) {
       <div className="kort">
         <h2>Innstillingar</h2>
         <div className="kanal-detalj-plassholder">
-          Per-kanal innstillingar kjem snart
+          Per-kanal innstillingar — bruk Innstillingar-sida for å endre kanalkonfigurasjon.
         </div>
       </div>
     </>

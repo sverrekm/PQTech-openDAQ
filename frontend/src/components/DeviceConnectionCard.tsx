@@ -16,7 +16,7 @@ export default function DeviceConnectionCard() {
       const data = await apiGet<{ enheter: Enhet[] }>('/api/enheter')
       setEnheter(data.enheter || [])
     } catch (e) {
-      setMelding({ text: 'Feil ved sok', ok: false })
+      setMelding({ text: 'Feil ved søk', ok: false })
     }
     setSoker(false)
   }
@@ -24,7 +24,7 @@ export default function DeviceConnectionCard() {
   const kobleTil = async (tilkobling?: string) => {
     const t = tilkobling || input.trim()
     if (!t) {
-      setMelding({ text: 'Skriv inn en tilkoblingsstreng', ok: false })
+      setMelding({ text: 'Skriv inn ei tilkoplingsstreng', ok: false })
       return
     }
     setKobler(true)
@@ -54,7 +54,7 @@ export default function DeviceConnectionCard() {
           {kobler ? 'Kobler...' : 'Koble til'}
         </button>
         <button className="btn btn-blaa" disabled={soker} onClick={sokEnheter}>
-          {soker ? 'Soker...' : 'Sok'}
+          {soker ? 'Søkjer...' : 'Søk'}
         </button>
       </div>
       {melding && (
@@ -81,8 +81,8 @@ export default function DeviceConnectionCard() {
         </ul>
       )}
       <p style={{ color: '#6b6b6b', fontSize: '0.8rem', marginTop: '0.75rem' }}>
-        Skriv inn tilkoblingsstreng eller klikk Sok for aa finne enheter paa nettverket.
-        Eksempler: <code style={{ color: '#B85420' }}>daq.opcua://IP</code>,{' '}
+        Skriv inn tilkoplingsstreng eller klikk Søk for å finne einingar på nettverket.
+        Eksempel: <code style={{ color: '#B85420' }}>daq.opcua://IP</code>,{' '}
         <code style={{ color: '#B85420' }}>daq.ns://IP</code>,{' '}
         <code style={{ color: '#B85420' }}>daqref://device0</code>
       </p>

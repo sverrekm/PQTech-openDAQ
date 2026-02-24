@@ -32,7 +32,7 @@ export default function DebugConsoleCard() {
     <div className="kort">
       <h2>Debug-konsoll</h2>
       <p style={{ color: '#6b6b6b', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
-        Send raa USB hex-kommandoar til SIRIUS.
+        Send rå USB hex-kommandoar til SIRIUS.
       </p>
       <div className="debug-input-row">
         <input

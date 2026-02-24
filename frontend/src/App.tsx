@@ -32,7 +32,7 @@ export default function App() {
   } else if (view.page === 'settings') {
     content = <SettingsPage />
   } else {
-    content = <ChannelPage index={view.index} kanalar={kanalar ?? []} liveData={liveData} />
+    content = <ChannelPage index={view.index} kanalar={kanalar ?? []} liveData={liveData} onBack={() => setView({ page: 'dashboard' })} />
   }
 
   return (

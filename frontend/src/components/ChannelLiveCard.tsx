@@ -19,13 +19,13 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
     const drv = live?.driver?.[key] as { siste?: number | null; antall?: number } | undefined
 
     if (odaq && odaq.kjelde === 'sirius' && odaq.siste !== undefined) {
-      return { value: odaq.siste, source: 'S', color: '#10b981' }
+      return { value: odaq.siste, source: 'Sirius', color: '#10b981' }
     }
     if (drv && drv.siste !== null && drv.siste !== undefined) {
-      return { value: drv.siste, source: 'D', color: '#3b82f6' }
+      return { value: drv.siste, source: 'USB', color: '#3b82f6' }
     }
     if (odaq && odaq.siste !== undefined) {
-      return { value: odaq.siste, source: '~', color: '#D76428' }
+      return { value: odaq.siste, source: 'Sim', color: '#D76428' }
     }
     return null
   }
@@ -40,8 +40,8 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
             <th>Namn</th>
             <th style={{ width: 55 }}>Eining</th>
             <th style={{ width: 45 }}>Aktiv</th>
-            <th style={{ width: 80 }}>Verdi</th>
-            <th style={{ width: 80 }}>Spark</th>
+            <th style={{ width: 100 }}>Verdi</th>
+            <th style={{ width: 80 }}>Trend</th>
           </tr>
         </thead>
         <tbody>
@@ -73,7 +73,12 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
                   </span>
                 </td>
                 <td className="kanal-live" style={{ color: cv?.color || '#6b6b6b' }}>
-                  {cv ? `${cv.value} ${cv.source}` : '-'}
+                  {cv ? (
+                    <>
+                      {typeof cv.value === 'number' ? cv.value.toFixed(2) : cv.value}
+                      <span style={{ fontSize: '0.65rem', opacity: 0.7, marginLeft: 3 }}>{cv.source}</span>
+                    </>
+                  ) : '-'}
                 </td>
                 <td>
                   <SparklineChart data={[...sparkArr]} />

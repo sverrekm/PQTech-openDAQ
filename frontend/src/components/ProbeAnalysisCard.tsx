@@ -52,7 +52,7 @@ export default function ProbeAnalysisCard() {
           Fang DewesoftX-trafikk (15s)
         </button>
         <span style={{ color: '#B85420', fontSize: '0.8rem' }}>
-          Passiv fangst via usbmon — forstyrrer IKKE USB/IP eller DewesoftX.
+          Passiv fangst via usbmon — forstyrrar IKKJE USB/IP eller DewesoftX.
         </span>
       </div>
 
@@ -61,8 +61,8 @@ export default function ProbeAnalysisCard() {
           Direkte USB-tester (stopper USB/IP-deling!)
         </summary>
         <p style={{ color: '#991b1b', fontSize: '0.8rem', margin: '0.5rem 0' }}>
-          Disse verktoyene tar kontroll over SIRIUS USB og avbryter USB/IP.
-          DewesoftX mister tilkoblingen. Bruk kun naar USB/IP er stoppet.
+          Desse verktøya tek kontroll over SIRIUS USB og avbryt USB/IP.
+          DewesoftX mistar tilkoplinga. Bruk berre når USB/IP er stoppa.
         </p>
         <div className="usbip-knapper">
           <button className="btn btn-blaa" disabled={running} onClick={() => run('probe', kjorProbe)}>
@@ -95,11 +95,11 @@ export default function ProbeAnalysisCard() {
 
       {statusMsg && (
         <div className={`melding ${status === 'error' ? 'melding-feil' : 'melding-ok'}`}>
-          {status === 'done' ? 'Fullfort' : status === 'error' ? 'Feil' : statusMsg}
+          {status === 'done' ? 'Fullført' : status === 'error' ? 'Feil' : statusMsg}
         </div>
       )}
 
-      <OutputTerminal text={running ? `Kjorer...\n${output}` : output} />
+      <OutputTerminal text={running ? `Køyrer...\n${output}` : output} />
 
       <ReportList />
     </div>

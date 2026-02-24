@@ -96,6 +96,12 @@ A5_SET_MODE = 0x02      # Sett modus
 A5_READ_STRING = 0x03   # Les streng/data
 A5_SET_CONFIG = 0x06    # Utvidet konfigurasjon
 
+# --- Excitation (forsterkar-spenning) register ---
+# Fraa DewesoftX pcapng-analyse: Lo-LV slotter brukar desse for integrator-spenning
+REG_EXC_ENABLE = 0xC3   # Excitation ON:  A5 02 C3 01
+REG_EXC_VOLT = 0xBC     # Voltage level:  A5 02 BC 04 (04 = 5V unipolar)
+REG_EXC_OFF = 0xC9      # Excitation OFF: A5 02 C9 00
+
 # --- Magiske verdiar ---
 WRITE_KEY = 0x5A                        # Skrivelaasnoekkelen
 TRIGGER_DATA = bytes([0x5A, 0x00, 0x00])  # Trigger-verdi for lese-registre

@@ -30,13 +30,13 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData }: Props) 
           className={`sidebar-nav-item ${view.page === 'dashboard' ? 'active' : ''}`}
           onClick={() => onNavigate({ page: 'dashboard' })}
         >
-          Dashboard
+          Oversikt
         </div>
         <div
           className={`sidebar-nav-item ${view.page === 'settings' ? 'active' : ''}`}
           onClick={() => onNavigate({ page: 'settings' })}
         >
-          Settings
+          Innstillingar
         </div>
       </div>
 

@@ -43,18 +43,18 @@ export default function UsbIpCard({ ip }: Props) {
 
   return (
     <div className="kort">
-      <h2>USB/IP — DEL SIRIUS</h2>
+      <h2>USB/IP — Del SIRIUS</h2>
       <div className="usbip-status-rad">
         <span className={`dot ${u.deling_aktiv ? 'dot-gronn' : 'dot-rod'}`} />
         <span>
           {u.deling_aktiv
-            ? 'Deling aktiv paa port 3240'
-            : u.tilgjengelig ? 'Klar' : 'USB/IP utilgjengelig'}
+            ? 'Deling aktiv på port 3240'
+            : u.tilgjengelig ? 'Klar' : 'USB/IP utilgjengeleg'}
         </span>
       </div>
       <InfoGrid items={[
         {
-          label: 'SIRIUS paa USB',
+          label: 'SIRIUS på USB',
           value: u.sirius_paa_usb ? (u.sirius_enhet_funnet || 'Ja') : 'Nei',
           color: u.sirius_paa_usb ? '#10b981' : '#ef4444',
         },
@@ -86,7 +86,7 @@ export default function UsbIpCard({ ip }: Props) {
       </div>
       {u.deling_aktiv && (
         <div className="usbip-instruksjoner">
-          <h3>Paa Windows-PC</h3>
+          <h3>På Windows-PC</h3>
           <ol>
             <li>
               Installer{' '}
@@ -94,7 +94,7 @@ export default function UsbIpCard({ ip }: Props) {
                 usbip-win2
               </a>
             </li>
-            <li>Apne PowerShell som Administrator</li>
+            <li>Opne PowerShell som Administrator</li>
             <li>
               List enheter:
               <CopyableCommand text={`usbip list -r ${ip}`} style={{ marginTop: '0.35rem' }} />
@@ -106,7 +106,7 @@ export default function UsbIpCard({ ip }: Props) {
                 style={{ marginTop: '0.35rem' }}
               />
             </li>
-            <li>Apne DewesoftX — SIRIUS vises som lokal USB-enhet</li>
+            <li>Opne DewesoftX — SIRIUS visest som lokal USB-eining</li>
           </ol>
         </div>
       )}

@@ -34,12 +34,12 @@ export default function SiriusStatusCard() {
         },
         { label: 'Serienummer', value: s.serienummer || '-' },
         {
-          label: 'Streaming',
+          label: 'Datastraum',
           value: s.streamer ? 'Aktiv' : 'Inaktiv',
           color: s.streamer ? '#10b981' : '#6b6b6b',
         },
         {
-          label: 'Daterate',
+          label: 'Datarate',
           value: s.data_rate_kbs && s.data_rate_kbs > 0
             ? `${s.data_rate_kbs.toFixed(1)} KB/s`
             : '-',
@@ -60,12 +60,12 @@ export default function SiriusStatusCard() {
       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
         {!s.streamer && (
           <button className="btn btn-gronn" disabled={busy} onClick={() => action(siriusStart)}>
-            Start streaming
+            Start
           </button>
         )}
         {s.streamer && (
           <button className="btn btn-rod" disabled={busy} onClick={() => action(siriusStopp)}>
-            Stopp streaming
+            Stopp
           </button>
         )}
         <button className="btn btn-blaa" disabled={busy} onClick={() => action(siriusRekoble)}>

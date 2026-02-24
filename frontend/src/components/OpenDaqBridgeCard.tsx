@@ -116,12 +116,12 @@ export default function OpenDaqBridgeCard() {
         <>
           <CopyableCommand text={s.ip} />
           <p style={{ color: '#6b6b6b', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-            DewesoftX: Settings &gt; Devices &gt; Dewesoft NET &gt; Manually add &gt; skriv inn adressa over.
+            Eininga dukkar automatisk opp som "Detected device" i DewesoftX Setup &gt; Devices.
           </p>
         </>
       )}
       <div style={{ marginTop: '0.75rem' }}>
-        <button className="btn btn-blaa" onClick={handleRestart}>Restart bridge</button>
+        <button className="btn btn-blaa" onClick={handleRestart}>Start på nytt</button>
         {restartMsg && (
           <span style={{
             fontSize: '0.8rem',

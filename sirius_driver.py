@@ -46,6 +46,7 @@ from sirius_protokoll_impl import (
     ADC_KANALER,
     SiriusFeil, SiriusUSBFeil, SiriusPollTimeout, SiriusIkkeFunnet,
     TIMEOUT_DATA,
+    REG_EXC_ENABLE, REG_EXC_VOLT, REG_EXC_OFF,
 )
 
 log = logging.getLogger('sirius_driver')
@@ -1238,6 +1239,48 @@ class SiriusDriver:
             log.error(f"Rekonnektering feilet ({self._rekoble_forsok}/{self._maks_rekoble}): {e}")
             return False
 
+    # ---- Excitation voltage (integrator-spenning for Lo-LV slotter) ----
+
+    def _sett_excitation(self):
+        """
+        Sett excitation-spenning for Lo-LV slotter (slot 4-6).
+
+        Rogowski-spoler og andre integrator-baserte sensorar treng 5V unipolar
+        excitation fraa SIRIUS-forsterkaren. DewesoftX set dette automatisk
+        ved kanaloppsett — vi repliserer kommandosekvensen fraa pcapng-analyse.
+
+        Kommandoar (per slot):
+          ON:  A5 02 C3 01 (enable) → commit → A5 02 BC 04 (5V) → commit
+          OFF: A5 02 C9 00 (disable) → commit
+        """
+        proto = self._proto
+
+        # Les kanal-konfig for å finne kva slotter som treng excitation
+        try:
+            from kanal_konfig import les_konfig
+            konfig = les_konfig()
+        except Exception as e:
+            log.warning(f"Kunne ikkje lese kanal-konfig for excitation: {e}")
+            return
+
+        for kk in konfig:
+            slot = kk.indeks
+            if slot > 7:
+                continue  # Berre fysiske ADC-slotter
+
+            if kk.sensor_aktiv:
+                # Enable 5V unipolar excitation
+                try:
+                    proto.a5_set_mode(slot, REG_EXC_ENABLE, 0x01)
+                    proto.commit(slot)
+                    proto.a5_set_mode(slot, REG_EXC_VOLT, 0x04)  # 0x04 = 5V
+                    proto.commit(slot)
+                    log.info(f"  Slot {slot} ({kk.namn}): excitation 5V ON")
+                except (SiriusPollTimeout, SiriusUSBFeil) as e:
+                    log.warning(f"  Slot {slot} excitation feil: {e}")
+
+        log.info("Excitation-oppsett fullfoert")
+
     # ---- Start Acquisition (fraa Wireshark pcapng-analyse) ----
 
     def _start_acquisition(self):
@@ -1269,6 +1312,9 @@ class SiriusDriver:
         # Steg 2: AC (hent slot-typar)
         log.info("  AC (slot-typar)")
         proto.hent_slot_typer()
+
+        # Steg 2b: Sett excitation-spenning for Lo-LV slotter
+        self._sett_excitation()
 
         # Steg 3-34: Globale register-skrivingar
         # Eksakte verdiar fraa DewesoftX sirius2.pcapng
