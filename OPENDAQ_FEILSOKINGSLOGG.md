@@ -446,7 +446,15 @@ Fase 1+2+4 (Python-filer)    ← docker cp + restart, inga rebuild
 Fase 3 (kompilatorflagg)     ← Krev full Docker rebuild
 ```
 
-**Commit:** `d5fb650`
+**Commits:** `d5fb650`, `c1f033b`
+
+### 8.7 Verifisert (2026-02-24)
+
+Alle 4 fasar deploya og testa:
+- **DewesoftX mottek data ved 20000 Hz Dynamic acquisition rate** ✅
+- Docker rebuild med `-O3 -mcpu=cortex-a76` fullført ✅
+- CPU-bruk: **8.3%** (ned frå ~25-30% estimert) ✅
+- Pakett-injeksjon: 8 kanalar, delta=50 ticks/sample ✅
 
 ---
 
@@ -532,8 +540,6 @@ ved høge ratar, og DewesoftX tolkar timeout/manglande pakkar som ugyldig data.
 **Commits:** `e85a276`, `482c14c`, `2bbf915`, `716277b`
 
 ### Uløyst / neste steg
-- Deploy Fase 3 (Dockerfile rebuild med `-O3 -mcpu=cortex-a76`) for ~10-15% C++ yting
-- Verifisere at DewesoftX godtek 20000 Hz Dynamic acquisition rate etter deploy
 - Lisens-formatet er ukjent (komprimert binær) — tom fil er workaround
 - openDAQ bridge startar ikkje automatisk (port-kollisjon eller import-feil)
 
