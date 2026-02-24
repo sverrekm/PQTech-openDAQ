@@ -34,21 +34,23 @@ Implementerte USB/IP slik at SIRIUS kan delast mellom Pi og Windows. Bytta frå 
 
 ## Fase 2: DewesoftX-oppdaging og tilkobling
 
-### 2.1 "Dewesoft NET" — feil protokoll
+### 2.1 "Dewesoft NET" — feil protokoll (tidleg misforståing)
 
-**Symptom:** DewesoftX "Connect Failed" via "Dewesoft NET"-menyen.
-**Årsak:** "Dewesoft NET" brukar Telnet+TCP, ikkje openDAQ.
-**Løysing:** Bruk openDAQ-oppdaging i HW Settings (ikkje "Dewesoft NET").
+**Symptom:** DewesoftX "Connect Failed" ved manuell tilkopling via "Dewesoft NET".
+**Årsak:** "Dewesoft NET" brukar Telnet+TCP, ikkje openDAQ. openDAQ-einingar dukkar
+automatisk opp som **Detected devices** i HW Settings når mDNS-annonsering fungerer —
+ein treng ikkje leggje til adressa manuelt.
+**Lærdom:** openDAQ-einingar skal oppdagast automatisk, ikkje via "Dewesoft NET".
 
 ### 2.2 Ingen mDNS-annonsering
 
-**Symptom:** DewesoftX finn ikkje eininga i openDAQ-oppdaging.
+**Symptom:** DewesoftX viser ikkje eininga under "Detected devices" i Setup > Devices.
 **Årsak:** openDAQ-modulane inkluderte ikkje mDNS-teneste.
 **Løysing:** Avahi service-fil på Pi-hosten (`/etc/avahi/services/opendaq.service`). Seinare erstatta med `builder.add_discovery_server("mdns")` og `server.enable_discovery()` (`a502139`).
 
 ### 2.3 OPC-UA endpoint annonserer 127.0.0.1
 
-**Symptom:** DewesoftX finn eininga via mDNS men kan ikkje koble til.
+**Symptom:** Eininga dukkar opp under "Detected devices", men DewesoftX kan ikkje koble til.
 **Årsak:** Docker mapper hostname til `127.0.1.1` i `/etc/hosts` → open62541 brukar `gethostname()` → endpoint-URL vert `opc.tcp://127.0.0.1:4840/`.
 **Løysing:** Skriv om `/etc/hosts` i `docker-entrypoint.sh` med riktig IP (`127e68f`).
 
@@ -139,7 +141,7 @@ Implementerte USB/IP slik at SIRIUS kan delast mellom Pi og Windows. Bytta frå 
 
 ### 4.1 openDAQ v3.30/v3.31 vs DewesoftX 2025.3
 
-**Symptom:** DewesoftX oppdagar eininga, koplar til, men vert vist som "Disconnected" i HW Settings. Ingen feilmeldingar i log.
+**Symptom:** Eininga dukkar opp under "Detected devices" i Setup, men vert vist som "Disconnected" etter tilkopling. Ingen feilmeldingar i log.
 
 **Rotårsak oppdaga via GitHub Issue #1047:** DewesoftX 2025.3 brukar openDAQ ~v3.20.x internt. Server v3.30+ er **ikkje bakoverkompatibel**.
 
@@ -361,17 +363,104 @@ OPC-UA-serveren annonserer same serial via C++ patch.
 
 ---
 
-## Noverande status (2026-02-23)
+## Fase 8: Optimaliser data acquisition rate — 2 kHz → 20 kHz (2026-02-24)
+
+### 8.1 Rotårsak: Sample rate mismatch (20× feil)
+
+**Symptom:** DewesoftX Dynamic acquisition rate avgrensa til ≤2000 Hz. Over dette
+viser alle kanalar "Invalid or no data".
+
+**Rotårsak:** openDAQ-brua rapporterte 1 kHz sample rate til DewesoftX medan
+SIRIUS-maskinvara leverer data ved 20 kHz (hardkoda i start-acquisition register 0x4E20).
+DewesoftX tolka dei ekstra samplene som ugyldig data ved høge ratar.
+
+Mismatch-en fanst på fire stader:
+
+| Stad | Var | Korrekt |
+|------|-----|---------|
+| `opendaq_bro.py:76` — `_tick_delta` | 1000 (= 1 kHz) | 50 (= 20 kHz) |
+| `opendaq_bro.py:784` — `GlobalSampleRate` | 1000.0 | 20000.0 |
+| `docker-compose.yml:48` — `SAMPLE_RATE` env | 1000 | 20000 |
+| `sirius_driver.py:179` — `MaaleKonfig` default | 1000 | 20000 |
+
+### 8.2 Fase 1: Fiks sample rate (STØRST EFFEKT)
+
+**Endringar (berre Python-filer, inga rebuild):**
+- `opendaq_bro.py`: `_tick_delta = 50`, `GlobalSampleRate` les `SAMPLE_RATE` env (default 20000)
+- `docker-compose.yml`: `SAMPLE_RATE=20000`
+- `sirius_driver.py`: `MaaleKonfig.sample_rate` default 20000
+- `kanal_konfig.py`: Alle 9 STANDARD_KONFIG entries 1000→20000, `KONFIG_VERSJON` 6→7
+
+**Forventa effekt:** Acquisition rate: 2000 → **20000 Hz**
+
+### 8.3 Fase 2: Optimaliser hot path (CPU-reduksjon)
+
+Reduserer Python-overhead i `oppdater_data()` slik at Pi 5 held tritt med 20 kHz.
+
+**2A: Stats berre for web UI — reduser frekvens**
+`opendaq_bro.py:556-571` — Statistikk (snitt, RMS, topp) brukast berre av web UI
+som pollar kvart 2. sekund. Bereknar stats kvar 20. pakke (~1 Hz) i staden for kvar pakke.
+Eliminerer 19/20 av float64-allokeringar og 3-pass statistikkberekningar.
+
+**2B: Raskare deinterleave med numpy reshape**
+`sirius_driver.py:1734-1756` — Erstatta per-kanal slice-loop med `interlev.reshape(n_frames, antall_kanaler).T`.
+
+**2C: deque i staden for list.pop(0)**
+`sirius_driver.py:207,1600-1603` — `list.pop(0)` er O(n). Bytta til `collections.deque(maxlen=1000)` for O(1) eviction.
+
+**2D: Unngå sorted() i hot loop**
+`opendaq_bro.py:545` — `sorted(kanal_data.items())` sorterte dict kvar pakke. Bytta til fast klasse-nivå indeks-liste `_KANAL_KEYS = ["kanal_0", ..., "kanal_7"]`.
+
+**Forventa effekt:** CPU: **-30 til -50%**
+
+### 8.4 Fase 3: Kompilatorflagg og Docker-ressursar
+
+Krev Docker image rebuild (~30-60 min på Pi 5).
+
+**3A: Arkitektur-spesifikke kompilatorflagg**
+`Dockerfile:571` — La til `-O3 -mcpu=cortex-a76` for både CXX og C flags.
+Pi 5 sin eksakte CPU-kjerne → aktiverer NEON SIMD og aggressiv vektorisering.
+
+**3B: Auk minne frå 512M til 1G**
+`docker-compose.yml:65` — Ved 20 kHz med 8 kanalar: ~350 MB typisk, spikes til ~500 MB.
+512 MB ga nesten ikkje margin. Pi 5 har 8 GB totalt.
+
+**3C: Auk byggeparallellisme**
+`docker-compose.yml:6` — `PARALLELLE_JOBBER: 2` → `4`. Berre for raskare bygg.
+
+**Forventa effekt:** C++: **-10 til -15%**, ingen OOM
+
+### 8.5 Fase 4: Pre-allokerte buffers
+
+**4A: Pre-allokert float64-buffer**
+`opendaq_bro.py` — `np.empty(992, dtype=np.float64)` for gjenbruk i `oppdater_data()`
+med `np.multiply(..., out=)` i staden for ny allokering per kanal per pakke.
+
+**Forventa effekt:** Marginalt: **-5 til -10% GC**
+
+### 8.6 Deployment-rekkefølge
+
+```
+Fase 1+2+4 (Python-filer)    ← docker cp + restart, inga rebuild
+   ↓ test med DewesoftX
+Fase 3 (kompilatorflagg)     ← Krev full Docker rebuild
+```
+
+**Commit:** `d5fb650`
+
+---
+
+## Noverande status (2026-02-24)
 
 ### Fungerer
 - SIRIUS USB-driver med reverse-engineered protokoll
-- EP2 ADC-streaming med 8 kanalar, 1000 Hz, 312.5 kB/s
+- EP2 ADC-streaming med 8 kanalar, **20 kHz**, ~317 kB/s
 - Start Acquisition-sekvens (34 register + reg 0x02 trigger)
 - 7-strategis EP2 recovery (kommando → dev.reset → uhubctl)
 - openDAQ v3.20.6 kompilert med 6 C++ patchar
 - OPC-UA server (:4840) + NativeStreaming (:7420)
 - mDNS-oppdaging via `add_discovery_server("mdns")`
-- DewesoftX **oppdagar og koplar til eininga** i HW Settings
+- DewesoftX **oppdagar eininga** under "Detected devices" i Setup > Devices
 - DataPacket-injeksjon av reelle SIRIUS-data
 - Web UI med live status, debug, kanalkonfig
 - MCP-server for Claude-tilgang til alle API-endepunkt
@@ -380,7 +469,10 @@ OPC-UA-serveren annonserer same serial via C++ patch.
 - DewesoftRT stub-skript (`platform_control.sh`) for SSH-kommandoar
 - `system.xml` med korrekte `TDSRTSystemProperties`-element-namn
 - `system.ini` med `[Settings]`-seksjon (`DisplayName`, `DeviceBehaviour`)
-- `system_ds.lic` lisensfil
+- `system_ds.lic` lisensfil (tom — unngår parse-feil)
+- **DewesoftX mottek data** ved Dynamic acquisition rate opptil **20000 Hz** (Setup > Analog in)
+- `GetPossibleSampleRate` eigenskapen lagt til på device + kanalar
+- Optimalisert hot path: stats 1 Hz, deque, numpy reshape, pre-allokert buffer
 
 ### 7.6 DewesoftX "Invalid or no data" på kanalar
 
@@ -395,23 +487,53 @@ OPC-UA-serveren annonserer same serial via C++ patch.
 **Analyse — GetPossibleSampleRate:**
 Binæranalyse av DEWEsoft.exe viser at `TDSOpenDaqAI.CalcADCSampleRate` spør etter
 eigenskapen `GetPossibleSampleRate` på openDAQ-kanalane. RefDevice har ikkje denne
-eigenskapen → 0x80000006 ("property does not exist") → DewesoftX kan ikkje konfigurere
-sample rate → kanalane viser "Invalid or no data".
+eigenskapen → 0x80000006 ("property does not exist").
+
+**Fix 1 — Legg til GetPossibleSampleRate:**
+La til `_legg_til_sample_rate_eigenskap()` i `opendaq_bro.py` som legg til
+`GetPossibleSampleRate` som `FloatProperty` (200000.0 Hz) på device + kvar kanal.
+Fleire property-typar vart prøvd: ListProperty → 0x80004002, IntProperty → 0x80004002,
+FloatProperty → 0x80004002. DewesoftX godtek ikkje grensesnittet uansett type —
+men `FloatProperty` eliminerte den opprinnelege 0x80000006-feilen.
 
 **Analyse — Lisens-feil:**
 Ekte Dewesoft-lisens (`system_ds.lic`) er komprimert/kryptert binær, ikkje plain XML.
 `GetUncompressedLicense` prøver å dekomprimere vår XML og får søppel-output.
 Lisensfeilmelding er truleg berre ei åtvaring, ikkje årsak til "Invalid or no data".
 
-**Løysing:**
-1. Legg til `GetPossibleSampleRate` som `ListProperty` på device + kvar kanal i
-   `opendaq_bro.py` med SIRIUSi-HS sample rates (200–200000 Hz).
-2. Gjer `system_ds.lic` tom (0 bytes) for å unngå parse-feil.
+**Fix 2 — Tom lisensfil:**
+Gjer `system_ds.lic` tom (0 bytes) i `docker-entrypoint.sh` for å unngå parse-feil.
 
-**Filar endra:** `opendaq_bro.py`, `docker-entrypoint.sh`
+**Analyse — OPC-UA DataType incompatible (namespace 7):**
+Container-loggar viste ~90 "DataType incompatible"-åtvaringar frå open62541 ved oppstart.
+Alle kanal-eigenskapar (Frequency, DC, Amplitude, SampleRate, PacketSize osv.) feila.
+Rotårsak: Patch 6 sin `coerceVariantToNodeType()` handterte berre DataTypes i
+namespace 0 (standard OPC-UA). openDAQ TMS registrerer eigendefinerte typar i namespace 7
+— desse vart ignorerte (early return `false`).
+
+**Fix 3 — findRegisteredDataType() i Patch 6:**
+Oppdatert Patch 6 i Dockerfile med ny funksjon `findRegisteredDataType()` som søkjer
+gjennom `UA_ServerConfig.customDataTypes`-registeret for typar i ikkje-standard
+namespaces. Krev Docker image rebuild (C++ rekompilering). Commit `716277b`.
+
+**Test — Innebygd datagenerering:**
+Testa med `OPENDAQ_DISABLE_ACQ` deaktivert (RefDevice genererer sinusbølger).
+Framleis "Invalid or no data" → stadfesta at problemet er i OPC-UA-konfigurasjonen,
+ikkje i data-injeksjonen.
+
+**LØYSING — Dynamic acquisition rate:**
+Problemet viste seg å vere knytt til **Dynamic acquisition rate** i DewesoftX
+(Setup > Analog in). Med standard (høg) rate viste alle kanalar "Invalid or no data".
+Ved å sette **Dynamic acquisition rate til 2000 Hz**, byrja data å kome gjennom.
+Truleg årsak: openDAQ-serveren (eller RefDevice) klarar ikkje å levere data raskt nok
+ved høge ratar, og DewesoftX tolkar timeout/manglande pakkar som ugyldig data.
+
+**Filar endra:** `opendaq_bro.py`, `docker-entrypoint.sh`, `Dockerfile` (Patch 6)
+**Commits:** `e85a276`, `482c14c`, `2bbf915`, `716277b`
 
 ### Uløyst / neste steg
-- **Verifisere at GetPossibleSampleRate fiksar "Invalid or no data"**
+- Deploy Fase 3 (Dockerfile rebuild med `-O3 -mcpu=cortex-a76`) for ~10-15% C++ yting
+- Verifisere at DewesoftX godtek 20000 Hz Dynamic acquisition rate etter deploy
 - Lisens-formatet er ukjent (komprimert binær) — tom fil er workaround
 - openDAQ bridge startar ikkje automatisk (port-kollisjon eller import-feil)
 
@@ -430,9 +552,10 @@ Lisensfeilmelding er truleg berre ei åtvaring, ikkje årsak til "Invalid or no 
 
 ## Git-statistikk
 
-- **~110 commits** relatert til openDAQ-integrasjon
+- **~111 commits** relatert til openDAQ-integrasjon
 - **6 C++ kildekode-patchar** på openDAQ SDK
 - **1 SDK-nedgradering** (v3.31 → v3.20.6)
 - **~15 revert-commits** (forsøk som forverra situasjonen)
 - **2 Wireshark pcapng-analysar** (73 657 USB-frames + direkte USB-capture)
 - **1 binæranalyse av DEWEsoft.exe** (95.6 MB, UTF-16LE strengsøk)
+- **1 acquisition rate-optimalisering** (2 kHz → 20 kHz, 4 fasar)
