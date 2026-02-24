@@ -34,6 +34,14 @@ class KanalKonfig:
     range_max: float     # 10.0
     enhet: str           # "V", "A", "m/s2"
     sample_rate: int     # 1000 (Hz)
+    # Sensor-skalering (to-punkt lineær)
+    sensor_aktiv: bool = False
+    sensor_namn: str = ""              # "Rogowski 6kA", "CT 1000A", etc.
+    sensor_inn_1: float = 0.0          # Input punkt 1 (V frå forsterkar)
+    sensor_ut_1: float = 0.0           # Output punkt 1 (A/fysisk eining)
+    sensor_inn_2: float = 1.0          # Input punkt 2 (V)
+    sensor_ut_2: float = 1.0           # Output punkt 2 (A)
+    sensor_enhet: str = ""             # Output-eining ("A", "kN", etc.)
 
     def til_dict(self) -> dict:
         return asdict(self)
@@ -49,12 +57,19 @@ class KanalKonfig:
             range_max=float(d.get("range_max", 10.0)),
             enhet=str(d.get("enhet", "V")),
             sample_rate=int(d.get("sample_rate", 20000)),
+            sensor_aktiv=bool(d.get("sensor_aktiv", False)),
+            sensor_namn=str(d.get("sensor_namn", "")),
+            sensor_inn_1=float(d.get("sensor_inn_1", 0.0)),
+            sensor_ut_1=float(d.get("sensor_ut_1", 0.0)),
+            sensor_inn_2=float(d.get("sensor_inn_2", 1.0)),
+            sensor_ut_2=float(d.get("sensor_ut_2", 1.0)),
+            sensor_enhet=str(d.get("sensor_enhet", "")),
         )
 
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 7  # v7: Sample rate 1000→20000 Hz (matchar SIRIUS hardware)
+KONFIG_VERSJON = 8  # v8: Konfigurerbar sensor-skalering per kanal
 
 # Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
 #
@@ -74,10 +89,19 @@ STANDARD_KONFIG: List[KanalKonfig] = [
     KanalKonfig(1, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 20000),
     KanalKonfig(2, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 20000),
     KanalKonfig(3, "AI 3", False, "voltage", -1600.0, 1600.0, "V", 20000),
-    KanalKonfig(4, "AI 4", True,  "current", -10000.0, 10000.0, "A", 20000),
-    KanalKonfig(5, "AI 5", True,  "current", -10000.0, 10000.0, "A", 20000),
-    KanalKonfig(6, "AI 6", True,  "current", -10000.0, 10000.0, "A", 20000),
-    KanalKonfig(7, "AI 7", False, "current", -10000.0, 10000.0, "A", 20000),
+    KanalKonfig(4, "AI 4", True,  "current", -5.0, 5.0, "V", 20000,
+                sensor_aktiv=True, sensor_namn="Rogowski 6kA",
+                sensor_inn_1=0.0, sensor_ut_1=0.0,
+                sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A"),
+    KanalKonfig(5, "AI 5", True,  "current", -5.0, 5.0, "V", 20000,
+                sensor_aktiv=True, sensor_namn="Rogowski 6kA",
+                sensor_inn_1=0.0, sensor_ut_1=0.0,
+                sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A"),
+    KanalKonfig(6, "AI 6", True,  "current", -5.0, 5.0, "V", 20000,
+                sensor_aktiv=True, sensor_namn="Rogowski 6kA",
+                sensor_inn_1=0.0, sensor_ut_1=0.0,
+                sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A"),
+    KanalKonfig(7, "AI 7", False, "current", -5.0, 5.0, "V", 20000),
     KanalKonfig(8, "Tid",  True,  "generic", 0.0, 3600.0, "s", 20000),
 ]
 
@@ -180,6 +204,23 @@ def valider_konfig(data: list) -> tuple:
             return None, f"Kanal {i}: ugyldig sample_rate"
         if sr < 1 or sr > 200000:
             return None, f"Kanal {i}: sample_rate {sr} utanfor gyldig omraade (1-200000)"
+
+        # Valider sensor-felt
+        sensor_aktiv = d.get("sensor_aktiv", False)
+        if not isinstance(sensor_aktiv, bool):
+            return None, f"Kanal {i}: sensor_aktiv maa vere bool"
+        if sensor_aktiv:
+            try:
+                s_inn_1 = float(d.get("sensor_inn_1", 0.0))
+                s_inn_2 = float(d.get("sensor_inn_2", 1.0))
+            except (TypeError, ValueError):
+                return None, f"Kanal {i}: ugyldige sensor_inn-verdiar"
+            if s_inn_2 == s_inn_1:
+                return None, (f"Kanal {i}: sensor_inn_2 ({s_inn_2}) kan ikkje "
+                              f"vere lik sensor_inn_1 ({s_inn_1})")
+        sensor_enhet = d.get("sensor_enhet", "")
+        if not isinstance(sensor_enhet, str):
+            return None, f"Kanal {i}: sensor_enhet maa vere streng"
 
         d["indeks"] = i
         konfig.append(KanalKonfig.fraa_dict(d))

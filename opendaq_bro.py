@@ -62,6 +62,7 @@ class OpenDAQBro:
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
         self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
+        self._kanal_offset = []     # Offset per kanal (for sensor-skalering)
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
@@ -163,6 +164,10 @@ class OpenDAQBro:
             # viser "Invalid or no data". Legg til på device og kvar kanal.
             self._legg_til_sample_rate_eigenskap()
 
+            # Legg til eigenskapar DewesoftX si settings-side forventer
+            # (hindrar Access Violation i TOpenDAQFrame.Initialize)
+            self._legg_til_dewesoftx_eigenskapar()
+
             # Fiks nil string-eigenskapar som krasjar DewesoftX
             self._fiks_alle_nil_strings()
 
@@ -219,6 +224,9 @@ class OpenDAQBro:
 
             # Initialiser DataPacket-injeksjon for reelle SIRIUS-data
             self._init_pakett_injeksjon()
+
+            # Sett signal descriptors med einingar og metadata (Nivå 1)
+            self._sett_signal_descriptors()
 
             # List kanalar og sjekk domain-signal (nil → DewesoftX krasj)
             kanalar = []
@@ -562,6 +570,8 @@ class OpenDAQBro:
                 # Skaler int16 ADC-verdiar til fysiske einingar (V/A)
                 skala = (self._kanal_skala[kanal_idx]
                          if kanal_idx < len(self._kanal_skala) else 1.0)
+                offset = (self._kanal_offset[kanal_idx]
+                          if kanal_idx < len(self._kanal_offset) else 0.0)
                 # Gjenbruk pre-allokert buffer viss storleiken matchar
                 n = len(data)
                 if n <= len(self._fdata_buf):
@@ -569,6 +579,8 @@ class OpenDAQBro:
                     np.multiply(data, skala, out=fdata, casting='unsafe')
                 else:
                     fdata = data.astype(np.float64) * skala
+                if offset != 0.0:
+                    fdata += offset
 
                 # Berekn statistikk for web UI (kvar 20. pakke = ~1 Hz)
                 if berekn_stats:
@@ -580,7 +592,7 @@ class OpenDAQBro:
                         "snitt": round(snitt, 4),
                         "rms": round(rms, 4),
                         "topp": round(topp, 4),
-                        "siste": round(float(data[-1]) * skala, 4),
+                        "siste": round(float(data[-1]) * skala + offset, 4),
                         "antall": len(data),
                         "kjelde": "sirius",
                     }
@@ -733,6 +745,7 @@ class OpenDAQBro:
         # Rekkefølge er kritisk: barnereferansar fyrst, deretter foreldre.
         self._kanal_signal = []   # Kanal/signal-referansar
         self._kanal_skala = []
+        self._kanal_offset = []
         self._siste_verdiar = {}
         self._dom_signal = []     # DataPacket-injeksjon referansar
         self._dom_desc = []
@@ -761,17 +774,17 @@ class OpenDAQBro:
     # AI 1-3: Hi-LV, spenning 230V RMS (325V topp), 50 Hz
     # AI 4:   Hi-LV, ikkje tilkobla
     # AI 5-7: Lo-LV, integrator 0-3V → 0-6000A (5V-driven)
-    #         Lo-LV ADC ±5V, faktor 2000 A/V → range ±10000A
+    #         Lo-LV ADC ±5V, sensor-skalering gjer resten
     # AI 8:   Lo-LV, ikkje tilkobla
     SUNDET_KANALAR = [
         {"namn": "AI 0", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
         {"namn": "AI 1", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
         {"namn": "AI 2", "amplitude": 325.0, "freq": 50.0, "range": (-1600, 1600)},
         {"namn": "AI 3", "amplitude": 0.0,   "freq": 50.0, "range": (-1600, 1600)},
-        {"namn": "AI 4", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
-        {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
-        {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-10000, 10000)},
-        {"namn": "AI 7", "amplitude": 0.0,   "freq": 50.0, "range": (-10000, 10000)},
+        {"namn": "AI 4", "amplitude": 100.0, "freq": 50.0, "range": (-5, 5)},
+        {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-5, 5)},
+        {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-5, 5)},
+        {"namn": "AI 7", "amplitude": 0.0,   "freq": 50.0, "range": (-5, 5)},
         {"namn": "Tid",  "amplitude": 0.0,   "freq": 1.0,  "range": (0, 3600)},
     ]
 
@@ -812,8 +825,10 @@ class OpenDAQBro:
 
         # Bygg skaleringsfaktorar: SIRIUS ADC leverer int16 (-32768..32767)
         # som representerer full skala av input-rangen.
-        # physical_value = raw_int16 * (range_max / 32768)
+        # Utan sensor: physical_value = raw_int16 * (range_max / 32768)
+        # Med sensor:  physical_value = raw_int16 * (amp_range / 32768) * slope + offset
         self._kanal_skala = []
+        self._kanal_offset = []
 
         channels = list(self._device.channels)
         for i, ch in enumerate(channels):
@@ -841,17 +856,48 @@ class OpenDAQBro:
                 self._safe_set(ch, "DC", 0.0)
                 # Waveform er SelectionProperty (int): 0=Sine
                 self._safe_set(ch, "Waveform", 0)
-                # CustomRange: Skip — StructProperty (Range) kan forårsake
-                # OPC-UA serialiseringsfeil som krasjar DewesoftX.
-                # Skalering vert handtert av _kanal_skala i oppdater_data().
-                log.info(f"  {kk.namn}: aktiv={kk.aktiv}, "
-                         f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
+
+                # Berekn skalering og CustomRange (med sensor-støtte)
+                if kk.sensor_aktiv and (kk.sensor_inn_2 != kk.sensor_inn_1):
+                    # To-punkt sensor: voltage → physical
+                    # voltage = raw_int16 × (amp_range / 32768)
+                    # physical = (voltage - inn_1) × slope + ut_1
+                    amp_range = kk.range_max  # Forsterkar-range (t.d. 5V)
+                    slope = ((kk.sensor_ut_2 - kk.sensor_ut_1) /
+                             (kk.sensor_inn_2 - kk.sensor_inn_1))
+                    offset = kk.sensor_ut_1 - slope * kk.sensor_inn_1
+                    skala = amp_range / 32768.0 * slope
+                    self._kanal_skala.append(skala)
+                    self._kanal_offset.append(offset)
+
+                    # Display-range frå sensor-skalering
+                    display_min = kk.range_min * slope + offset
+                    display_max = kk.range_max * slope + offset
+                    try:
+                        custom_range = _daq.Range(display_min, display_max)
+                        ch.set_property_value("CustomRange", custom_range)
+                        log.info(f"  {kk.namn}: CustomRange=[{display_min}, {display_max}] "
+                                 f"(sensor: {kk.sensor_namn}, slope={slope}, offset={offset})")
+                    except Exception as e_cr:
+                        log.warning(f"  {kk.namn}: CustomRange feilet: {e_cr}")
+                    log.info(f"  {kk.namn}: aktiv={kk.aktiv}, sensor={kk.sensor_namn}, "
+                             f"skala={skala:.6f}, offset={offset}")
+                else:
+                    # Direkte skalering utan sensor
+                    skala = kk.range_max / 32768.0 if kk.range_max > 0 else 1.0
+                    self._kanal_skala.append(skala)
+                    self._kanal_offset.append(0.0)
+
+                    try:
+                        custom_range = _daq.Range(float(kk.range_min), float(kk.range_max))
+                        ch.set_property_value("CustomRange", custom_range)
+                        log.info(f"  {kk.namn}: CustomRange=[{kk.range_min}, {kk.range_max}]")
+                    except Exception as e_cr:
+                        log.warning(f"  {kk.namn}: CustomRange feilet: {e_cr}")
+                    log.info(f"  {kk.namn}: aktiv={kk.aktiv}, "
+                             f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
             except Exception as e:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
-
-            # Skaleringsfaktor: int16 → fysisk eining
-            skala = kk.range_max / 32768.0 if kk.range_max > 0 else 1.0
-            self._kanal_skala.append(skala)
 
         # Logg alle kanalar sine eigenskapar for å finne nil-verdiar
         for idx, ch in enumerate(channels):
@@ -896,6 +942,175 @@ class OpenDAQBro:
                 log.info(f"  {label}: GetPossibleSampleRate = {max_rate} Hz")
             except Exception as e:
                 log.warning(f"  {label}: GetPossibleSampleRate feilet: {e}")
+
+    def _legg_til_dewesoftx_eigenskapar(self):
+        """Legg til dummy-eigenskapar som DewesoftX si OpenDAQSettingsFrame forventer.
+
+        DewesoftX krasjar med Access Violation i TOpenDAQFrame.Initialize (linje 482)
+        når den prøver å lese eigenskapar som ikkje finst på RefDevice:
+          - DeviceLogLevel: SelectionProperty for log level combo box
+          - Ymse andre konfig-eigenskapar settings-panelet treng
+
+        Stakksporet:
+          DeviceLogLevelItemComboSelect → RebootDeviceItemButtonClick
+          → Reconnect → SettingsChanged → Initialize → KRASJ (null deref)
+
+        Ved å legge til desse eigenskapane unngår vi null pointer i DewesoftX.
+        """
+        # DeviceLogLevel: Selection med vanlege log levels
+        # DewesoftX sin DeviceLogLevelItemComboSelect les denne for å populere dropdown
+        eigenskapar = [
+            ("DeviceLogLevel", "int", 2),      # 0=Trace,1=Debug,2=Info,3=Warn,4=Error
+            ("DeviceLogPath", "string", ""),    # Sti til loggfil (DewesoftX kan spørje)
+        ]
+
+        for namn, typ, default in eigenskapar:
+            try:
+                # Sjekk om eigenskapen allereie finst
+                try:
+                    self._device.get_property(namn)
+                    log.info(f"  DewesoftX-prop {namn}: finst allereie")
+                    continue
+                except Exception:
+                    pass
+
+                if typ == "int":
+                    prop = _daq.IntPropertyBuilder(namn, int(default))
+                    self._device.add_property(prop.build())
+                elif typ == "string":
+                    prop = _daq.StringPropertyBuilder(namn, str(default))
+                    self._device.add_property(prop.build())
+                elif typ == "float":
+                    prop = _daq.FloatPropertyBuilder(namn, float(default))
+                    self._device.add_property(prop.build())
+
+                log.info(f"  DewesoftX-prop {namn} = {default!r}")
+            except Exception as e:
+                log.warning(f"  DewesoftX-prop {namn} feilet: {e}")
+
+    # Amplifier-namn per kanal (matchar DewesoftX direkte USB-visning)
+    _AMPL_NAMN = {
+        "voltage": "SIRIUS-HS-HVv2",   # Hi-LV forsterkarkort
+        "current": "SIRIUS-HS-LVv2",   # Lo-LV forsterkarkort
+        "generic": "SIRIUS-HS",
+    }
+
+    def _sett_signal_descriptors(self):
+        """Sett signal descriptors med einingar, range og metadata per kanal.
+
+        DewesoftX les signal descriptors for å vise:
+          - Units (V/A) i kolonnen "Units"
+          - Physical quantity i kolonnen "Physical quantity"
+          - Measurement type i kolonnen "Measurement"
+          - Amplifier name i kolonnen "Ampl. name"
+
+        Opprettar DataDescriptorBuilder med UnitBuilder per kanal basert på
+        kanal_konfig (type, enhet, range). Sett ny descriptor via
+        ISignalConfig.set_descriptor() + legg til AmplifierName som
+        StringProperty per kanal.
+        """
+        kanal_konfig = les_konfig()
+
+        # Sjekk at nødvendige API-ar finst
+        for attr in ('DataDescriptorBuilder', 'UnitBuilder', 'SampleType'):
+            if not hasattr(_daq, attr):
+                log.warning(f"  Signal descriptors: {attr} ikkje tilgjengeleg "
+                            f"— kan ikkje sette einingar")
+                return
+
+        sett_teller = 0
+        for idx, (ch, sig) in enumerate(self._kanal_signal):
+            if sig is None or idx >= len(kanal_konfig):
+                continue
+            kk = kanal_konfig[idx]
+
+            try:
+                # 1. Bygg einingsobjekt (Unit)
+                # Bruk sensor-eining viss sensor er aktiv
+                unit_builder = _daq.UnitBuilder()
+                if kk.sensor_aktiv and kk.sensor_enhet:
+                    enhet = kk.sensor_enhet
+                    if enhet == "A":
+                        unit_builder.name = "ampere"
+                        unit_builder.symbol = "A"
+                        unit_builder.quantity = "electric_current"
+                    else:
+                        unit_builder.name = enhet
+                        unit_builder.symbol = enhet
+                        unit_builder.quantity = kk.type or ""
+                elif kk.type == "voltage":
+                    unit_builder.name = "volt"
+                    unit_builder.symbol = "V"
+                    unit_builder.quantity = "voltage"
+                elif kk.type == "current":
+                    unit_builder.name = "ampere"
+                    unit_builder.symbol = "A"
+                    unit_builder.quantity = "electric_current"
+                else:
+                    unit_builder.name = kk.enhet or ""
+                    unit_builder.symbol = kk.enhet or ""
+                    unit_builder.quantity = kk.type or ""
+                unit_obj = unit_builder.build()
+
+                # 2. Bygg descriptor med eining og range
+                desc_builder = _daq.DataDescriptorBuilder()
+                desc_builder.name = kk.namn
+                desc_builder.sample_type = _daq.SampleType.Float64
+                desc_builder.unit = unit_obj
+
+                # value_range: fysisk range (berekna frå sensor viss aktiv)
+                try:
+                    if kk.sensor_aktiv and (kk.sensor_inn_2 != kk.sensor_inn_1):
+                        slope = ((kk.sensor_ut_2 - kk.sensor_ut_1) /
+                                 (kk.sensor_inn_2 - kk.sensor_inn_1))
+                        s_offset = kk.sensor_ut_1 - slope * kk.sensor_inn_1
+                        display_min = kk.range_min * slope + s_offset
+                        display_max = kk.range_max * slope + s_offset
+                        desc_builder.value_range = _daq.Range(display_min, display_max)
+                    else:
+                        desc_builder.value_range = _daq.Range(
+                            float(kk.range_min), float(kk.range_max))
+                except Exception:
+                    pass  # Ikkje alle SDK-versjonar støttar value_range
+
+                new_desc = desc_builder.build()
+
+                # 3. Sett descriptor på signal via ISignalConfig
+                try:
+                    sig.set_descriptor(new_desc)
+                except Exception as e_desc:
+                    # Fallback: prøv descriptor eigenskap direkte
+                    try:
+                        sig.descriptor = new_desc
+                    except Exception:
+                        log.warning(f"  {kk.namn}: set_descriptor feilet: {e_desc}")
+                        continue
+
+                sett_teller += 1
+                log.info(f"  {kk.namn}: descriptor unit={kk.enhet}, "
+                         f"quantity={unit_builder.quantity}, "
+                         f"range=[{kk.range_min}, {kk.range_max}]")
+
+                # 4. Oppdater lagra val_desc for DataPacket-injeksjon
+                if idx < len(self._val_desc):
+                    self._val_desc[idx] = new_desc
+
+            except Exception as e:
+                log.warning(f"  {kk.namn}: signal descriptor feilet: {e}")
+
+            # 5. Legg til AmplifierName som kanal-eigenskap
+            ampl_namn = self._AMPL_NAMN.get(kk.type, "SIRIUS-HS")
+            try:
+                try:
+                    ch.get_property("AmplifierName")
+                except Exception:
+                    prop = _daq.StringPropertyBuilder("AmplifierName", ampl_namn)
+                    ch.add_property(prop.build())
+                    log.info(f"  {kk.namn}: AmplifierName={ampl_namn}")
+            except Exception as e:
+                log.warning(f"  {kk.namn}: AmplifierName feilet: {e}")
+
+        log.info(f"  Signal descriptors sett: {sett_teller}/{len(self._kanal_signal)} kanalar")
 
     def _sett_sirius_device_info(self):
         """Sett DeviceInfo til å matche ekte Dewesoft SIRIUS.

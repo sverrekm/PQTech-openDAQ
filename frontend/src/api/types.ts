@@ -84,6 +84,14 @@ export interface KanalKonfig {
   range_max: number
   enhet: string
   sample_rate: number
+  // Sensor-skalering (to-punkt lineaer)
+  sensor_aktiv: boolean
+  sensor_namn: string
+  sensor_inn_1: number
+  sensor_ut_1: number
+  sensor_inn_2: number
+  sensor_ut_2: number
+  sensor_enhet: string
 }
 
 export interface KanalLive {
