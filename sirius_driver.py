@@ -1268,14 +1268,15 @@ class SiriusDriver:
             if slot > 7:
                 continue  # Berre fysiske ADC-slotter
 
-            if kk.sensor_aktiv:
-                # Enable 5V unipolar excitation
+            if kk.excitation_v > 0:
+                # Enable unipolar excitation (0x04 = 5V)
+                volt_code = 0x04 if kk.excitation_v >= 5.0 else 0x04
                 try:
                     proto.a5_set_mode(slot, REG_EXC_ENABLE, 0x01)
                     proto.commit(slot)
-                    proto.a5_set_mode(slot, REG_EXC_VOLT, 0x04)  # 0x04 = 5V
+                    proto.a5_set_mode(slot, REG_EXC_VOLT, volt_code)
                     proto.commit(slot)
-                    log.info(f"  Slot {slot} ({kk.namn}): excitation 5V ON")
+                    log.info(f"  Slot {slot} ({kk.namn}): excitation {kk.excitation_v}V ON")
                 except (SiriusPollTimeout, SiriusUSBFeil) as e:
                     log.warning(f"  Slot {slot} excitation feil: {e}")
 

@@ -77,6 +77,7 @@ export default function ChannelConfigCard() {
             <th style={{ width: 70 }}>Maks</th>
             <th style={{ width: 55 }}>Eining</th>
             <th style={{ width: 55 }}>Sensor</th>
+            <th style={{ width: 55 }}>Exc.</th>
             <th style={{ width: 45 }}>Aktiv</th>
           </tr>
         </thead>
@@ -141,6 +142,16 @@ export default function ChannelConfigCard() {
                   </button>
                 </td>
                 <td>
+                  <select
+                    value={k.excitation_v}
+                    onChange={e => oppdater(i, 'excitation_v', parseFloat(e.target.value))}
+                    title="Excitation-spenning til integrator"
+                  >
+                    <option value={0}>Av</option>
+                    <option value={5}>5 V</option>
+                  </select>
+                </td>
+                <td>
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
@@ -153,7 +164,7 @@ export default function ChannelConfigCard() {
               </tr>
               {opnaSensor.has(i) && (
                 <tr key={`sensor-${i}`} className="sensor-rad">
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <div className="sensor-panel">
                       <div className="sensor-panel-header">
                         <label className="toggle-switch">

@@ -92,6 +92,7 @@ export interface KanalKonfig {
   sensor_inn_2: number
   sensor_ut_2: number
   sensor_enhet: string
+  excitation_v: number
 }
 
 export interface KanalLive {
