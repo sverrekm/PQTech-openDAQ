@@ -350,6 +350,22 @@ class SiriusDriver:
                 "EP2 (ADC) svarte ikkje - bruk 'Gjenoppliv EP2' i web UI."
             )
 
+        # ---- Skriv lisensdata til system_ds.lic for DewesoftX SCP ----
+        # Køyrer alltid etter tilkobling, uavhengig av EP2-status.
+        if self._tilkoblet and self._proto:
+            try:
+                lisens_bytes = self._proto.les_lisens_eeprom()
+                lic_path = "/opt/dewesoft/software/system/system_ds.lic"
+                import os
+                if os.path.isdir(os.path.dirname(lic_path)):
+                    with open(lic_path, "wb") as f:
+                        f.write(lisens_bytes)
+                    log.info(f"Lisens skrive til {lic_path} ({len(lisens_bytes)} bytes)")
+                else:
+                    log.info(f"Lisens-mappe finst ikkje ({lic_path}), hoppar over")
+            except Exception as e:
+                log.warning(f"Kunne ikkje lese/skrive lisens-EEPROM: {e}")
+
     def _frigjer_dev(self):
         """Frigjer USB-handle utan full koble_fra (unngår stopp_streaming).
 
@@ -1556,20 +1572,6 @@ class SiriusDriver:
                 self._enhetsinfo.serienummer = dewesoft_sn
             else:
                 log.info("  EEPROM: Dewesoft-serienummer ikkje funne (held USB-serial)")
-
-        # ---- Skriv lisensdata til system_ds.lic for DewesoftX SCP ----
-        try:
-            lisens_bytes = proto.les_lisens_eeprom()
-            lic_path = "/opt/dewesoft/software/system/system_ds.lic"
-            import os
-            if os.path.isdir(os.path.dirname(lic_path)):
-                with open(lic_path, "wb") as f:
-                    f.write(lisens_bytes)
-                log.info(f"  Lisens skrive til {lic_path} ({len(lisens_bytes)} bytes)")
-            else:
-                log.info(f"  Lisens-mappe finst ikkje ({lic_path}), hoppar over")
-        except Exception as e:
-            log.warning(f"  Kunne ikkje lese/skrive lisens-EEPROM: {e}")
 
         # ---- Lo-LV slot-initialisering (slot 4-7) ----
         # INIT_SEKVENS over initialiserer berre Hi-LV slot 0-3.
