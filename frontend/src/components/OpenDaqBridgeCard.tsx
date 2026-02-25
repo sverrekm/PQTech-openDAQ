@@ -43,8 +43,8 @@ export default function OpenDaqBridgeCard() {
   const alleOppe = s.alle_portar_oppe === true
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">openDAQ Nettverksservere</h2>
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">openDAQ Nettverksservere</h2>
 
       {/* Hovudstatus med visuell indikator */}
       <div className={`flex items-center gap-2 p-2 rounded-lg mb-3 ${alleOppe ? 'bg-green-100 border border-green-500' : s.aktiv ? 'bg-yellow-100 border border-yellow-500' : 'bg-red-100 border border-red-500'}`}>

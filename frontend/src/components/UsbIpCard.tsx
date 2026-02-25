@@ -53,8 +53,8 @@ export default function UsbIpCard({ ip }: Props) {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">USB/IP — Del SIRIUS</h2>
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">USB/IP — Del SIRIUS</h2>
       <div className="flex items-center gap-2 mb-3 text-sm">
         <span className={`w-2 h-2 rounded-full ${u.deling_aktiv ? 'bg-green-500' : 'bg-red-500'}`} />
         <span>

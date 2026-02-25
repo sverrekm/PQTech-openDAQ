@@ -41,8 +41,8 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Kanalar - Live</h2>
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Kanalar - Live</h2>
       <table className="w-full border-collapse text-sm mt-3">
         <thead>
           <tr>

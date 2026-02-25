@@ -16,8 +16,8 @@ export default function LogViewer() {
   const lines = data?.linjer ?? []
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Logg</h2>
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Logg</h2>
       {loading && !data ? (
         <div className="flex justify-center items-center h-24">
           <svg className="animate-spin h-6 w-6 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

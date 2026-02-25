@@ -35,8 +35,8 @@ export default function SiriusStatusCard() {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">SIRIUS Direkte</h2>
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">SIRIUS Direkte</h2>
       <InfoGrid items={[
         {
           label: 'Tilkobling',
