@@ -11,7 +11,6 @@ export function usePolling<T>(
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const doFetch = useCallback(async () => {
-    setLoading(true)
     try {
       const result = await fetcher()
       setData(result)
