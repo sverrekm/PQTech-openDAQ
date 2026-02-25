@@ -158,3 +158,43 @@ export interface DebugResult {
   hex?: string
   feil?: string
 }
+
+// --- /api/mqtt/* ---
+export interface MqttBrokerKonfig {
+  host: string
+  port: number
+  brukarnavn: string
+  passord: string
+  klient_id: string
+  aktivert: boolean
+}
+
+export interface MqttKanalKonfig {
+  topic: string
+  namn: string
+  enhet: string
+  json_sti: string
+  range_min: number
+  range_max: number
+}
+
+export interface MqttKonfig {
+  broker: MqttBrokerKonfig
+  kanalar: MqttKanalKonfig[]
+}
+
+export interface MqttTopicStatus {
+  namn: string
+  enhet: string
+  verdi: number | null
+  sist_oppdatert: number | null
+}
+
+export interface MqttStatus {
+  tilkobla: boolean
+  aktivert: boolean
+  broker: string
+  feil?: string
+  meldingar_motteke: number
+  topics: Record<string, MqttTopicStatus>
+}

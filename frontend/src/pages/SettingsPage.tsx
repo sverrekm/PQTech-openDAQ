@@ -1,4 +1,5 @@
 import ChannelConfigCard from '../components/ChannelConfigCard'
+import MqttSettingsCard from '../components/MqttSettingsCard'
 import DeviceConnectionCard from '../components/DeviceConnectionCard'
 import DebugConsoleCard from '../components/DebugConsoleCard'
 import ProbeAnalysisCard from '../components/ProbeAnalysisCard'
@@ -8,6 +9,7 @@ export default function SettingsPage() {
   return (
     <>
       <ChannelConfigCard />
+      <MqttSettingsCard />
       <DeviceConnectionCard />
       <DebugConsoleCard />
       <ProbeAnalysisCard />

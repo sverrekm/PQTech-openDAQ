@@ -37,6 +37,8 @@ import numpy as np
 
 from sirius_driver import SiriusDriver, SiriusFeil, SiriusIkkeFunnet
 from opendaq_bro import OpenDAQBro
+from mqtt_konfig import les_mqtt_konfig, lagre_mqtt_konfig, valider_mqtt_konfig, MqttKonfig
+from mqtt_klient import MqttKlient
 import usbip_manager
 
 logging.basicConfig(
@@ -100,6 +102,8 @@ server_status = {
 _driver: SiriusDriver = None
 _maaler = None
 _opendaq_bro: OpenDAQBro = None
+_mqtt_klient: MqttKlient = None
+_mqtt_konfig: MqttKonfig = None
 _args = None
 _lock = threading.Lock()
 
@@ -444,6 +448,43 @@ def hent_enhetsinfo():
 _opendaq_feil = None
 
 
+def hent_mqtt_status():
+    """Hent MQTT-klient status for web API."""
+    if _mqtt_klient is not None:
+        return _mqtt_klient.hent_status()
+    return {"tilkobla": False, "aktivert": False, "feil": "MQTT ikkje starta"}
+
+
+def hent_mqtt_konfig_dict():
+    """Hent MQTT-konfig som dict for web API."""
+    if _mqtt_konfig is not None:
+        return _mqtt_konfig.til_dict()
+    konfig = les_mqtt_konfig()
+    return konfig.til_dict()
+
+
+def oppdater_mqtt(ny_konfig: MqttKonfig):
+    """Oppdater MQTT-konfig, lagre, og restart klienten.
+
+    Krev bridge-restart for å endre openDAQ-kanaltallet.
+    """
+    global _mqtt_klient, _mqtt_konfig
+
+    lagre_mqtt_konfig(ny_konfig)
+    _mqtt_konfig = ny_konfig
+
+    if _mqtt_klient is not None:
+        _mqtt_klient.restart(ny_konfig)
+        log.info("MQTT-klient restarta med ny konfig")
+    elif ny_konfig.broker.aktivert:
+        _mqtt_klient = MqttKlient(ny_konfig)
+        _mqtt_klient.start()
+        log.info("MQTT-klient starta")
+
+    return True, ("MQTT konfig lagra. Restart openDAQ bridge for å oppdatere "
+                   "kanaltallet i DewesoftX.")
+
+
 _port_probe_cache = {"ts": 0.0, "result": {}}
 
 
@@ -578,7 +619,11 @@ def restart_opendaq_bro():
     try:
         sn = server_status.get("serienummer", "")
         enamn = server_status.get("enhet_navn", "")
-        _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn)
+        # Les MQTT-konfig på nytt (kan ha endra seg sidan sist)
+        _mqtt_konfig_fresh = les_mqtt_konfig()
+        mqtt_k = _mqtt_konfig_fresh.kanalar if _mqtt_konfig_fresh.broker.aktivert else []
+        _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
+                                  mqtt_kanalar=mqtt_k)
         ok = _opendaq_bro.start()
         if ok:
             _opendaq_feil = None
@@ -603,6 +648,7 @@ def _global_data_callback(kanal_data):
 
     Matar openDAQ-brua med data slik at DewesoftX ser verdiar.
     Streaming køyrer alltid - aldri stopp/start-syklus.
+    Injiserer MQTT-verdiar i tillegg til SIRIUS ADC-data.
     """
     global _callback_feil_teller
     if _opendaq_bro and _opendaq_bro.tilgjengelig:
@@ -612,6 +658,23 @@ def _global_data_callback(kanal_data):
             _callback_feil_teller += 1
             if _callback_feil_teller <= 3 or _callback_feil_teller % 1000 == 0:
                 log.warning(f"oppdater_data feil #{_callback_feil_teller}: {e}")
+
+        # Injiser MQTT-verdiar synkronisert med SIRIUS-datablokker
+        if _mqtt_klient is not None:
+            try:
+                mqtt_verdiar = _mqtt_klient.hent_verdiar()
+                if mqtt_verdiar:
+                    # Bruk same blokkstorleik som SIRIUS-data
+                    blokk = 1024
+                    for v in kanal_data.values():
+                        if v is not None and len(v) > 0:
+                            blokk = len(v)
+                            break
+                    _opendaq_bro.oppdater_mqtt_data(mqtt_verdiar, blokk)
+            except Exception as e:
+                _callback_feil_teller += 1
+                if _callback_feil_teller <= 3 or _callback_feil_teller % 1000 == 0:
+                    log.warning(f"oppdater_mqtt_data feil #{_callback_feil_teller}: {e}")
 
 
 def gjenoppliv_ep2():
@@ -987,15 +1050,27 @@ def start_server(args):
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()
 
+    # Last MQTT-konfig og start klient
+    global _opendaq_bro, _opendaq_feil, _mqtt_klient, _mqtt_konfig
+    _mqtt_konfig = les_mqtt_konfig()
+    mqtt_kanalar = _mqtt_konfig.kanalar if _mqtt_konfig.broker.aktivert else []
+    if _mqtt_konfig.broker.aktivert and _mqtt_konfig.kanalar:
+        _mqtt_klient = MqttKlient(_mqtt_konfig)
+        _mqtt_klient.start()
+        log.info(f"MQTT-klient starta: {_mqtt_konfig.broker.host}:"
+                 f"{_mqtt_konfig.broker.port}, {len(_mqtt_konfig.kanalar)} kanalar")
+    else:
+        log.info("MQTT deaktivert eller ingen kanalar konfigurert")
+
     # Start openDAQ nettverksservere (referanse-enhet for DewesoftX-tilkobling)
-    global _opendaq_bro, _opendaq_feil
     try:
         log.info("Startar openDAQ nettverksbro...")
         # Send SIRIUS serienummer og enhetsnamn til openDAQ bridge
         # slik at DewesoftX kan sjaa dei via OPC-UA device info.
         sn = server_status.get("serienummer", "")
         enamn = server_status.get("enhet_namn", "")
-        _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn)
+        _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
+                                  mqtt_kanalar=mqtt_kanalar)
         ok = _opendaq_bro.start()
         if ok:
             log.info("openDAQ bridge starta OK")
@@ -1061,6 +1136,8 @@ def start_server(args):
         pass
 
     log.info("Stopper...")
+    if _mqtt_klient:
+        _mqtt_klient.stopp()
     if _maaler:
         _maaler.stopp()
     if _opendaq_bro:

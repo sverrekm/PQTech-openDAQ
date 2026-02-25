@@ -35,12 +35,16 @@ try:
         hent_opendaq_status as _opendaq_hent_status,
         restart_opendaq_bro as _opendaq_restart,
         hent_opendaq_verdiar as _opendaq_hent_verdiar,
+        hent_mqtt_status as _mqtt_hent_status,
+        hent_mqtt_konfig_dict as _mqtt_hent_konfig,
+        oppdater_mqtt as _mqtt_oppdater,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
     SIRIUS_DIREKTE = False
 
 from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
+from mqtt_konfig import valider_mqtt_konfig
 
 app = Flask(__name__)
 
@@ -591,6 +595,50 @@ def api_kanalar_live():
             resultat["driver"] = {}
 
     return jsonify(resultat)
+
+
+# --- MQTT API ---
+
+@app.route("/api/mqtt/konfig")
+def api_mqtt_konfig_hent():
+    """Hent gjeldande MQTT-konfigurasjon."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"broker": {}, "kanalar": []})
+    try:
+        return jsonify(_mqtt_hent_konfig())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/mqtt/konfig", methods=["PUT"])
+def api_mqtt_konfig_oppdater():
+    """Oppdater MQTT-konfigurasjon (broker + kanalar)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "SIRIUS-driver ikkje lasta"}), 503
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"suksess": False, "melding": "Ugyldig JSON"}), 400
+
+    konfig, feil = valider_mqtt_konfig(data)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+
+    try:
+        ok, melding = _mqtt_oppdater(konfig)
+        return jsonify({"suksess": ok, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/mqtt/status")
+def api_mqtt_status():
+    """Hent MQTT-klient tilkoblingsstatus og siste verdiar."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"tilkobla": False, "aktivert": False})
+    try:
+        return jsonify(_mqtt_hent_status())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
 
 
 # --- USB/IP API ---

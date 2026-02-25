@@ -28,6 +28,7 @@ from datetime import datetime
 import numpy as np
 
 from kanal_konfig import les_konfig
+from mqtt_konfig import les_mqtt_konfig
 
 log = logging.getLogger('opendaq_bro')
 
@@ -50,7 +51,8 @@ class OpenDAQBro:
     DewesoftX finn eininga via openDAQ mDNS-oppdaging.
     """
 
-    def __init__(self, module_path=None, serienummer="", enhetsnamn=""):
+    def __init__(self, module_path=None, serienummer="", enhetsnamn="",
+                 mqtt_kanalar=None):
         self._instance = None
         self._device = None
         self._tilgjengelig = False
@@ -59,6 +61,7 @@ class OpenDAQBro:
         )
         self._serienummer = serienummer
         self._enhetsnamn = enhetsnamn
+        self._mqtt_kanalar = mqtt_kanalar or []  # Liste av MqttKanalKonfig
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
         self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
@@ -161,8 +164,11 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kunne ikkje liste eigenskapar: {e}")
 
-            # Konfigurer 9 kanalar (8 ADC + 1 tid) som matchar SIRIUS Sundet-oppsett
+            # Konfigurer kanalar (8 ADC + N MQTT) som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
+
+            # Sett MQTT kanal-nøklar for data-injeksjon
+            self._MQTT_KANAL_KEYS = [f"mqtt_{i}" for i in range(len(self._mqtt_kanalar))]
 
             # Legg til GetPossibleSampleRate eigenskapen.
             # DewesoftX sin TDSOpenDaqAI.CalcADCSampleRate spør etter denne
@@ -675,6 +681,84 @@ class OpenDAQBro:
             if self._data_teller % 100 == 0:
                 log.warning(f"oppdater_data feil: {e}")
 
+    def oppdater_mqtt_data(self, mqtt_verdiar, blokk_storleik=1024):
+        """Injiser MQTT-verdiar som DataPackets i openDAQ-kanalar (indeks 8+).
+
+        Lagar ein flat float64-array fylt med siste MQTT-verdi og sender
+        den som ein DataPacket, synkronisert med SIRIUS-datablokker.
+
+        Args:
+            mqtt_verdiar: dict {topic: float_verdi} frå MqttKlient.hent_verdiar()
+            blokk_storleik: Antal samples per pakke (matchar SIRIUS-blokk)
+        """
+        if not self._tilgjengelig or not self._pakett_klar:
+            return
+        if not mqtt_verdiar or not self._mqtt_kanalar:
+            return
+
+        try:
+            for mi, mk in enumerate(self._mqtt_kanalar):
+                verdi = mqtt_verdiar.get(mk.topic)
+                if verdi is None:
+                    continue
+
+                kanal_idx = 8 + mi
+                if kanal_idx >= len(self._kanal_signal):
+                    break
+
+                ch, sig = self._kanal_signal[kanal_idx]
+                if sig is None:
+                    continue
+
+                # Oppdater web UI-verdiar
+                mqtt_key = f"mqtt_{mi}"
+                self._siste_verdiar[mqtt_key] = {
+                    "snitt": round(verdi, 4),
+                    "rms": round(abs(verdi), 4),
+                    "topp": round(abs(verdi), 4),
+                    "siste": round(verdi, 4),
+                    "antall": blokk_storleik,
+                    "kjelde": "mqtt",
+                    "topic": mk.topic,
+                    "enhet": mk.enhet,
+                }
+
+                # Send DataPacket med konstant verdi
+                if (kanal_idx < len(self._dom_signal) and
+                        self._dom_signal[kanal_idx] is not None):
+                    try:
+                        dom_sig = self._dom_signal[kanal_idx]
+                        dom_desc = self._dom_desc[kanal_idx]
+                        val_desc = self._val_desc[kanal_idx]
+
+                        offset = (self._start_ticks +
+                                  self._total_samples[kanal_idx] * self._tick_delta)
+
+                        time_pkt = _daq.DataPacket(dom_desc, blokk_storleik, offset)
+                        val_pkt = _daq.DataPacketWithDomain(
+                            time_pkt, val_desc, blokk_storleik, 0)
+
+                        try:
+                            buf = np.frombuffer(
+                                val_pkt.raw_data, dtype=np.float64)
+                            buf[:] = verdi
+                        except (ValueError, TypeError):
+                            import ctypes
+                            arr = (ctypes.c_double * blokk_storleik).from_address(
+                                int(val_pkt.raw_data))
+                            for j in range(blokk_storleik):
+                                arr[j] = verdi
+
+                        dom_sig.send_packet(time_pkt)
+                        sig.send_packet(val_pkt)
+                        self._total_samples[kanal_idx] += blokk_storleik
+                    except Exception as e:
+                        if self._data_teller % 1000 == 0:
+                            log.warning(f"  MQTT pakett Ch{kanal_idx}: {e}")
+        except Exception as e:
+            if self._data_teller % 100 == 0:
+                log.warning(f"oppdater_mqtt_data feil: {e}")
+
     def hent_siste_verdiar(self) -> dict:
         """Returner siste kanal-verdiar for web UI live-visning."""
         result = dict(self._siste_verdiar)
@@ -778,6 +862,7 @@ class OpenDAQBro:
         self._kanal_signal = []   # Kanal/signal-referansar
         self._kanal_skala = []
         self._kanal_offset = []
+        self._MQTT_KANAL_KEYS = []
         self._siste_verdiar = {}
         self._adc_nullpunkt = {}
         self._nullpunkt_sum = {}
@@ -805,6 +890,8 @@ class OpenDAQBro:
 
     # Fast kanal-nøklar for hot loop (unngår sorted() og list-oppretting per kall)
     _KANAL_KEYS = [f"kanal_{i}" for i in range(8)]
+    # MQTT-kanal-nøklar (sett dynamisk ved oppstart)
+    _MQTT_KANAL_KEYS = []
 
     # Kanalopsett (SIRIUSi-HS, 4×Hi-LV + 4×Lo-LV)
     # AI 1-3: Hi-LV, spenning 230V RMS (325V topp), 50 Hz
@@ -839,13 +926,15 @@ class OpenDAQBro:
           - GlobalSampleRate: Float, [1, 1000000]
         Verdiar vert klampa automatisk av _safe_set().
         """
-        # Berre 8 ADC-kanalar (ikkje 9).
+        # ADC-kanalar + MQTT-kanalar.
         # Counter waveform (Waveform=3) for tidskanal manglar domain-signal,
         # som krasjar DewesoftX i TryGetSampleRate med "Interface object is nil".
-        if not self._safe_set(self._device, "NumberOfChannels", 8):
+        n_mqtt = len(self._mqtt_kanalar)
+        n_total = 8 + n_mqtt
+        if not self._safe_set(self._device, "NumberOfChannels", n_total):
             log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
             return
-        log.info("  NumberOfChannels sett til 8 (utan tidskanal)")
+        log.info(f"  NumberOfChannels sett til {n_total} (8 ADC + {n_mqtt} MQTT)")
 
         # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
         # Les frå SAMPLE_RATE env var (default 20000 = SIRIUS hardware rate)
@@ -940,9 +1029,34 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
 
+        # Konfigurer MQTT-kanalar (indeks 8+)
+        for mi, mk in enumerate(self._mqtt_kanalar):
+            ch_idx = 8 + mi
+            if ch_idx >= len(channels):
+                break
+            ch = channels[ch_idx]
+            try:
+                ch.name = mk.namn or mk.topic
+                self._safe_set(ch, "Amplitude", 0.0)
+                self._safe_set(ch, "Frequency", 1.0)
+                self._safe_set(ch, "DC", 0.0)
+                self._safe_set(ch, "Waveform", 0)
+                # MQTT-kanalar har skala=1.0 (verdiar kjem ferdig skalerte)
+                self._kanal_skala.append(1.0)
+                self._kanal_offset.append(0.0)
+                try:
+                    custom_range = _daq.Range(float(mk.range_min), float(mk.range_max))
+                    ch.set_property_value("CustomRange", custom_range)
+                except Exception:
+                    pass
+                log.info(f"  MQTT Ch{ch_idx}: {mk.namn} (topic={mk.topic}, "
+                         f"enhet={mk.enhet})")
+            except Exception as e:
+                log.warning(f"  MQTT kanal {ch_idx} konfig feilet: {e}")
+
         # Logg alle kanalar sine eigenskapar for å finne nil-verdiar
         for idx, ch in enumerate(channels):
-            if idx < len(kanal_konfig):
+            if idx < len(kanal_konfig) + len(self._mqtt_kanalar):
                 self._logg_eigenskapar(ch, f"Ch{idx}.")
 
     def _legg_til_sample_rate_eigenskap(self):
@@ -1150,6 +1264,45 @@ class OpenDAQBro:
                     log.info(f"  {kk.namn}: AmplifierName={ampl_namn}")
             except Exception as e:
                 log.warning(f"  {kk.namn}: AmplifierName feilet: {e}")
+
+        # MQTT-kanalar (indeks 8+): sett descriptor med eining frå MQTT-konfig
+        for mi, mk in enumerate(self._mqtt_kanalar):
+            ch_idx = 8 + mi
+            if ch_idx >= len(self._kanal_signal):
+                break
+            ch, sig = self._kanal_signal[ch_idx]
+            if sig is None:
+                continue
+            try:
+                unit_builder = _daq.UnitBuilder()
+                unit_builder.name = mk.enhet or ""
+                unit_builder.symbol = mk.enhet or ""
+                unit_builder.quantity = "mqtt"
+                unit_obj = unit_builder.build()
+
+                desc_builder = _daq.DataDescriptorBuilder()
+                desc_builder.name = mk.namn or mk.topic
+                desc_builder.sample_type = _daq.SampleType.Float64
+                desc_builder.unit = unit_obj
+                try:
+                    desc_builder.value_range = _daq.Range(
+                        float(mk.range_min), float(mk.range_max))
+                except Exception:
+                    pass
+                new_desc = desc_builder.build()
+                try:
+                    sig.set_descriptor(new_desc)
+                except Exception:
+                    try:
+                        sig.descriptor = new_desc
+                    except Exception:
+                        continue
+                if ch_idx < len(self._val_desc):
+                    self._val_desc[ch_idx] = new_desc
+                sett_teller += 1
+                log.info(f"  MQTT {mk.namn}: descriptor enhet={mk.enhet}")
+            except Exception as e:
+                log.warning(f"  MQTT {mk.namn}: signal descriptor feilet: {e}")
 
         log.info(f"  Signal descriptors sett: {sett_teller}/{len(self._kanal_signal)} kanalar")
 
