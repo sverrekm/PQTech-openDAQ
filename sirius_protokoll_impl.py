@@ -239,6 +239,38 @@ class SiriusProtokoll:
         """Les EEPROM-data (enhetsinfo, serienummer, kalibrering)."""
         return self.send_raa_kommando(bytes([OPCODE_EEPROM, 0x1E, addr_hi, addr_lo]))
 
+    def les_lisens_eeprom(self):
+        """Les lisensblokka frå EEPROM (side 0x21, offset 0x40-0xBF).
+
+        Returnerer rå binærdata (130 bytes) som kan skrivast til system_ds.lic.
+        Strukturen er:
+          0x40: 8 bytes header (checksum + datalen)
+          0x48: 16 bytes hash
+          0x58: 16 bytes lisensnøkkel (t.d. DWLQ8JP9YCQD311 + checksum)
+          0x68-0xBF: lisensoppføringar (serienummer, hardware-ID-ar)
+        """
+        # Same EEPROM-adresser som DewesoftX les i pcapng
+        reads = [
+            (0x21, 0x40, 0x08),  # Header
+            (0x21, 0x48, 0x10),  # Hash
+            (0x21, 0x58, 0x10),  # Lisensnøkkel
+            (0x21, 0x68, 0x10),  # Lisensoppføringar
+            (0x21, 0x78, 0x10),
+            (0x21, 0x88, 0x10),
+            (0x21, 0x98, 0x10),
+            (0x21, 0xA8, 0x10),
+            (0x21, 0xB8, 0x10),
+        ]
+        lisens_data = bytearray()
+        for page, offset, length in reads:
+            svar = self.send_raa_kommando(
+                bytes([OPCODE_EEPROM, page, offset, length])
+            )
+            # Svar er 64 bytes; berre dei fyrste `length` bytes er nyttedata
+            lisens_data.extend(svar[:length])
+        log.info(f"Lisens-EEPROM lese: {len(lisens_data)} bytes")
+        return bytes(lisens_data)
+
     def init_kommando(self):
         """Send B0 3F 0C, initialiser/reset enheten."""
         svar = self.send_raa_kommando(bytes([OPCODE_INIT, 0x3F, 0x0C]))

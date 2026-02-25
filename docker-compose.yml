@@ -52,8 +52,8 @@ services:
       - NATIVE_SIRIUS=true
       # Deaktiver RefDevice intern datagenering (Python injiserer ekte data)
       - OPENDAQ_DISABLE_ACQ=1
-      # Serienummer for SIRIUS-eining (USB-serial som Pi ser, knytt til lisens)
-      - OPENDAQ_SERIAL=D019274CF6
+      # Serienummer for SIRIUS-eining (Dewesoft EEPROM-serial)
+      - OPENDAQ_SERIAL=DB19106004
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
       # OPC-UA annonsert IP — sett til container-IP (macvlan)

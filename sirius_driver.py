@@ -1557,6 +1557,20 @@ class SiriusDriver:
             else:
                 log.info("  EEPROM: Dewesoft-serienummer ikkje funne (held USB-serial)")
 
+        # ---- Skriv lisensdata til system_ds.lic for DewesoftX SCP ----
+        try:
+            lisens_bytes = proto.les_lisens_eeprom()
+            lic_path = "/opt/dewesoft/software/system/system_ds.lic"
+            import os
+            if os.path.isdir(os.path.dirname(lic_path)):
+                with open(lic_path, "wb") as f:
+                    f.write(lisens_bytes)
+                log.info(f"  Lisens skrive til {lic_path} ({len(lisens_bytes)} bytes)")
+            else:
+                log.info(f"  Lisens-mappe finst ikkje ({lic_path}), hoppar over")
+        except Exception as e:
+            log.warning(f"  Kunne ikkje lese/skrive lisens-EEPROM: {e}")
+
         # ---- Lo-LV slot-initialisering (slot 4-7) ----
         # INIT_SEKVENS over initialiserer berre Hi-LV slot 0-3.
         # Lo-LV slot 4-7 treng eigen init for kalibrering, filter, modus

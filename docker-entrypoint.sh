@@ -39,7 +39,7 @@ if [ ! -f /opt/dewesoft/scripts/platform_control.sh ]; then
 #   platform_control.sh info booting
 #   platform_control.sh date get/set
 #   platform_control.sh shutdown/reboot cleanly
-SERIAL="${OPENDAQ_SERIAL:-D019274CF6}"
+SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
 case "$1" in
   sysinfo)
     cat <<XML
@@ -109,7 +109,7 @@ ssh-keygen -A 2>/dev/null
 # Viss system.ini manglar: TSystemSettings vert nil → GetDisplayName krasjar.
 # Viss system.xml har feil element-namn: TDSRTSystemProperties parsar feil.
 # =============================================================
-SERIAL="${OPENDAQ_SERIAL:-D019274CF6}"
+SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
 CONTAINER_IP="${OPENDAQ_IP:-192.168.1.161}"
 mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system
 
