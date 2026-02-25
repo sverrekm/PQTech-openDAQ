@@ -352,17 +352,35 @@ class SiriusDriver:
 
         # ---- Skriv lisensdata til system_ds.lic for DewesoftX SCP ----
         # Køyrer alltid etter tilkobling, uavhengig av EP2-status.
+        # DewesoftX sin GetUncompressedLicense forventar komprimert data.
+        # Skriv tre variantar: rå, zlib-komprimert, og Delphi-style (size+zlib).
+        # Berre éin av dei vil fungere — DewesoftX prøver å dekomprimere.
         if self._tilkoblet and self._proto:
             try:
+                import os, zlib, struct
                 lisens_bytes = self._proto.les_lisens_eeprom()
-                lic_path = "/opt/dewesoft/software/system/system_ds.lic"
-                import os
-                if os.path.isdir(os.path.dirname(lic_path)):
+                lic_dir = "/opt/dewesoft/software/system"
+                if os.path.isdir(lic_dir):
+                    # Variant 1: zlib-komprimert (mest sannsynleg)
+                    compressed = zlib.compress(lisens_bytes)
+                    lic_path = os.path.join(lic_dir, "system_ds.lic")
                     with open(lic_path, "wb") as f:
+                        f.write(compressed)
+                    log.info(f"Lisens skrive til {lic_path} "
+                             f"(zlib: {len(compressed)} bytes, rå: {len(lisens_bytes)} bytes)")
+
+                    # Variant 2: rå EEPROM-bytes (backup)
+                    raw_path = os.path.join(lic_dir, "system_ds_raw.lic")
+                    with open(raw_path, "wb") as f:
                         f.write(lisens_bytes)
-                    log.info(f"Lisens skrive til {lic_path} ({len(lisens_bytes)} bytes)")
+
+                    # Variant 3: Delphi TMemoryStream-style (uint32 LE size + zlib)
+                    delphi_path = os.path.join(lic_dir, "system_ds_delphi.lic")
+                    with open(delphi_path, "wb") as f:
+                        f.write(struct.pack("<I", len(lisens_bytes)))
+                        f.write(compressed)
                 else:
-                    log.info(f"Lisens-mappe finst ikkje ({lic_path}), hoppar over")
+                    log.info(f"Lisens-mappe finst ikkje ({lic_dir}), hoppar over")
             except Exception as e:
                 log.warning(f"Kunne ikkje lese/skrive lisens-EEPROM: {e}")
 
