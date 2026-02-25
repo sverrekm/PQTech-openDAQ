@@ -166,7 +166,7 @@ Fase 5: Flush EP2/EP4/EP6
 alle 4 slottar. Hovudkontrollaren responderer paa enkle kommandoar (AE, A0, A1, AC, B0)
 men ikkje paa per-slot register-lesingar (AD op=0x14).
 
-## Status per 2026-02-14
+## Status per 2026-02-24
 
 ### Fungerer
 - [x] Native SIRIUS USB-driver (reverse-engineered protokoll)
@@ -187,6 +187,38 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 - [x] Native Streaming paa :7420
 - [x] mDNS-annonsering via avahi
 - [x] DewesoftX oppdagar og koplar til eininga
+- [x] Start-acquisition sekvens (34 register + reg 0x02 trigger)
+- [x] Full init-sekvens replay fraa pcapng (INIT_SEKVENS, ~1000 AD-kommandoar)
+- [x] Lo-LV slot-initialisering (slot 4-7, 223 kommandoar fraa pcapng)
+- [x] Excitation-spenning 5V unipolar for Rogowski-integrator (pin 1 Exc+)
+- [x] Konfigurerbar to-punkt sensor-skalering per kanal (Web UI)
+- [x] Excitation ON/OFF per kanal (Web UI dropdown)
+- [x] ADC nullpunkt auto-kalibrering (fjernar DC-offset ~-420 counts)
+- [x] DewesoftX mottek reelle ADC-data ved 20 kHz via openDAQ
+- [x] Spenningskanalane (Hi-LV 0-2) viser korrekte 230V AC
+- [x] Straumkanalane (Lo-LV 4-6) viser korrekte verdiar med Rogowski 6kA
+
+### Hardware-oppsett (SIRIUSi-HS)
+
+| Slot | Type | Forsterkar | ADC-range | Sensor | Excitation |
+|------|------|-----------|-----------|--------|------------|
+| 0-2 | Hi-LV | SIRIUS-HS-HVv2 | +/-1600V | Direkte spenning | N/A |
+| 3 | Hi-LV | SIRIUS-HS-HVv2 | +/-1600V | Inaktiv | N/A |
+| 4-6 | Lo-LV | SIRIUS-HS-LVv2 / LV-LEMO10+v2 | +/-5V | Rogowski 6kA (0-3V = 0-6000A) | 5V unipolar |
+| 7 | Lo-LV | SIRIUS-HS-LV-LEMO10+v2 | +/-5V | Inaktiv | Av |
+
+**Lo-LV LEMO 9-pin kontakt (STG module DSUB 9pin):**
+```
+Pin 1 (Exc+)  +5V til integrator
+Pin 2 (In+)   + signal fraa integrator (0-10Vdc)
+Pin 3 (Sns-)  GND (minus til integrator)
+Pin 4 (GND)   GND
+Pin 5 (R+)    Ikkje brukt
+Pin 6 (Sns+)  +5V til integrator (sense)
+Pin 7 (In-)   Bygla til Pin 4 GND (single-ended)
+Pin 8 (Exc-)  GND (minus til integrator)
+Pin 9 (TEDS)  DS2431+ TEDS-chip (sensor-ID)
+```
 
 ### EP2 STATUS: Fungerer ved boot!
 - EP2 streamer ADC-data ved factory-default (etter docker rebuild/USB re-enumerering)
@@ -207,22 +239,96 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 - EP2 leverer 15 872 bytes/pakke ved 20 pkt/s (20 kHz, 8 kanalar, int16 LE)
 - **EP8 OUT (0x08)** var IKKJE brukt i capturen - start skjer via EP1 AD-kommandoar
 
-### Neste steg
+### EXCITATION OG Lo-LV FUNN (2026-02-24)
+- **sundet.dxs** (DewesoftX oppsettfil): ZIP med local.xml, viser excitation=5V for slot 4-6
+- **sirius2.pcapng**: Fangst med Sundet-oppsett, inneheld komplett Lo-LV init
+- **Excitation-kommandoar:** `A5 02 C3 01` (enable) + `A5 02 BC 04` (5V unipolar)
+- **Lo-LV init krev 223 kommandoar** (kalibrering, filter, modus, excitation) for slot 4-7
+- **Slot-spesifikk kalibrering:** A5 04 E9 xx (slot 4=B5, 5=CC, 6=D0, 7=00)
+- **Init-rekkefolgje er kritisk:** Lo-LV init MAA koyre FOER A4 pre-start
+- **ADC DC-offset:** Alle kanalar har ~-420 counts DC-offset, fjerna med auto-kalibrering
+- **Verifisert med 7kW last:** Straum ~10-20A RMS per fase (korrekt for 230V 3-fase)
+
+### Fullfoerte steg
 - [x] **Fange DewesoftX "Start Store" USB-trafikk** - GJORT! (sirius1.pcapng)
 - [x] **Identifiser start-kommando** - FUNNE! Register 0x02 via AD-kommando
-- [ ] **Implementer start-sekvens i sirius_driver.py** - Send 34 register-skrivingar
-      + reg 0x02 trigger for aa starte EP2 etter init-sekvensen har stoppa den
-- [ ] **Test start-sekvens paa Pi** - Verifiser at EP2 kjem tilbake etter init
+- [x] **Implementer start-sekvens i sirius_driver.py** - 34 register + trigger
+- [x] **Test start-sekvens paa Pi** - EP2 startar etter start-acquisition
 - [x] **EP8 OUT (0x08)** - Ikkje brukt av DewesoftX for start. Kan ignorerast.
-- [x] **dev.reset()** - Implementert (commit ab9a419). FX2 rebootter men EP2
-      kjem ikkje tilbake automatisk (hovudkontrollar bevarer tilstand).
-- [x] **uhubctl** - Implementert (commit ab9a419). Power-cycle funkar men
-      treng lang ventetid og pyusb cache-tømming.
+- [x] **dev.reset()** - Implementert (commit ab9a419)
+- [x] **uhubctl** - Implementert (commit ab9a419)
+- [x] **Injiser reelle SIRIUS-data i openDAQ-signalar** - oppdater_data() fungerer
+- [x] **DewesoftX ser live ADC-verdiar** - 8 kanalar ved 20 kHz
+- [x] **Sensor-skalering** - To-punkt lineaer (Rogowski 6kA: 0-3V = 0-6000A)
+- [x] **Excitation-spenning** - 5V unipolar til Lo-LV integrator
+- [x] **ADC nullpunkt** - Auto-kalibrering ved oppstart (~2s)
 
-### Framtidig (etter EP2-start er implementert)
-- [ ] Injiser reelle SIRIUS-data i openDAQ-signalar (oppdater_data fungerer)
-- [ ] DewesoftX ser live ADC-verdiar
-- [ ] Full DewesoftX-integrasjon med 8 kanalar
+### TEDS (Transducer Electronic Data Sheet) - UNDER UTFORSKING
+
+**Kva er TEDS:** IEEE 1451.4 standard for sensor-metadata lagra i EEPROM (DS2431+)
+innebygd i proben/sensorkontakten. Inneheld produsent, modell, kalibrering, range, etc.
+
+**DS2431+ 1-Wire EEPROM:**
+- 128 bytes (4 pages x 32 bytes) + 16 bytes kontrollregister
+- Family code: 0x2D, 8-byte ROM ID (family + 48-bit serial + CRC8)
+- 1-Wire protokoll: Reset → Skip ROM (0xCC) → Read Memory (0xF0) → adresse → data
+- Parasittisk straumforsyning (treng ikkje ekstern VCC)
+- Pull-up motstand ~4.7K paa datalinja
+
+**IEEE 1451.4 TEDS dataformat (128 bytes):**
+```
+Byte 0:        Sjekksum (XOR av bytes 1-31 i page 0)
+Bytes 1-8:     Basic TEDS (64-bit bitstraum, LSB-fyrst):
+                 Bit 0-13:  Manufacturer ID (14 bit)
+                 Bit 14-28: Model Number (15 bit)
+                 Bit 29-33: Version Letter (5 bit, A=1..Z=26)
+                 Bit 34-39: Version Number (6 bit)
+                 Bit 40-63: Serial Number (24 bit)
+Bytes 9-31:    Template TEDS data (template selector + sensorspesifikke felt)
+Bytes 32-127:  Kalibrering, brukardata, ekstra template-data (3 pages)
+```
+
+**Template-typar (byte 9, bit 64-71):**
+- 25 = IEPE akselerometer/kraft
+- 30 = Hoegnivaa spenning
+- 33 = Resistiv bru (strain gauge)
+- 36 = Termoelement
+- 37 = RTD
+
+**Tilgang via SIRIUS Lo-LV (Class 2 MMI):**
+- Pin 9 (TEDS) paa LEMO-kontakten er dedikert 1-Wire datalinje
+- Class 2: Direkte 1-Wire tilgang (ingen polaritetsreversering som Class 1/IEPE)
+- SIRIUS har truleg innebygd 1-Wire master i kvar slot-forsterkar
+
+**Pcapng-analyse (sirius1 + sirius2):**
+- DewesoftX probar **register 0x15** med sub-adresser: 0x80, 0xA0, 0xA8, 0xAA, 0xEA, 0xFA, 0xFE, 0xFF
+- Alle svar er `0xFF` (ingen TEDS-data returnert)
+- Register 0x15 vart lese FOER Lo-LV init — 1-Wire-brua var truleg ikkje aktiv
+- Ingen andre TEDS-spesifikke kommandoar funne i pcapng-data
+- EEPROM (A8) inneheld berre enheitsdata (serienr, lisensnokkel, fabrikkalibrering)
+
+**Probe Tester App (D:\\Koding\\Probe_tester_app):**
+- Separat app med Arduino som les DS2431+ direkte via 1-Wire
+- Arduino sender data over seriell (COM3, 115200 baud):
+  - `Fabrikk-ID:` — ROM-ID fraa DS2431+
+  - `Custom-ID:` — brukar-ID (skriv med `SETID`-kommando)
+  - `Strøm:` / `Motstand:` — elektriske maalingar
+- Stadfester at probane HAR DS2431+ TEDS-chip
+- Kan lese og skrive EEPROM (128 bytes)
+
+**Uloyst: Korleis lese TEDS gjennom SIRIUS USB-protokoll?**
+- Register 0x15 er kandidat, men returnerte berre 0xFF
+- Mogleg at 1-Wire-brua krev init/excitation foer den responderer
+- Kan vere ukjende A5 sub-kommandoar (0x05, 0x07, 0x08?) for 1-Wire tilgang
+- Alternativ: Fange ny pcapng medan DewesoftX eksplisitt les TEDS
+
+### Framtidig
+- [ ] Verifiser straumverdiar mot kjend last (meir noyaktig kalibrering)
+- [ ] DewesoftX viser korrekte einingar (A for straum, V for spenning)
+- [ ] Fleire excitation-alternativ (2.5V, 10V) viss noedvendig
+- [ ] TEDS-lesing gjennom SIRIUS USB-protokoll (register 0x15 eller A5 sub-cmd)
+- [ ] Auto-konfigurasjon av sensor-skalering basert paa TEDS-data
+- [ ] Korrekt AC RMS-berekning (per-syklus i staden for per-blokk)
 
 ## Feilsoekingshistorikk
 
@@ -324,6 +430,39 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 - uhubctl: lenger vent (8s), pyusb cache-tømming, retry-loop for reconnect
 - EP2 recovery er no MANUELT (Gjenoppliv EP2-knappen), ikkje auto-trigga
 
+### Problem 14: Lo-LV slottar ikkje initialiserte (LOYST)
+**Symptom:** Lo-LV kanalar 4-6 (Rogowski straumprobar) viste berre stoy/null i DewesoftX
+**Aarsak:** Init-sekvensen (INIT_SEKVENS) inneheldt berre Hi-LV slottar 0-3.
+  Lo-LV slottar 4-7 krev ein eigen init-sekvens med 223 kommandoar:
+  kalibrering (A5 03 9A xx), filter, modus, excitation (A5 02 C3 01 / A5 02 BC 04),
+  og slot-kalibrering (A5 04 E9 xx). Utan denne sekvensen responderer ikkje
+  forsterkarane og excitation-spenning vert ikkje aktivert.
+**Kjelde:** `sirius2.pcapng` - Wireshark-fangst med Sundet-oppsett (alle 8 kanalar aktive)
+**Loysing:** Ekstraherte 4 slot-spesifikke init-sekvensar (LV_SLOT4_INIT..LV_SLOT7_INIT)
+  og la dei til i `sirius_init_sekvens.py`. Replay i `_start_acquisition()` (commit 98683eb)
+
+### Problem 15: Lo-LV init-rekkefolgje feil (LOYST)
+**Symptom:** Lo-LV init vart lagt ETTER A4 pre-start. Kanalar viste framleis berre
+  stoy med ~-430 raw count DC-offset, sjolv med 7kW 3-fase last.
+**Aarsak:** DewesoftX sender Lo-LV slot-init (register 0x13 skriving) FOER A4 00 (pre-start).
+  Naar init kom etter A4 var forsterkarkonfigurasjonen ikkje aktiv under streaming.
+**Loysing:** Flytta Lo-LV init til "Steg 0" i `_start_acquisition()`, foer A4 pre-start
+  og excitation-oppsett. Matchande rekkefolgje som DewesoftX (commit 98683eb)
+
+### Problem 16: ADC DC-offset gir feil straumverdiar (LOYST)
+**Symptom:** Straum-kanalar viste ~131A RMS med 7kW last (forventa ~10A per fase).
+  Spenningskanalar viste ~23V phantom paa inaktiv kanal 3.
+**Aarsak:** Alle ADC-kanalar har ein konstant DC-offset paa ~-420 raw int16 counts.
+  Denne offseten dominerte dei relativt smaa straumsignala (~150 counts peak-to-peak).
+  Offset-kjelda er truleg forsterkar-referansedrift eller ADC-nullpunkt-drift.
+**Loysing:** Auto-kalibrering av ADC-nullpunkt i `opendaq_bro.py`:
+  1. Akkumulerer raatt ADC-gjennomsnitt over fyrste 40 datablokker (~2 sekund)
+  2. Lagrar per-kanal DC-offset i `_adc_nullpunkt`
+  3. Subtraherer offset (i skalerte einingar) fraa alle etterfylgjande data
+  4. Reset ved kanal-rekonfigurering
+  **Resultat:** kanal 0-2: ~224V RMS (korrekt 230V AC), kanal 3: 0.07V,
+  kanal 4-6: 14-23A RMS (korrekt for 7kW/3 fasar), kanal 7: 0.00 (commit 98683eb)
+
 ## Git-commits (kronologisk)
 
 | Commit | Beskriving |
@@ -345,20 +484,39 @@ men ikkje paa per-slot register-lesingar (AD op=0x14).
 | 31e4453 | Auto-recover EP2 via sysfs USB power-cycle when EP2 test fails |
 | 3257461 | EP2 revival: 7 command strategies to restart dead ADC streaming |
 | ab9a419 | EP2 hardware reset: dev.reset() + uhubctl power-cycle |
+| 595a29a | Revert serial til DB19106004 (Dewesoft instrument-serial) |
+| 246dc25 | Fix DewesoftX GetDisplayName crash: system.ini + korrekt XML |
+| e85a276 | Fix "Invalid or no data": GetPossibleSampleRate + lisens-fiks |
+| 482c14c | Fix GetPossibleSampleRate: IntProperty i staden for ListProperty |
+| 2bbf915 | Try FloatProperty for GetPossibleSampleRate |
+| 716277b | Fix root cause: handle custom namespace DataTypes i OPC-UA |
+| d5fb650 | Optimaliser data acquisition rate fraa 2 kHz til 20 kHz |
+| da595a0 | Oppdater feilsokingslogg med Fase 8: acquisition rate 2→20 kHz |
+| c1f033b | Fix Dockerfile: bruk arkitektur-spesifikke kompilatorflagg |
+| 34e6a4a | Verifisert: DewesoftX mottek data ved 20000 Hz |
+| 8df83bb | Konfigurerbar to-punkt sensor-skalering per kanal med Web UI |
+| 8d33208 | Fix validering: godta 8 eller 9 kanalar i PUT /api/kanalar |
+| 4fa5be4 | Excitation voltage for Lo-LV integrator + UI-forbetringar |
+| 0b54e09 | Excitation-spenning konfigurerbar per kanal i Web UI |
+| 98683eb | Lo-LV slot-init, excitation og ADC nullpunkt auto-kalibrering |
 
 ## Filar
 
 | Fil | Beskriving |
 |-----|-----------|
-| sirius_driver.py | SIRIUS USB-driver: tilkobling, init, streaming, EP2-gjenoppliving |
+| sirius_driver.py | SIRIUS USB-driver: tilkobling, init, Lo-LV init, excitation, streaming |
 | sirius_protokoll_impl.py | Lavnivaa USB-protokoll (EP1 kommandoar, AD/B1 poll) |
 | sirius_server.py | Server: driver + openDAQ bro + web UI + autonom maaling |
-| opendaq_bro.py | openDAQ nettverksbro (OPC-UA, streaming, 8 kanalar) |
+| opendaq_bro.py | openDAQ nettverksbro (OPC-UA, streaming, sensor-skalering, nullpunkt) |
 | kanal_konfig.py | Kanal-konfigurasjon datamodell og JSON-persistens |
 | web_ui.py | Flask web UI med live status, debug, kanal-konfig |
 | docker-entrypoint.sh | Container oppstart, hostname-fiks, modul-deaktivering |
 | docker-compose.yml | Docker Compose (privileged, host network, /sys mounted) |
 | Dockerfile | Multi-stage: bygg openDAQ + runtime |
+| sirius_init_sekvens.py | Init-sekvensar fraa pcapng: INIT_SEKVENS + LV_SLOT4-7_INIT |
+| _deploy.py | Deploy-skript: kopier filer til Pi-container via SSH/docker cp |
+| _hent_live.py | Hjelpar: hent live-data fraa container via SSH |
+| frontend/ | React (Vite) Web UI: dashboard, kanal-konfig, sensor-skalering, debug |
 | sirius_adc_leser.py | Referanse: enkel EP2-lesar (fungerte paa factory-fresh device) |
 | sirius_sniffer.py | USB-trafikk sniffer for protokoll-analyse |
 | sirius_dekoder.py | Dekoder for sniffa USB-pakkar |
