@@ -384,7 +384,17 @@ class OpenDAQBro:
             self._fiks_primary_connection_strings(ip)
 
             # Fase 3: Aktiver mDNS-discovery
+            # BERRE NativeStreaming — ikkje OPC-UA.
+            # OPC-UA er tilgjengeleg på port 4840 for intern bruk
+            # (NativeStreaming-protokollen brukar OPC-UA for metadata),
+            # men skal IKKJE annonserast som separat eining via mDNS.
+            # Med OPC-UA discovery aktiv ser DewesoftX to einingar:
+            #   1) RefDev0 (via daq.nd://) — fungerer
+            #   2) openDAQ Device (via daq.opcua://) — duplikat, error 0x80000006
             for srv_type, server in servers_added:
+                if srv_type == 'OpenDAQOPCUA':
+                    log.info(f"  {srv_type}: discovery IKKJE aktivert (unngår duplikat i DewesoftX)")
+                    continue
                 try:
                     server.enable_discovery()
                     log.info(f"  {srv_type}: discovery aktivert")
