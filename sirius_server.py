@@ -506,7 +506,8 @@ def hent_enhet_konfig_dict():
     if _enhet_konfig is None:
         _enhet_konfig = les_enhet_konfig()
     return {"antal_adc_kanalar": _enhet_konfig.antal_adc_kanalar,
-            "modell": _enhet_konfig.modell}
+            "modell": _enhet_konfig.modell,
+            "location": _enhet_konfig.location}
 
 
 def oppdater_enhet(ny_konfig: EnhetKonfig):
@@ -611,6 +612,24 @@ def hent_opendaq_verdiar():
     return {}
 
 
+def _oppdater_system_ini_location(location: str):
+    """Oppdater DisplayLocation i system.ini slik at DewesoftX ser ny plassering."""
+    ini_sti = Path("/opt/dewesoft/software/system/system.ini")
+    try:
+        if ini_sti.exists():
+            linjer = ini_sti.read_text(encoding='utf-8').splitlines()
+            nye_linjer = []
+            for linje in linjer:
+                if linje.startswith("DisplayLocation="):
+                    nye_linjer.append(f"DisplayLocation={location}")
+                else:
+                    nye_linjer.append(linje)
+            ini_sti.write_text('\n'.join(nye_linjer) + '\n', encoding='utf-8')
+            log.info(f"  system.ini DisplayLocation oppdatert: '{location}'")
+    except Exception as e:
+        log.warning(f"  Kunne ikkje oppdatere system.ini: {e}")
+
+
 def restart_opendaq_bro():
     """Manuell restart av openDAQ bridge (for debugging/retry).
 
@@ -695,6 +714,9 @@ def restart_opendaq_bro():
         _mqtt_konfig_fresh = les_mqtt_konfig()
         _enhet_fresh = les_enhet_konfig()
         mqtt_k = _mqtt_konfig_fresh.kanalar if _mqtt_konfig_fresh.broker.aktivert else []
+        # Oppdater location env var og system.ini slik at C++ og DewesoftX ser ny verdi
+        os.environ["OPENDAQ_LOCATION"] = _enhet_fresh.location
+        _oppdater_system_ini_location(_enhet_fresh.location)
         # Berre vis ADC-kanalar viss SIRIUS er tilkobla OG vi ikkje er i USB/IP-modus
         sirius_ok = server_status.get("tilkoblet", False)
         modus = les_modus()

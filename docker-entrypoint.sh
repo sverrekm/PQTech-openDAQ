@@ -166,7 +166,7 @@ SYSXML
 cat > /opt/dewesoft/software/system/system.ini <<SYSINI
 [Settings]
 DisplayName=${DEVICE_MODEL}
-DisplayLocation=
+DisplayLocation=${OPENDAQ_LOCATION:-}
 DeviceBehaviour=DewesoftDAQ
 GroupLogicalID=
 SYSINI

@@ -31,6 +31,7 @@ class EnhetKonfig:
     """Konfigurasjon for Dewesoft-instrumentet."""
     antal_adc_kanalar: int = 8       # 4, 8, 16 etc. avhengig av modell
     modell: str = ""                 # Auto-detektert eller manuelt sett (tom = ukjend)
+    location: str = ""               # Plassering som visest i DewesoftX (t.d. "Verksted", "Tavle 3")
 
 
 def les_enhet_konfig() -> EnhetKonfig:
@@ -41,6 +42,7 @@ def les_enhet_konfig() -> EnhetKonfig:
             konfig = EnhetKonfig(
                 antal_adc_kanalar=int(data.get("antal_adc_kanalar", 8)),
                 modell=str(data.get("modell", "")),
+                location=str(data.get("location", "")),
             )
             log.info(f"Lasta enhet-konfig: {konfig.antal_adc_kanalar} ADC-kanalar, "
                      f"modell={konfig.modell}")
@@ -84,8 +86,9 @@ def valider_enhet_konfig(data: dict) -> tuple:
         return None, f"antal_adc_kanalar {n} utanfor gyldig omraade (1-32)"
 
     modell = str(data.get("modell", ""))
+    location = str(data.get("location", ""))
 
-    return EnhetKonfig(antal_adc_kanalar=n, modell=modell), None
+    return EnhetKonfig(antal_adc_kanalar=n, modell=modell, location=location), None
 
 
 # --- Modus-persistens ---

@@ -3,7 +3,7 @@ import type { EnhetKonfig } from '../api/types'
 import { fetchEnhetKonfig, oppdaterEnhetKonfig } from '../api/enhet'
 
 export default function DeviceSettingsCard() {
-  const [konfig, setKonfig] = useState<EnhetKonfig>({ antal_adc_kanalar: 8, modell: '' })
+  const [konfig, setKonfig] = useState<EnhetKonfig>({ antal_adc_kanalar: 8, modell: '', location: '' })
   const [melding, setMelding] = useState<string | null>(null)
   const [lagrar, setLagrar] = useState(false)
 
@@ -27,7 +27,7 @@ export default function DeviceSettingsCard() {
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Enhet</h2>
 
-      <div className="grid grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-2 gap-4 mb-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Antal ADC-kanalar</label>
           <select
@@ -49,6 +49,16 @@ export default function DeviceSettingsCard() {
             onChange={e => setKonfig({ ...konfig, modell: e.target.value })}
           />
         </div>
+      </div>
+      <div className="mb-4">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Location (visest i DewesoftX)</label>
+        <input
+          type="text"
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+          value={konfig.location}
+          onChange={e => setKonfig({ ...konfig, location: e.target.value })}
+          placeholder="t.d. Verksted, Tavle 3, Sundet"
+        />
       </div>
 
       <div className="flex items-center gap-3">

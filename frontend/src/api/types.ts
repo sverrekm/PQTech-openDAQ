@@ -203,4 +203,5 @@ export interface MqttStatus {
 export interface EnhetKonfig {
   antal_adc_kanalar: number
   modell: string
+  location: string
 }

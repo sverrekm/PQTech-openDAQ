@@ -264,7 +264,10 @@ if serial_line in content:
     devInfo.setParentMacAddress("");
     devInfo.setSystemType("");
     devInfo.setSystemUuid("");
-    devInfo.setLocation("");
+    {
+        const char* envLoc = std::getenv("OPENDAQ_LOCATION");
+        devInfo.setLocation(envLoc && envLoc[0] ? envLoc : "");
+    }
     devInfo.setUserName("");
 
     // DeviceType: DewesoftX krasjar med 'Interface object is nil' i
