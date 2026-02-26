@@ -113,8 +113,52 @@ def finn_sirius_busid():
     return None, None
 
 
+def _rydd_stale_usbip(busid=None):
+    """Rydd opp stale usbip-tilstand: drep usbipd og unbind.
+
+    Kernel usbip-host-driveren hugsar 'exported'-tilstand frå tidlegare
+    sesjonar. Utan unbind+rebind får Windows-klienten 'Device busy
+    (already exported)' ved attach. Denne funksjonen nullstiller alt.
+    """
+    global _usbipd_prosess
+
+    # 1. Drep vår eigen usbipd-prosess
+    if _usbipd_prosess and _usbipd_prosess.poll() is None:
+        try:
+            _usbipd_prosess.terminate()
+            _usbipd_prosess.wait(timeout=3)
+        except Exception:
+            try:
+                _usbipd_prosess.kill()
+            except Exception:
+                pass
+        _usbipd_prosess = None
+
+    # 2. Drep eventuelle andre usbipd-prosessar (frå tidlegare container-køyring)
+    try:
+        subprocess.run(["killall", "usbipd"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+    # 3. Unbind enheten for å nullstille 'exported'-tilstand
+    target_busid = busid or usbip_status.get("busid")
+    if target_busid:
+        try:
+            subprocess.run(
+                ["usbip", "unbind", f"--busid={target_busid}"],
+                capture_output=True, text=True, timeout=10
+            )
+            log.info(f"Rydda stale usbip bind: busid={target_busid}")
+        except Exception:
+            pass
+
+
 def del_enhet():
     """Bind SIRIUS til usbip + start usbipd daemon paa port 3240.
+
+    Ryddar ALLTID opp stale tilstand fyrst (unbind + kill usbipd) for å
+    unngaa 'Device busy (already exported)' frå Windows-klienten.
+
     Returnerer (suksess, melding).
     """
     global _usbipd_prosess
@@ -135,7 +179,10 @@ def del_enhet():
             usbip_status["feil"] = feil
             return False, feil
 
-        # 3. Bind enheten til usbip-host
+        # 3. Rydd opp stale tilstand (drep gammal usbipd + unbind)
+        _rydd_stale_usbip(busid)
+
+        # 4. Bind enheten til usbip-host (friskt bind etter unbind)
         try:
             r = subprocess.run(
                 ["usbip", "bind", f"--busid={busid}"],
@@ -151,23 +198,20 @@ def del_enhet():
             usbip_status["feil"] = feil
             return False, feil
 
-        # 4. Start usbipd daemon
-        if _usbipd_prosess and _usbipd_prosess.poll() is None:
-            log.info("usbipd kjorer allerede")
-        else:
-            try:
-                _usbipd_prosess = subprocess.Popen(
-                    ["usbipd", "--tcp-port", str(USBIP_PORT)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                log.info(f"usbipd startet paa port {USBIP_PORT} (pid={_usbipd_prosess.pid})")
-            except Exception as e:
-                feil = f"Kunne ikke starte usbipd: {e}"
-                usbip_status["feil"] = feil
-                return False, feil
+        # 5. Start ny usbipd daemon
+        try:
+            _usbipd_prosess = subprocess.Popen(
+                ["usbipd", "--tcp-port", str(USBIP_PORT)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            log.info(f"usbipd startet paa port {USBIP_PORT} (pid={_usbipd_prosess.pid})")
+        except Exception as e:
+            feil = f"Kunne ikke starte usbipd: {e}"
+            usbip_status["feil"] = feil
+            return False, feil
 
-        # 5. Oppdater status
+        # 6. Oppdater status
         usbip_status.update({
             "tilgjengelig": True,
             "deling_aktiv": True,
