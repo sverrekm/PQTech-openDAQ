@@ -216,7 +216,7 @@ replacements = [
     ('devInfo.setManufacturer("openDAQ")',
      'devInfo.setManufacturer("Dewesoft")'),
     ('devInfo.setModel("Reference device")',
-     'devInfo.setModel(std::getenv("OPENDAQ_MODEL") && std::getenv("OPENDAQ_MODEL")[0] ? std::getenv("OPENDAQ_MODEL") : "Dewesoft Instrument")'),
+     'devInfo.setModel(std::getenv("OPENDAQ_MODEL") && std::getenv("OPENDAQ_MODEL")[0] ? std::getenv("OPENDAQ_MODEL") : "PQTech-openDAQ")'),
 ]
 
 patched = 0
@@ -238,7 +238,7 @@ if serial_line in content:
     // Namn: DewesoftX viser dette i HW Settings (lest frå OPENDAQ_MODEL env)
     {
         const char* envModel = std::getenv("OPENDAQ_MODEL");
-        devInfo.setName(envModel && envModel[0] ? envModel : "Dewesoft Instrument");
+        devInfo.setName(envModel && envModel[0] ? envModel : "PQTech-openDAQ");
     }
     // MAC-adresse: les frå OPENDAQ_MAC miljøvariabel (sett i entrypoint)
     {
@@ -273,7 +273,7 @@ if serial_line in content:
     {
         const char* envModel = std::getenv("OPENDAQ_MODEL");
         std::string model = (envModel && envModel[0]) ? envModel : "Dewesoft Instrument";
-        devInfo.setDeviceType(DeviceType("dewesoft_instrument", model, "Dewesoft Data Acquisition", "daq.opcua", nullptr));
+        devInfo.setDeviceType(DeviceType("pqtech_opendaq", model, "PQTech openDAQ Bridge", "daq.opcua", nullptr));
     }"""
     content = content[:end_idx] + extra + content[end_idx:]
     patched += 1

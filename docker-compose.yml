@@ -54,6 +54,8 @@ services:
       - OPENDAQ_DISABLE_ACQ=1
       # Serienummer (tom = auto-detektert fraa instrumentet)
       - OPENDAQ_SERIAL=
+      # Modellnamn som visest i DewesoftX (tom = "PQTech-openDAQ")
+      - OPENDAQ_MODEL=PQTech-openDAQ
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
       # OPC-UA annonsert IP — sett til container-IP (macvlan)

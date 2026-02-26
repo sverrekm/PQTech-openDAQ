@@ -40,14 +40,14 @@ if [ ! -f /opt/dewesoft/scripts/platform_control.sh ]; then
 #   platform_control.sh date get/set
 #   platform_control.sh shutdown/reboot cleanly
 SERIAL="${OPENDAQ_SERIAL:-PQTech}"
-DEVICE_MODEL="${OPENDAQ_MODEL:-Dewesoft Instrument}"
+DEVICE_MODEL="${OPENDAQ_MODEL:-PQTech-openDAQ}"
 case "$1" in
   sysinfo)
     cat <<XML
 <?xml version="1.0"?>
 <SystemProperties>
   <DeviceId>${DEVICE_MODEL}</DeviceId>
-  <DeviceDisplayName>${DEVICE_MODEL} [${SERIAL}]</DeviceDisplayName>
+  <DeviceDisplayName>${DEVICE_MODEL}</DeviceDisplayName>
   <DeviceName>${DEVICE_MODEL}</DeviceName>
   <SerialNumber>${SERIAL}</SerialNumber>
   <SystemSerialNumber>${SERIAL}</SystemSerialNumber>
@@ -111,7 +111,7 @@ ssh-keygen -A 2>/dev/null
 # Viss system.xml har feil element-namn: TDSRTSystemProperties parsar feil.
 # =============================================================
 SERIAL="${OPENDAQ_SERIAL:-PQTech}"
-DEVICE_MODEL="${OPENDAQ_MODEL:-Dewesoft Instrument}"
+DEVICE_MODEL="${OPENDAQ_MODEL:-PQTech-openDAQ}"
 CONTAINER_IP="${OPENDAQ_IP:-192.168.1.161}"
 mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system
 
@@ -122,7 +122,7 @@ cat > /opt/dewesoft/scripts/system.xml <<SYSXML
 <?xml version="1.0"?>
 <SystemProperties>
   <DeviceId>${DEVICE_MODEL}</DeviceId>
-  <DeviceDisplayName>${DEVICE_MODEL} [${SERIAL}]</DeviceDisplayName>
+  <DeviceDisplayName>${DEVICE_MODEL}</DeviceDisplayName>
   <DeviceName>${DEVICE_MODEL}</DeviceName>
   <SerialNumber>${SERIAL}</SerialNumber>
   <SystemSerialNumber>${SERIAL}</SystemSerialNumber>
@@ -165,7 +165,7 @@ SYSXML
 # med "Access violation Read of address 0000000000000008".
 cat > /opt/dewesoft/software/system/system.ini <<SYSINI
 [Settings]
-DisplayName=${DEVICE_MODEL} [${SERIAL}]
+DisplayName=${DEVICE_MODEL}
 DisplayLocation=
 DeviceBehaviour=DewesoftDAQ
 GroupLogicalID=
