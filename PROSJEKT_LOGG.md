@@ -1,46 +1,70 @@
-# openDAQ SIRIUS Bridge - Prosjektlogg
+# PQTech openDAQ Bridge - Prosjektlogg
 
 ## Oversikt
 
-Raspberry Pi 5 med Dewesoft SIRIUSi-HS (8 AI-kanalar) tilkobla via USB.
-Docker-container kjoerer native SIRIUS-driver for autonome maalingar,
-og openDAQ nettverksbro for DewesoftX-tilkobling over nettverk.
+Raspberry Pi 5 med Dewesoft-instrument tilkobla via USB.
+Docker-container med to hovudmodusar:
 
-**Maal:** DewesoftX paa Windows skal kunne koble til SIRIUS via openDAQ-protokollen
-over nettverket, samtidig som native driver held fram med autonome maalingar.
+1. **USB/IP-modus** (generisk) — Del kva som helst Dewesoft-instrument
+   (SIRIUS, KRYPTON, IOLITE, MINITAURs) til Windows via USB/IP.
+   DewesoftX ser instrumentet som lokal USB-eining.
+2. **Direkte-modus** (SIRIUS-spesifikk) — Pi les ADC-data direkte via
+   reverse-engineered USB-protokoll og strøymer via openDAQ.
 
-## Hardware
+**Bonus:** MQTT-sensorar kan strøymast som ekstra kanalar via openDAQ-broen
+uavhengig av modus (t.d. temperaturprobar, værstasjonar).
+
+**Mål:** Fleksibel gateway mellom Dewesoft-instrument og DewesoftX over nettverk,
+med MQTT-sensorintegrering som tilleggsverdi.
+
+## Hardware (testoppsett)
 
 | Komponent | Detaljar |
 |-----------|----------|
 | Datamaskin | Raspberry Pi 5 |
-| Instrument | Dewesoft SIRIUSi-HS, 8 AI-kanalar, S/N D019274CF6, FW 2.11.1.1 |
+| Instrument | Dewesoft SIRIUSi-HS, 8 AI-kanalar |
 | Tilkobling | USB direkte til Pi (Bus 3, VID=0x1CED, PID=0x1002) |
-| Pi nettverk | WiFi 192.168.1.160, Kabla 192.168.1.53 |
-| Windows PC | 192.168.1.100 (DewesoftX 2025.3 DEMO) |
+| Container IP | 192.168.1.161 (macvlan) |
+| Windows PC | DewesoftX 2025.3 |
 
 ## Arkitektur
 
 ```
-SIRIUS ──USB──> SiriusDriver (native, reverse-engineered)
-                    |
-                    +──> Kontinuerleg EP2-streaming (start ved boot, aldri stopp)
-                    +──> Autonom maaler (les fraa buffer, CSV/NPZ kvar 60s)
-                    +──> Web UI (:8080, live kanal-verdiar)
-                    |
-              OpenDAQBro (opendaq_bro.py)
-                    |
-                    +──> daqref://device0 (sub-device, 8 AI-kanalar)
-                    +──> oppdater_data() injiserer ADC-data i openDAQ-signal
-                    +──> OPC-UA server (:4840)
-                    +──> Native Streaming (:7420)
-                    +──> WebSocket/LT Streaming (:7414)
-                    +──> mDNS via avahi (Pi host)
-                    |
-              DewesoftX (Windows)
-                    +──> Oppdagar eininga via mDNS
-                    +──> Koplar til via OPC-UA + Native Streaming
+                        ┌─────────────────────────────────────────┐
+                        │  Docker-container (pqtech-opendaq)      │
+                        │                                         │
+  Dewesoft ──USB──>     │  ┌── USB/IP-modus ──────────────────┐  │
+  instrument            │  │  usbip bind + usbipd (:3240)     │  │
+                        │  │  → Windows: usbip attach          │  │
+                        │  │  → DewesoftX ser lokal USB        │  │
+                        │  └──────────────────────────────────┘  │
+                        │                                         │
+                        │  ┌── Direkte-modus (SIRIUS) ────────┐  │
+                        │  │  SiriusDriver (reverse-engineered)│  │
+                        │  │  → EP2 ADC-streaming              │  │
+                        │  │  → Autonom maaler (CSV/NPZ)       │  │
+                        │  └──────────┬───────────────────────┘  │
+                        │             │                           │
+                        │  ┌── openDAQ Nettverksbro ──────────┐  │
+  MQTT broker ──────>   │  │  ADC-kanalar (0..N frå SIRIUS)   │  │
+  (temp, vêr, etc.)     │  │  + MQTT-kanalar (bonus-sensorar) │  │
+                        │  │  NativeStreaming (:7420)           │  │
+                        │  │  OPC-UA (:4840, intern)           │  │
+                        │  │  mDNS-annonsering                 │  │
+                        │  └──────────┬───────────────────────┘  │
+                        └─────────────┼───────────────────────────┘
+                                      │
+                              DewesoftX (Windows)
+                              → Finn eining via mDNS / daq.nd://
+                              → ADC + MQTT kanalar i same system
 ```
+
+### Modus-persistens
+
+Sist aktive modus (`direkte` / `usbip`) vert lagra i `/data/konfig/modus.json`.
+Ved container-restart vert same modus automatisk gjenoppretta:
+- USB/IP: Hoppar over SIRIUS-tilkobling, startar usbipd automatisk
+- Direkte: Koplar til SIRIUS-driver, startar ADC-streaming
 
 ## USB-protokoll (reverse-engineered)
 
@@ -166,39 +190,71 @@ Fase 5: Flush EP2/EP4/EP6
 alle 4 slottar. Hovudkontrollaren responderer paa enkle kommandoar (AE, A0, A1, AC, B0)
 men ikkje paa per-slot register-lesingar (AD op=0x14).
 
-## Status per 2026-02-24
+## Status per 2026-02-26
 
-### Fungerer
+### Hovudfunksjonar
+
+#### USB/IP-modus (generisk)
+- [x] Alle Dewesoft-instrument (SIRIUS, KRYPTON, IOLITE, MINITAURs) kan delast via USB/IP
+- [x] `usbip bind` + `usbipd` på port 3240
+- [x] Windows-klient: `usbip attach` → DewesoftX ser instrument som lokal USB
+- [x] Robust cleanup av stale kernel-state (kill usbipd → unbind → bind → start)
+- [x] Automatisk gjenoppretting ved container-restart (modus-persistens)
+
+#### Direkte-modus (SIRIUS-spesifikk)
 - [x] Native SIRIUS USB-driver (reverse-engineered protokoll)
 - [x] USB-tilkobling med auto-detach, set_configuration
 - [x] EP1 kommandokanal (send/motta kommandoar)
-- [x] USB string descriptor-lesing (produsent, produkt, serienr)
-- [x] sysfs USB power-cycle (deauthorize/reauthorize via /sys/bus/usb)
-- [x] Kontinuerleg streaming-modell (start ein gong, aldri stopp)
-- [x] EP2 status-tracking (ep2_ok property)
-- [x] 7-strategis EP2 gjenoppliving (kommando-basert)
-- [x] Kanal-konfig med JSON-persistens (/data/konfig/kanalar.json)
-- [x] Autonom maaling med CSV/NPZ-lagring (samlar fraa buffer)
-- [x] Web UI paa port 8080 med live status, Rekoble, Gjenoppliv EP2
-- [x] Debug-kommando i web UI (send vilkaarleg hex til EP1)
-- [x] openDAQ kompilert fraa kildekode (v3.31, aarch64 Docker)
-- [x] openDAQ nettverksbro med 8 AI-kanalar
-- [x] OPC-UA server paa :4840
-- [x] Native Streaming paa :7420
-- [x] mDNS-annonsering via avahi
-- [x] DewesoftX oppdagar og koplar til eininga
+- [x] EP2 ADC-streaming ved 20 kHz, 8 kanalar
 - [x] Start-acquisition sekvens (34 register + reg 0x02 trigger)
-- [x] Full init-sekvens replay fraa pcapng (INIT_SEKVENS, ~1000 AD-kommandoar)
-- [x] Lo-LV slot-initialisering (slot 4-7, 223 kommandoar fraa pcapng)
-- [x] Excitation-spenning 5V unipolar for Rogowski-integrator (pin 1 Exc+)
-- [x] Konfigurerbar to-punkt sensor-skalering per kanal (Web UI)
-- [x] Excitation ON/OFF per kanal (Web UI dropdown)
+- [x] Full init-sekvens replay frå pcapng (~1000 AD-kommandoar)
+- [x] Lo-LV slot-initialisering (slot 4-7, 223 kommandoar frå pcapng)
+- [x] Excitation-spenning 5V unipolar for Rogowski-integrator
 - [x] ADC nullpunkt auto-kalibrering (fjernar DC-offset ~-420 counts)
-- [x] DewesoftX mottek reelle ADC-data ved 20 kHz via openDAQ
-- [x] Spenningskanalane (Hi-LV 0-2) viser korrekte 230V AC
-- [x] Straumkanalane (Lo-LV 4-6) viser korrekte verdiar med Rogowski 6kA
+- [x] Konfigurerbar to-punkt sensor-skalering per kanal
 
-### Hardware-oppsett (SIRIUSi-HS)
+#### openDAQ Nettverksbro
+- [x] openDAQ v3.31 kompilert frå kildekode (aarch64 Docker)
+- [x] Dynamisk antal ADC-kanalar (0..N basert på modus og tilkobling)
+- [x] MQTT-kanalar som ekstra openDAQ-signalar (bonus-sensorar)
+- [x] NativeStreaming på :7420 med mDNS-annonsering
+- [x] OPC-UA på :4840 (intern, utan mDNS — unngår duplikat i DewesoftX)
+- [x] DewesoftX oppdagar og koplar til eininga via `daq.nd://`
+
+#### MQTT Virtuelle Kanalar
+- [x] Abonner på vilkårlege MQTT-topics (JSON eller rå payload)
+- [x] JSON-sti-ekstraksjon (t.d. `temperature.value`)
+- [x] Konfigurerbar range (min/max), eining, namn per kanal
+- [x] MQTT-kanalar synlege i DewesoftX saman med ADC-kanalar
+- [x] Fungerer i begge modusar (med eller utan SIRIUS tilkobla)
+- [x] Web UI for full MQTT broker- og kanal-konfigurasjon
+
+#### Modus-persistens
+- [x] Sist aktive modus lagra i `/data/konfig/modus.json`
+- [x] Automatisk gjenoppretting ved container-restart
+- [x] USB/IP: Hoppar over SIRIUS-tilkobling, startar usbipd automatisk
+- [x] Direkte: Koplar til SIRIUS-driver, startar ADC-streaming
+- [x] `GET /api/modus` returnerer gjeldande modus
+
+#### Generisk instrument-støtte
+- [x] Instrument-modell og serienummer via env vars (`OPENDAQ_MODEL`, `OPENDAQ_SERIAL`)
+- [x] C++ openDAQ-patch les modell frå env var ved runtime
+- [x] docker-entrypoint.sh brukar env vars i alle konfig-filer
+- [x] Generisk ±10V standard kanalkonfig (v11) for ukjende instrument
+- [x] Frontend og Web UI utan SIRIUS-spesifikke referansar
+
+#### Web UI (React + Tailwind CSS)
+- [x] Dashboard med live status for alle tenester
+- [x] SIRIUS direkte-status med Start/Stopp/Rekoble
+- [x] USB/IP-panel med Del/Stopp/klient-instruksjonar
+- [x] MQTT-konfigurasjon (broker + topics)
+- [x] Kanal-konfigurasjon med sensor-skalering og excitation
+- [x] Debug-konsoll (send vilkårleg hex til EP1)
+- [x] Sidebar med kanal-liste og live-verdiar
+- [x] Kanal-detaljside med sparkline og statistikk
+- [x] Tailwind CSS (migrert frå eigendefinert CSS)
+
+### Hardware-oppsett (SIRIUSi-HS testrig)
 
 | Slot | Type | Forsterkar | ADC-range | Sensor | Excitation |
 |------|------|-----------|-----------|--------|------------|
@@ -220,48 +276,13 @@ Pin 8 (Exc-)  GND (minus til integrator)
 Pin 9 (TEDS)  DS2431+ TEDS-chip (sensor-ID)
 ```
 
-### EP2 STATUS: Fungerer ved boot!
-- EP2 streamer ADC-data ved factory-default (etter docker rebuild/USB re-enumerering)
-- Fyrste reelle data: 10112 samples, 8 kanalar, RMS ~7455/5313
-- **Ingen "start EP2" kommando trengst** - EP2 er PÅ som standard
-
-### USB-SNIFF FUNN (stadfesta)
-- **Init-sekvensen (A0/A1/A8/B0) DREP EP2** - USB-sniff frå DewesoftX stadfester dette
-- I opptak MED EP2-data: kun AD/B1-polling og AE-telemetri, INGEN A0/A1/A8/B0
-- I opptak UTAN EP2-data: init-sekvens køyrt, EP2 forsvinn
-
-### WIRESHARK PCAPNG FUNN (2026-02-14) - START STREAMING FUNNE!
-- **sirius1.pcapng**: Komplett Wireshark USBPcap-capture fraa DewesoftX paa Windows
-- **105 sekund**, 73 657 frames, fangar init → idle → "Start Store" → streaming
-- **Register 0x02 via AD-kommando** er "Start Acquisition"-triggeren
-- **34 register-skrivingar** (sample rate, ADC-konfig, DMA, kalibrering) som preamble
-- **A4 00 + AC** sendes før register-sekvensen
-- EP2 leverer 15 872 bytes/pakke ved 20 pkt/s (20 kHz, 8 kanalar, int16 LE)
-- **EP8 OUT (0x08)** var IKKJE brukt i capturen - start skjer via EP1 AD-kommandoar
-
-### EXCITATION OG Lo-LV FUNN (2026-02-24)
-- **sundet.dxs** (DewesoftX oppsettfil): ZIP med local.xml, viser excitation=5V for slot 4-6
-- **sirius2.pcapng**: Fangst med Sundet-oppsett, inneheld komplett Lo-LV init
-- **Excitation-kommandoar:** `A5 02 C3 01` (enable) + `A5 02 BC 04` (5V unipolar)
-- **Lo-LV init krev 223 kommandoar** (kalibrering, filter, modus, excitation) for slot 4-7
-- **Slot-spesifikk kalibrering:** A5 04 E9 xx (slot 4=B5, 5=CC, 6=D0, 7=00)
-- **Init-rekkefolgje er kritisk:** Lo-LV init MAA koyre FOER A4 pre-start
-- **ADC DC-offset:** Alle kanalar har ~-420 counts DC-offset, fjerna med auto-kalibrering
-- **Verifisert med 7kW last:** Straum ~10-20A RMS per fase (korrekt for 230V 3-fase)
-
-### Fullfoerte steg
-- [x] **Fange DewesoftX "Start Store" USB-trafikk** - GJORT! (sirius1.pcapng)
-- [x] **Identifiser start-kommando** - FUNNE! Register 0x02 via AD-kommando
-- [x] **Implementer start-sekvens i sirius_driver.py** - 34 register + trigger
-- [x] **Test start-sekvens paa Pi** - EP2 startar etter start-acquisition
-- [x] **EP8 OUT (0x08)** - Ikkje brukt av DewesoftX for start. Kan ignorerast.
-- [x] **dev.reset()** - Implementert (commit ab9a419)
-- [x] **uhubctl** - Implementert (commit ab9a419)
-- [x] **Injiser reelle SIRIUS-data i openDAQ-signalar** - oppdater_data() fungerer
-- [x] **DewesoftX ser live ADC-verdiar** - 8 kanalar ved 20 kHz
-- [x] **Sensor-skalering** - To-punkt lineaer (Rogowski 6kA: 0-3V = 0-6000A)
-- [x] **Excitation-spenning** - 5V unipolar til Lo-LV integrator
-- [x] **ADC nullpunkt** - Auto-kalibrering ved oppstart (~2s)
+### Framtidig
+- [ ] TEDS-lesing gjennom SIRIUS USB-protokoll (register 0x15 eller A5 sub-cmd)
+- [ ] Auto-konfigurasjon av sensor-skalering basert på TEDS-data
+- [ ] Korrekt AC RMS-berekning (per-syklus i staden for per-blokk)
+- [ ] Fleire excitation-alternativ (2.5V, 10V)
+- [ ] Støtte for fleire USB-instrument samstundes
+- [ ] WebSocket live-data til frontend (erstatte polling)
 
 ### TEDS (Transducer Electronic Data Sheet) - UNDER UTFORSKING
 
@@ -499,25 +520,54 @@ Bytes 32-127:  Kalibrering, brukardata, ekstra template-data (3 pages)
 | 4fa5be4 | Excitation voltage for Lo-LV integrator + UI-forbetringar |
 | 0b54e09 | Excitation-spenning konfigurerbar per kanal i Web UI |
 | 98683eb | Lo-LV slot-init, excitation og ADC nullpunkt auto-kalibrering |
+| f62147c | Migrer frontend frå eigendefinert CSS til Tailwind CSS |
+| 0414a0a | Fix UI-hopping: ikkje re-sett loading ved kvar polling-runde |
+| cc5f0c0 | Gjer Oversikt-korta meir kompakte |
+| 2a2eddd | Oppdater serienummer til D019274CF6 (USB-serial knytt til lisens) |
+| fa532e1 | Les lisens frå SIRIUS EEPROM og skriv til system_ds.lic |
+| 60ab534 | Flytt lisens-EEPROM-lesing til koble_til() så den alltid køyrer |
+| d77e928 | Prøv zlib-komprimert lisens for DewesoftX GetUncompressedLicense |
+| adb9add | Legg til MQTT virtuelle kanalar som ekstra openDAQ-kanalar |
+| aad09cb | Legg til mqtt_konfig.py og mqtt_klient.py i Dockerfile COPY |
+| 4e53329 | Vis MQTT-kanalar i sidebar/dashboard og fjern Tid-kanal |
+| fe13407 | MQTT uavhengig av SIRIUS, konfigurerbart ADC-kanaltal, kanalnummerering |
+| fbfc832 | Berre aktive kanalar i broen, fjerna simulering |
+| 78d7f94 | Persist driftsmodus (USB/IP vs direkte) across container restarts |
+| 1894585 | Restart bridge med antal_adc=0 ved USB/IP-modus |
+| 8d2e66e | Fix USB/IP 'Device busy (already exported)' permanent |
+| ebabc4e | Disable OPC-UA mDNS discovery to fix duplicate device in DewesoftX |
+| d045bf1 | Generisk instrument-støtte: fjern all SIRIUS-spesifikk hardkoding |
 
 ## Filar
 
 | Fil | Beskriving |
 |-----|-----------|
+| **Backend (Python)** | |
+| sirius_server.py | Hovudserver: driver + openDAQ bro + web UI + autonom måling + modus-logikk |
 | sirius_driver.py | SIRIUS USB-driver: tilkobling, init, Lo-LV init, excitation, streaming |
-| sirius_protokoll_impl.py | Lavnivaa USB-protokoll (EP1 kommandoar, AD/B1 poll) |
-| sirius_server.py | Server: driver + openDAQ bro + web UI + autonom maaling |
-| opendaq_bro.py | openDAQ nettverksbro (OPC-UA, streaming, sensor-skalering, nullpunkt) |
-| kanal_konfig.py | Kanal-konfigurasjon datamodell og JSON-persistens |
-| web_ui.py | Flask web UI med live status, debug, kanal-konfig |
-| docker-entrypoint.sh | Container oppstart, hostname-fiks, modul-deaktivering |
-| docker-compose.yml | Docker Compose (privileged, host network, /sys mounted) |
-| Dockerfile | Multi-stage: bygg openDAQ + runtime |
-| sirius_init_sekvens.py | Init-sekvensar fraa pcapng: INIT_SEKVENS + LV_SLOT4-7_INIT |
+| sirius_protokoll_impl.py | Lavnivå USB-protokoll (EP1 kommandoar, AD/B1 poll) |
+| sirius_init_sekvens.py | Init-sekvensar frå pcapng: INIT_SEKVENS + LV_SLOT4-7_INIT |
+| opendaq_bro.py | openDAQ nettverksbro (dynamisk ADC + MQTT kanalar, NativeStreaming, OPC-UA) |
+| web_ui.py | Flask web API med live status, modus-byte, kanal/MQTT-konfig |
+| enhet_konfig.py | Eining-konfigurasjon + modus-persistens (les_modus/lagre_modus) |
+| kanal_konfig.py | Kanal-konfigurasjon datamodell og JSON-persistens (v11 generisk) |
+| mqtt_konfig.py | MQTT-konfigurasjon: broker-tilkobling og kanal-definisjonar |
+| mqtt_klient.py | MQTT-klient: abonnement, JSON-parsing, live-verdiar |
+| usbip_manager.py | USB/IP-styring: bind/unbind/usbipd med stale-state cleanup |
+| **Docker** | |
+| Dockerfile | Multi-stage: bygg openDAQ v3.31 + runtime (generisk instrument-patch) |
+| docker-compose.yml | Docker Compose: pqtech-opendaq, macvlan, env vars |
+| docker-entrypoint.sh | Container oppstart: hostname-fiks, modul-deaktivering, env var-konfig |
+| **Frontend (React + Tailwind)** | |
+| frontend/ | Vite + React + TypeScript + Tailwind CSS |
+| frontend/src/App.tsx | Hovudlayout: sidebar med kanalar + hovudinnhald |
+| frontend/src/components/ | Dashboard-kort: SiriusStatus, UsbIp, Mqtt, DeviceConnection, ChannelConfig, Debug |
+| frontend/src/pages/ | ChannelPage (kanal-detalj med sparkline og statistikk) |
+| frontend/src/api/ | API-klientar: sirius, mqtt, kanalar, opendaq |
+| **Verktøy** | |
 | _deploy.py | Deploy-skript: kopier filer til Pi-container via SSH/docker cp |
-| _hent_live.py | Hjelpar: hent live-data fraa container via SSH |
-| frontend/ | React (Vite) Web UI: dashboard, kanal-konfig, sensor-skalering, debug |
-| sirius_adc_leser.py | Referanse: enkel EP2-lesar (fungerte paa factory-fresh device) |
+| _hent_live.py | Hjelpar: hent live-data frå container via SSH |
+| sirius_adc_leser.py | Referanse: enkel EP2-lesar (factory-fresh device) |
 | sirius_sniffer.py | USB-trafikk sniffer for protokoll-analyse |
 | sirius_dekoder.py | Dekoder for sniffa USB-pakkar |
 
@@ -526,8 +576,9 @@ Bytes 32-127:  Kalibrering, brukardata, ekstra template-data (3 pages)
 | Port | Teneste |
 |------|---------|
 | 8080 | Web UI (Flask) |
-| 4840 | OPC-UA (openDAQ) |
-| 7420 | Native Streaming (openDAQ) |
+| 3240 | USB/IP daemon (usbipd) — berre i USB/IP-modus |
+| 4840 | OPC-UA (openDAQ, intern — ikkje annonsert via mDNS) |
+| 7420 | Native Streaming (openDAQ, mDNS-annonsert) |
 | 7414 | WebSocket/LT Streaming (openDAQ) |
 
 ## Andre Dewesoft-verktoy tilgjengelege
