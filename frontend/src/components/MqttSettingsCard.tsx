@@ -18,7 +18,7 @@ const TOM_KONFIG: MqttKonfig = {
     port: 1883,
     brukarnavn: '',
     passord: '',
-    klient_id: 'opendaq-sirius',
+    klient_id: 'pqtech-opendaq',
     aktivert: false,
   },
   kanalar: [],

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Enheitskonfigurasjon for SIRIUS openDAQ-bro
-=============================================
+Enheitskonfigurasjon for Dewesoft openDAQ-bro
+==============================================
 Lagrar enheits-innstillingar som antal ADC-kanalar, modell, etc.
 Persistert til /data/konfig/enhet.json (Docker-volume).
+
+Fungerer med alle Dewesoft-instrument (SIRIUS, KRYPTON, IOLITE, MINITAURs, etc.)
 
 Bruk:
     from enhet_konfig import les_enhet_konfig, lagre_enhet_konfig
@@ -20,15 +22,15 @@ ENHET_KONFIG_STI = Path("/data/konfig/enhet.json")
 MODUS_KONFIG_STI = Path("/data/konfig/modus.json")
 
 # Gyldige driftsmodus
-MODUS_DIREKTE = "direkte"   # Container brukar SIRIUS direkte over USB
-MODUS_USBIP = "usbip"       # SIRIUS delast via USB/IP til Windows
+MODUS_DIREKTE = "direkte"   # Container brukar instrumentet direkte over USB
+MODUS_USBIP = "usbip"       # Instrumentet delast via USB/IP til Windows
 
 
 @dataclass
 class EnhetKonfig:
-    """Konfigurasjon for SIRIUS-enheten."""
-    antal_adc_kanalar: int = 8       # 4, 8, 16 etc. avhengig av SIRIUS-modell
-    modell: str = "SIRIUSi-HS-8xLV"  # Modellnamn for visning
+    """Konfigurasjon for Dewesoft-instrumentet."""
+    antal_adc_kanalar: int = 8       # 4, 8, 16 etc. avhengig av modell
+    modell: str = ""                 # Auto-detektert eller manuelt sett (tom = ukjend)
 
 
 def les_enhet_konfig() -> EnhetKonfig:
@@ -38,7 +40,7 @@ def les_enhet_konfig() -> EnhetKonfig:
             data = json.loads(ENHET_KONFIG_STI.read_text(encoding='utf-8'))
             konfig = EnhetKonfig(
                 antal_adc_kanalar=int(data.get("antal_adc_kanalar", 8)),
-                modell=str(data.get("modell", "SIRIUSi-HS-8xLV")),
+                modell=str(data.get("modell", "")),
             )
             log.info(f"Lasta enhet-konfig: {konfig.antal_adc_kanalar} ADC-kanalar, "
                      f"modell={konfig.modell}")
@@ -81,7 +83,7 @@ def valider_enhet_konfig(data: dict) -> tuple:
     if n < 1 or n > 32:
         return None, f"antal_adc_kanalar {n} utanfor gyldig omraade (1-32)"
 
-    modell = str(data.get("modell", "SIRIUSi-HS-8xLV"))
+    modell = str(data.get("modell", ""))
 
     return EnhetKonfig(antal_adc_kanalar=n, modell=modell), None
 

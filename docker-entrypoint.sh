@@ -39,15 +39,16 @@ if [ ! -f /opt/dewesoft/scripts/platform_control.sh ]; then
 #   platform_control.sh info booting
 #   platform_control.sh date get/set
 #   platform_control.sh shutdown/reboot cleanly
-SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
+SERIAL="${OPENDAQ_SERIAL:-PQTech}"
+DEVICE_MODEL="${OPENDAQ_MODEL:-Dewesoft Instrument}"
 case "$1" in
   sysinfo)
     cat <<XML
 <?xml version="1.0"?>
 <SystemProperties>
-  <DeviceId>SIRIUSi-HS</DeviceId>
-  <DeviceDisplayName>SIRIUSi-HS [${SERIAL}]</DeviceDisplayName>
-  <DeviceName>SIRIUSi-HS 8xHV 8xLV</DeviceName>
+  <DeviceId>${DEVICE_MODEL}</DeviceId>
+  <DeviceDisplayName>${DEVICE_MODEL} [${SERIAL}]</DeviceDisplayName>
+  <DeviceName>${DEVICE_MODEL}</DeviceName>
   <SerialNumber>${SERIAL}</SerialNumber>
   <SystemSerialNumber>${SERIAL}</SystemSerialNumber>
   <PlatformVersion>1.0</PlatformVersion>
@@ -68,7 +69,7 @@ case "$1" in
       <SerialNumber>${SERIAL}</SerialNumber>
       <HWVersion>1.0</HWVersion>
       <FWVersion>1.0</FWVersion>
-      <ModuleConnectorType>SIRIUSi-HS</ModuleConnectorType>
+      <ModuleConnectorType>${DEVICE_MODEL}</ModuleConnectorType>
     </Amplifier>
   </AmplifiersList>
 </SystemProperties>
@@ -109,7 +110,8 @@ ssh-keygen -A 2>/dev/null
 # Viss system.ini manglar: TSystemSettings vert nil → GetDisplayName krasjar.
 # Viss system.xml har feil element-namn: TDSRTSystemProperties parsar feil.
 # =============================================================
-SERIAL="${OPENDAQ_SERIAL:-DB19106004}"
+SERIAL="${OPENDAQ_SERIAL:-PQTech}"
+DEVICE_MODEL="${OPENDAQ_MODEL:-Dewesoft Instrument}"
 CONTAINER_IP="${OPENDAQ_IP:-192.168.1.161}"
 mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system
 
@@ -119,9 +121,9 @@ mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system
 cat > /opt/dewesoft/scripts/system.xml <<SYSXML
 <?xml version="1.0"?>
 <SystemProperties>
-  <DeviceId>SIRIUSi-HS</DeviceId>
-  <DeviceDisplayName>SIRIUSi-HS [${SERIAL}]</DeviceDisplayName>
-  <DeviceName>SIRIUSi-HS 8xHV 8xLV</DeviceName>
+  <DeviceId>${DEVICE_MODEL}</DeviceId>
+  <DeviceDisplayName>${DEVICE_MODEL} [${SERIAL}]</DeviceDisplayName>
+  <DeviceName>${DEVICE_MODEL}</DeviceName>
   <SerialNumber>${SERIAL}</SerialNumber>
   <SystemSerialNumber>${SERIAL}</SystemSerialNumber>
   <PlatformVersion>1.0</PlatformVersion>
@@ -151,7 +153,7 @@ cat > /opt/dewesoft/scripts/system.xml <<SYSXML
       <SerialNumber>${SERIAL}</SerialNumber>
       <HWVersion>1.0</HWVersion>
       <FWVersion>1.0</FWVersion>
-      <ModuleConnectorType>SIRIUSi-HS</ModuleConnectorType>
+      <ModuleConnectorType>${DEVICE_MODEL}</ModuleConnectorType>
     </Amplifier>
   </AmplifiersList>
 </SystemProperties>
@@ -163,7 +165,7 @@ SYSXML
 # med "Access violation Read of address 0000000000000008".
 cat > /opt/dewesoft/software/system/system.ini <<SYSINI
 [Settings]
-DisplayName=SIRIUSi-HS [${SERIAL}]
+DisplayName=${DEVICE_MODEL} [${SERIAL}]
 DisplayLocation=
 DeviceBehaviour=DewesoftDAQ
 GroupLogicalID=

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Kanal-konfigurasjon for SIRIUS openDAQ-bro
-============================================
+Kanal-konfigurasjon for Dewesoft openDAQ-bro
+=============================================
 Datamodell og JSON-persistens for kanalinnstillingar.
 Lagrar til /data/konfig/kanalar.json (montert som Docker-volume).
 
@@ -72,42 +72,19 @@ class KanalKonfig:
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 10  # v10: Fjerna overflødig Tid-kanal (kun 8 ADC-kanalar)
+KONFIG_VERSJON = 11  # v11: Generisk standard (ikkje SIRIUS-spesifikk)
 
-# Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
-#
-# Kanal 1-4: Hi-LV (høgspenning) — direkte spenningsmåling
-#   ADC int16 full-skala = ±1600V (verifisert: RMS 4596 × 1600/32768 ≈ 224V)
-#
-# Kanal 5-7: Lo-LV (lågspenning) — integrator for straummåling
-#   Integrator: 5V-driven, 0-3V utgang → 0-6000A
-#   Lo-LV ADC-range: ±5V (anteke)
-#   Skalering: faktor = 6000A / 3V = 2000 A/V
-#   Kombinert range_max: 5V × 2000 = 10000A
-#   Formel: straum_A = raw_int16 × (10000 / 32768)
-#
-# Kanal 8: Lo-LV, ikkje tilkobla
+# Generisk standard-konfigurasjon — fungerer med alle Dewesoft-instrument.
+# Brukarar konfigurerer kanalar via web UI etter at instrumentet er tilkobla.
 STANDARD_KONFIG: List[KanalKonfig] = [
-    KanalKonfig(0, "AI 0", True,  "voltage", -1600.0, 1600.0, "V", 20000),
-    KanalKonfig(1, "AI 1", True,  "voltage", -1600.0, 1600.0, "V", 20000),
-    KanalKonfig(2, "AI 2", True,  "voltage", -1600.0, 1600.0, "V", 20000),
-    KanalKonfig(3, "AI 3", False, "voltage", -1600.0, 1600.0, "V", 20000),
-    KanalKonfig(4, "AI 4", True,  "current", -5.0, 5.0, "V", 20000,
-                sensor_aktiv=True, sensor_namn="Rogowski 6kA",
-                sensor_inn_1=0.0, sensor_ut_1=0.0,
-                sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A",
-                excitation_v=5.0),
-    KanalKonfig(5, "AI 5", True,  "current", -5.0, 5.0, "V", 20000,
-                sensor_aktiv=True, sensor_namn="Rogowski 6kA",
-                sensor_inn_1=0.0, sensor_ut_1=0.0,
-                sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A",
-                excitation_v=5.0),
-    KanalKonfig(6, "AI 6", True,  "current", -5.0, 5.0, "V", 20000,
-                sensor_aktiv=True, sensor_namn="Rogowski 6kA",
-                sensor_inn_1=0.0, sensor_ut_1=0.0,
-                sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A",
-                excitation_v=5.0),
-    KanalKonfig(7, "AI 7", False, "current", -5.0, 5.0, "V", 20000),
+    KanalKonfig(0, "AI 0", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(1, "AI 1", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(2, "AI 2", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(3, "AI 3", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(4, "AI 4", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(5, "AI 5", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(6, "AI 6", True,  "voltage", -10.0, 10.0, "V", 20000),
+    KanalKonfig(7, "AI 7", True,  "voltage", -10.0, 10.0, "V", 20000),
 ]
 
 

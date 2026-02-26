@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Web-grensesnitt for openDAQ Server (Dewesoft SIRIUS)
-=====================================================
+Web-grensesnitt for PQTech openDAQ Server
+==========================================
 Flask-app som viser openDAQ server-status og gir
 instruksjoner for tilkobling fra DewesoftX.
 
@@ -650,7 +650,7 @@ def api_mqtt_status():
 def api_enhet_konfig():
     """Hent enheit-konfig (antal ADC-kanalar, modell)."""
     if not SIRIUS_DIREKTE:
-        return jsonify({"antal_adc_kanalar": 8, "modell": "SIRIUSi-HS-8xLV"})
+        return jsonify({"antal_adc_kanalar": 8, "modell": ""})
     try:
         return jsonify(_enhet_hent_konfig())
     except Exception as e:

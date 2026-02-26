@@ -1,14 +1,14 @@
 services:
-  opendaq-sirius:
+  opendaq:
     build:
       context: .
       args:
         PARALLELLE_JOBBER: 4
-    image: opendaq-sirius:latest
-    container_name: opendaq-sirius
+    image: pqtech-opendaq:latest
+    container_name: pqtech-opendaq
     restart: unless-stopped
 
-    # USB-tilgang til SIRIUS
+    # USB-tilgang til Dewesoft-instrument
     privileged: true
 
     # macvlan-nettverk: eigen IP paa LAN (DewesoftX SSH-ar hit)
@@ -32,7 +32,7 @@ services:
       - ./konfig:/data/konfig
 
     environment:
-      # Tilkoblingsstreng (tom = auto-oppdagelse av SIRIUS USB)
+      # Tilkoblingsstreng (tom = auto-oppdagelse av Dewesoft USB-instrument)
       # Eksempler:
       #   daq.opcua://192.168.1.100   (OPC-UA)
       #   daq.ns://192.168.1.100      (native streaming)
@@ -48,12 +48,12 @@ services:
       - SAMPLE_RATE=20000
       - MAALE_PREFIKS=maaling
       # Sett til "true" for aa bruke direkte SIRIUS USB-driver
-      # (uten openDAQ SDK - bruker reverse-engineered protokoll)
+      # (reverse-engineered protokoll — kun for SIRIUS-instrument)
       - NATIVE_SIRIUS=true
       # Deaktiver RefDevice intern datagenering (Python injiserer ekte data)
       - OPENDAQ_DISABLE_ACQ=1
-      # Serienummer for SIRIUS-eining (Dewesoft EEPROM-serial)
-      - OPENDAQ_SERIAL=DB19106004
+      # Serienummer (tom = auto-detektert fraa instrumentet)
+      - OPENDAQ_SERIAL=
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
       # OPC-UA annonsert IP — sett til container-IP (macvlan)

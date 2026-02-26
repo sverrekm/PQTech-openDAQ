@@ -3,7 +3,7 @@ import type { EnhetKonfig } from '../api/types'
 import { fetchEnhetKonfig, oppdaterEnhetKonfig } from '../api/enhet'
 
 export default function DeviceSettingsCard() {
-  const [konfig, setKonfig] = useState<EnhetKonfig>({ antal_adc_kanalar: 8, modell: 'SIRIUSi-HS-8xLV' })
+  const [konfig, setKonfig] = useState<EnhetKonfig>({ antal_adc_kanalar: 8, modell: '' })
   const [melding, setMelding] = useState<string | null>(null)
   const [lagrar, setLagrar] = useState(false)
 

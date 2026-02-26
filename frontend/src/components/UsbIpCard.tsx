@@ -54,7 +54,7 @@ export default function UsbIpCard({ ip }: Props) {
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">USB/IP — Del SIRIUS</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">USB/IP — Del instrument</h2>
       <div className="flex items-center gap-2 mb-3 text-sm">
         <span className={`w-2 h-2 rounded-full ${u.deling_aktiv ? 'bg-green-500' : 'bg-red-500'}`} />
         <span>
@@ -65,7 +65,7 @@ export default function UsbIpCard({ ip }: Props) {
       </div>
       <InfoGrid items={[
         {
-          label: 'SIRIUS på USB',
+          label: 'Instrument på USB',
           value: u.sirius_paa_usb ? (u.sirius_enhet_funnet || 'Ja') : 'Nei',
           color: u.sirius_paa_usb ? '#10b981' : '#ef4444',
         },
@@ -88,7 +88,7 @@ export default function UsbIpCard({ ip }: Props) {
             disabled={busy || !u.sirius_paa_usb || !u.tilgjengelig}
             onClick={handleDel}
           >
-            Del SIRIUS via USB/IP
+            Del via USB/IP
           </button>
         )}
         {u.deling_aktiv && (
@@ -113,13 +113,13 @@ export default function UsbIpCard({ ip }: Props) {
               <CopyableCommand text={`usbip list -r ${ip}`} className="mt-1" />
             </li>
             <li>
-              Koble til SIRIUS:
+              Koble til instrument:
               <CopyableCommand
                 text={`usbip attach -r ${ip} -b ${u.busid || 'X-Y'}`}
                 className="mt-1"
               />
             </li>
-            <li>Opne DewesoftX — SIRIUS visest som lokal USB-eining</li>
+            <li>Opne DewesoftX — instrumentet visest som lokal USB-eining</li>
           </ol>
         </div>
       )}

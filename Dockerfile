@@ -216,7 +216,7 @@ replacements = [
     ('devInfo.setManufacturer("openDAQ")',
      'devInfo.setManufacturer("Dewesoft")'),
     ('devInfo.setModel("Reference device")',
-     'devInfo.setModel("SIRIUSi-HS 8xHV 8xLV")'),
+     'devInfo.setModel(std::getenv("OPENDAQ_MODEL") && std::getenv("OPENDAQ_MODEL")[0] ? std::getenv("OPENDAQ_MODEL") : "Dewesoft Instrument")'),
 ]
 
 patched = 0
@@ -235,8 +235,11 @@ if serial_line in content:
     idx = content.index(serial_line)
     end_idx = content.index(';', idx) + 1
     extra = """
-    // Namn: DewesoftX viser dette i HW Settings (t.d. "SIRIUSi-HS [DB19106004]")
-    devInfo.setName("SIRIUSi-HS");
+    // Namn: DewesoftX viser dette i HW Settings (lest frå OPENDAQ_MODEL env)
+    {
+        const char* envModel = std::getenv("OPENDAQ_MODEL");
+        devInfo.setName(envModel && envModel[0] ? envModel : "Dewesoft Instrument");
+    }
     // MAC-adresse: les frå OPENDAQ_MAC miljøvariabel (sett i entrypoint)
     {
         const char* envMac = std::getenv("OPENDAQ_MAC");
@@ -267,7 +270,11 @@ if serial_line in content:
     // DeviceType: DewesoftX krasjar med 'Interface object is nil' i
     // TOpenDaqDeviceInfo.UpdateInfo viss DeviceType er nullptr.
     // DeviceType er eit objekt (ikkje streng), so nil-string-patchen hjelper ikkje.
-    devInfo.setDeviceType(DeviceType("dewesoft_sirius", "SIRIUSi-HS 8xHV 8xLV", "Dewesoft SIRIUSi-HS Data Acquisition", "daq.opcua", nullptr));"""
+    {
+        const char* envModel = std::getenv("OPENDAQ_MODEL");
+        std::string model = (envModel && envModel[0]) ? envModel : "Dewesoft Instrument";
+        devInfo.setDeviceType(DeviceType("dewesoft_instrument", model, "Dewesoft Data Acquisition", "daq.opcua", nullptr));
+    }"""
     content = content[:end_idx] + extra + content[end_idx:]
     patched += 1
     print("OK: La til MAC, platform, softwareRevision, DeviceType + alle string-felt")
@@ -285,7 +292,7 @@ if '#include' in content:
             last_include = m
         if last_include:
             insert_pos = last_include.end()
-            content = content[:insert_pos] + '\n#include <cstdlib>\n#include <opendaq/device_type_factory.h>' + content[insert_pos:]
+            content = content[:insert_pos] + '\n#include <cstdlib>\n#include <string>\n#include <opendaq/device_type_factory.h>' + content[insert_pos:]
             patched += 1
             print("OK: La til #include <opendaq/device_type_factory.h>")
 
