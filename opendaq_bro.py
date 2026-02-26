@@ -772,55 +772,20 @@ class OpenDAQBro:
         return result
 
     def _les_signal_loop(self):
-        """Bakgrunnstraad som genererer simulerte verdiar.
+        """Bakgrunnstraad for SIRIUS timeout-deteksjon.
 
-        Brukar SUNDET_KANALAR-konfig direkte (ikkje openDAQ-eigenskapar)
-        for å vise realistiske simulerte verdiar i web UI.
-        Hopper over når SIRIUS leverer reelle data.
+        Nullstiller _sirius_aktiv viss data ikkje har kome på 5 sekund.
         """
         import time
-        import math
-        log.info("  Signal-leser-traad starta")
+        log.info("  Signal-overvaking starta")
 
-        t0 = time.time()
         while not self._stopp_event.is_set():
-            # Sjekk om SIRIUS er aktiv (data motteke siste 5 sekund)
-            sirius_nyleg = (
-                self._sirius_aktiv and
-                (time.time() - self._sirius_ts) < 5.0
-            )
-
-            if not sirius_nyleg:
+            if self._sirius_aktiv and (time.time() - self._sirius_ts) > 5.0:
                 self._sirius_aktiv = False
-                # Generer simulerte verdiar frå SUNDET_KANALAR (berre ADC-kanalar)
-                t = time.time() - t0
-                for i, cfg in enumerate(self.SUNDET_KANALAR):
-                    if i >= self._antal_adc:
-                        break
-                    key = f"kanal_{i}"
-                    amp = cfg["amplitude"]
-                    freq = cfg["freq"]
-                    # Forskyv fase per kanal (120° mellom fasane)
-                    faseforskyvning = 0.0
-                    if i < 3:
-                        faseforskyvning = i * (2.0 * math.pi / 3.0)  # L1, L2, L3
-                    elif 4 <= i <= 6:
-                        faseforskyvning = (i - 4) * (2.0 * math.pi / 3.0)
+                log.info("  SIRIUS data timeout — merka som inaktiv")
+            self._stopp_event.wait(timeout=2.0)
 
-                    verdi = amp * math.sin(2 * math.pi * freq * t + faseforskyvning)
-                    rms = amp / math.sqrt(2) if amp > 0 else 0.0
-                    self._siste_verdiar[key] = {
-                        "snitt": 0.0,
-                        "rms": round(rms, 2),
-                        "topp": round(abs(amp), 2),
-                        "siste": round(verdi, 2),
-                        "antall": 100,
-                        "kjelde": "simulert",
-                    }
-
-            self._stopp_event.wait(timeout=1.0)
-
-        log.info("  Signal-leser-traad stoppa")
+        log.info("  Signal-overvaking stoppa")
 
     def stopp(self):
         """Stopp openDAQ instance og servere.
@@ -930,6 +895,10 @@ class OpenDAQBro:
         n_adc = self._antal_adc
         n_mqtt = len(self._mqtt_kanalar)
         n_total = n_adc + n_mqtt
+        # Ref device krev minst 1 kanal — viss ingen kanalar, bruk 1 dummy
+        if n_total < 1:
+            n_total = 1
+            log.info("  Ingen kanalar konfigurert — brukar 1 dummy-kanal")
         if not self._safe_set(self._device, "NumberOfChannels", n_total):
             log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
             return
@@ -961,7 +930,7 @@ class OpenDAQBro:
 
         channels = list(self._device.channels)
         for i, ch in enumerate(channels):
-            if i >= len(kanal_konfig):
+            if i >= n_adc or i >= len(kanal_konfig):
                 break
             kk = kanal_konfig[i]
             # Bruk SUNDET_KANALAR for amplitude/freq som fallback
@@ -1168,7 +1137,7 @@ class OpenDAQBro:
 
         sett_teller = 0
         for idx, (ch, sig) in enumerate(self._kanal_signal):
-            if sig is None or idx >= len(kanal_konfig):
+            if idx >= self._antal_adc or sig is None or idx >= len(kanal_konfig):
                 continue
             kk = kanal_konfig[idx]
 

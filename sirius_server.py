@@ -1021,6 +1021,19 @@ def rekoble_driver():
                     enhetsnamn=info.get("enhetsstreng", ""),
                 )
 
+            # Restart openDAQ bridge med ADC-kanalar viss broen starta utan
+            # (antal_adc=0 fordi SIRIUS ikkje var tilkobla ved oppstart).
+            _enhet_fresh = les_enhet_konfig()
+            bro_adc = _opendaq_bro._antal_adc if _opendaq_bro else 0
+            if bro_adc != _enhet_fresh.antal_adc_kanalar:
+                log.info(f"Rekoble: planlegg bridge-restart ({bro_adc} → "
+                         f"{_enhet_fresh.antal_adc_kanalar} ADC-kanalar)")
+                # Restart i bakgrunn etter at lock er frigjeven
+                def _delayed_bridge_restart():
+                    time.sleep(0.5)
+                    restart_opendaq_bro()
+                threading.Thread(target=_delayed_bridge_restart, daemon=True).start()
+
             # Start streaming (EP2 recovery skjer automatisk i koble_til)
             if _driver.ep2_ok and not _driver.streamer:
                 try:
@@ -1118,9 +1131,17 @@ def start_server(args):
     # Last enheit- og MQTT-konfig
     global _opendaq_bro, _opendaq_feil, _mqtt_klient, _mqtt_konfig, _enhet_konfig
     _enhet_konfig = les_enhet_konfig()
-    log.info(f"  ADC-kanalar: {_enhet_konfig.antal_adc_kanalar} ({_enhet_konfig.modell})")
+    log.info(f"  ADC-kanalar konfig: {_enhet_konfig.antal_adc_kanalar} ({_enhet_konfig.modell})")
     _mqtt_konfig = les_mqtt_konfig()
     mqtt_kanalar = _mqtt_konfig.kanalar if _mqtt_konfig.broker.aktivert else []
+
+    # Berre vis ADC-kanalar i broen viss SIRIUS faktisk er tilkobla.
+    # Utan SIRIUS har ADC-kanalane ingen data og kan forstyrre DewesoftX.
+    effektiv_adc = _enhet_konfig.antal_adc_kanalar if enhet_tilkoblet else 0
+    if not enhet_tilkoblet and mqtt_kanalar:
+        log.info(f"  SIRIUS ikkje tilkobla — berre MQTT-kanalar i broen ({len(mqtt_kanalar)} stk)")
+    elif not enhet_tilkoblet:
+        log.info("  SIRIUS ikkje tilkobla — broen startar med 0 kanalar")
     if _mqtt_konfig.broker.aktivert and _mqtt_konfig.kanalar:
         _mqtt_klient = MqttKlient(_mqtt_konfig)
         _mqtt_klient.start()
@@ -1138,7 +1159,7 @@ def start_server(args):
         enamn = server_status.get("enhet_namn", "")
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_kanalar,
-                                  antal_adc=_enhet_konfig.antal_adc_kanalar)
+                                  antal_adc=effektiv_adc)
         ok = _opendaq_bro.start()
         if ok:
             log.info("openDAQ bridge starta OK")
