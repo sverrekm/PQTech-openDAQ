@@ -72,7 +72,7 @@ class KanalKonfig:
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 9  # v9: Excitation-spenning per kanal
+KONFIG_VERSJON = 10  # v10: Fjerna overflødig Tid-kanal (kun 8 ADC-kanalar)
 
 # Standard-konfigurasjon for SIRIUSi-HS (4×Hi-LV + 4×Lo-LV)
 #
@@ -108,7 +108,6 @@ STANDARD_KONFIG: List[KanalKonfig] = [
                 sensor_inn_2=3.0, sensor_ut_2=6000.0, sensor_enhet="A",
                 excitation_v=5.0),
     KanalKonfig(7, "AI 7", False, "current", -5.0, 5.0, "V", 20000),
-    KanalKonfig(8, "Tid",  True,  "generic", 0.0, 3600.0, "s", 20000),
 ]
 
 
@@ -141,7 +140,7 @@ def les_konfig() -> List[KanalKonfig]:
                 lagre_konfig(ny)
                 return ny
 
-            if isinstance(data, list) and len(data) in (8, 9):
+            if isinstance(data, list) and len(data) == 8:
                 konfig = [KanalKonfig.fraa_dict(d) for d in data]
                 log.info(f"Lasta kanal-konfig v{lagra_versjon} fraa {KONFIG_STI}")
                 return konfig
@@ -181,8 +180,8 @@ def valider_konfig(data: list) -> tuple:
     if not isinstance(data, list):
         return None, "Forventa ein liste med 8 kanalar"
 
-    if len(data) not in (8, 9):
-        return None, f"Forventa 8 eller 9 kanalar, fekk {len(data)}"
+    if len(data) != 8:
+        return None, f"Forventa 8 kanalar, fekk {len(data)}"
 
     konfig = []
     for i, d in enumerate(data):

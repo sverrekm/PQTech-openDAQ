@@ -1,15 +1,16 @@
 import { useRef } from 'react'
-import type { KanalKonfig, KanalLive } from '../api/types'
+import type { KanalKonfig, KanalLive, MqttStatus } from '../api/types'
 import SparklineChart from './SparklineChart'
 
 interface Props {
   kanalar: KanalKonfig[] | null
   liveData: KanalLive | null
+  mqttStatus?: MqttStatus | null
   onChannelClick: (index: number) => void
   loading?: boolean
 }
 
-export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClick, loading = false }: Props) {
+export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, onChannelClick, loading = false }: Props) {
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
 
   if (loading || !kanalar) {
@@ -87,6 +88,44 @@ export default function ChannelLiveCard({ kanalar, liveData: live, onChannelClic
                     <>
                       {typeof cv.value === 'number' ? cv.value.toFixed(2) : cv.value}
                       <span className="text-xs opacity-70 ml-1">{cv.source}</span>
+                    </>
+                  ) : '-'}
+                </td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                  <SparklineChart data={[...sparkArr]} />
+                </td>
+              </tr>
+            )
+          })}
+          {mqttStatus?.aktivert && mqttStatus.topics && Object.entries(mqttStatus.topics).map(([topic, info]) => {
+            const mqttKey = `mqtt_${topic}`
+            const mqttIdx = 1000 + Object.keys(mqttStatus.topics).indexOf(topic)
+            if (info.verdi !== null) {
+              const arr = sparkDataRef.current.get(mqttIdx) || []
+              arr.push(info.verdi)
+              if (arr.length > 30) arr.shift()
+              sparkDataRef.current.set(mqttIdx, arr)
+            }
+            const sparkArr = sparkDataRef.current.get(mqttIdx) || []
+
+            return (
+              <tr key={mqttKey} className="transition-colors duration-100 ease-in-out bg-purple-50/30">
+                <td className="px-1 py-1 border-b border-gray-100 align-middle text-purple-500 font-semibold text-xs">M</td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                  {info.namn || topic}
+                  <span className="text-xs text-purple-400 ml-1">MQTT</span>
+                </td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">{info.enhet || '-'}</td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                  <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${info.verdi !== null ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                    {info.verdi !== null ? 'Ja' : 'Ventar'}
+                  </span>
+                </td>
+                <td className="font-mono text-sm text-right px-1 py-1 border-b border-gray-100 align-middle" style={{ color: '#8b5cf6' }}>
+                  {info.verdi !== null ? (
+                    <>
+                      {info.verdi.toFixed(2)}
+                      <span className="text-xs opacity-70 ml-1">MQTT</span>
                     </>
                   ) : '-'}
                 </td>

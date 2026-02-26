@@ -908,14 +908,13 @@ class OpenDAQBro:
         {"namn": "AI 5", "amplitude": 100.0, "freq": 50.0, "range": (-5, 5)},
         {"namn": "AI 6", "amplitude": 100.0, "freq": 50.0, "range": (-5, 5)},
         {"namn": "AI 7", "amplitude": 0.0,   "freq": 50.0, "range": (-5, 5)},
-        {"namn": "Tid",  "amplitude": 0.0,   "freq": 1.0,  "range": (0, 3600)},
     ]
 
     def _konfig_kanalar(self):
-        """Sett 9 kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET).
+        """Sett kanalar med namn og eigenskapar frå kanal_konfig (eller fallback til SUNDET).
 
         Kanal 0-7: ADC-kanalar (Sine waveform, data frå SIRIUS)
-        Kanal 8:   Tidskanal (Counter waveform, value = globalSampleIndex)
+        Kanal 8+:  MQTT-kanalar (virtuelle, data frå MQTT-broker)
 
         openDAQ referanse-eininga har faste grenser for eigenskapar:
           - Amplitude: Float, [0, 10]
@@ -926,9 +925,6 @@ class OpenDAQBro:
           - GlobalSampleRate: Float, [1, 1000000]
         Verdiar vert klampa automatisk av _safe_set().
         """
-        # ADC-kanalar + MQTT-kanalar.
-        # Counter waveform (Waveform=3) for tidskanal manglar domain-signal,
-        # som krasjar DewesoftX i TryGetSampleRate med "Interface object is nil".
         n_mqtt = len(self._mqtt_kanalar)
         n_total = 8 + n_mqtt
         if not self._safe_set(self._device, "NumberOfChannels", n_total):
@@ -972,12 +968,6 @@ class OpenDAQBro:
 
                 amp = sundet["amplitude"] if sundet else 0.0
                 freq = sundet["freq"] if sundet else 50.0
-
-                # Hopp over tidskanalen (indeks 8) — ikkje brukt med 8 kanalar
-                if kk.type == "generic" and kk.namn == "Tid":
-                    continue
-                if i >= 8:
-                    break
                 # Amplitude er FloatProperty [0, 10] — _safe_set klampar
                 self._safe_set(ch, "Amplitude", amp if kk.aktiv else 0.0)
                 # Frequency er FloatProperty [0.1, 10000]

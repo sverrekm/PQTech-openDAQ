@@ -1,4 +1,4 @@
-import type { KanalKonfig, KanalLive } from '../api/types'
+import type { KanalKonfig, KanalLive, MqttStatus } from '../api/types'
 
 export type View =
   | { page: 'dashboard' }
@@ -10,9 +10,10 @@ interface Props {
   onNavigate: (view: View) => void
   kanalar: KanalKonfig[] | null
   liveData: KanalLive | null
+  mqttStatus?: MqttStatus | null
 }
 
-export default function Sidebar({ view, onNavigate, kanalar, liveData }: Props) {
+export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus }: Props) {
   const hasData = (idx: number): boolean => {
     if (!liveData) return false
     const key = `kanal_${idx}`
@@ -60,6 +61,26 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData }: Props) 
             >
               <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasData(k.indeks) ? 'bg-green-500' : 'bg-gray-500'}`} />
               {k.namn}
+            </div>
+          ))}
+        </>
+      )}
+
+      {mqttStatus?.aktivert && mqttStatus.topics && Object.keys(mqttStatus.topics).length > 0 && (
+        <>
+          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">MQTT</div>
+          {Object.entries(mqttStatus.topics).map(([topic, info]) => (
+            <div
+              key={topic}
+              className={`${baseKanalClass} ${inactiveKanalClass} cursor-default`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${info.verdi !== null ? 'bg-green-500' : 'bg-yellow-500'}`} />
+              <span className="truncate">{info.namn || topic}</span>
+              {info.verdi !== null && (
+                <span className="ml-auto text-xs font-mono text-gray-400">
+                  {info.verdi.toFixed(1)}{info.enhet ? ` ${info.enhet}` : ''}
+                </span>
+              )}
             </div>
           ))}
         </>

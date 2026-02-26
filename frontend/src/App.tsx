@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { useState } from 'react'
 import { fetchStatus } from './api/status'
 import { fetchKanalar, fetchKanalLive } from './api/kanalar'
+import { fetchMqttStatus } from './api/mqtt'
 import { usePolling } from './hooks/usePolling'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
@@ -23,6 +24,9 @@ export default function App() {
   const kanalFetcher = useCallback(() => fetchKanalar(), [])
   const { data: kanalar, loading: kanalarLoading } = usePolling(kanalFetcher, 5000)
 
+  const mqttFetcher = useCallback(() => fetchMqttStatus(), [])
+  const { data: mqttStatus } = usePolling(mqttFetcher, 3000)
+
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
   }
@@ -43,7 +47,7 @@ export default function App() {
       </div>
     );
   } else if (view.page === 'dashboard') {
-    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} onChannelClick={handleChannelClick} />
+    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} onChannelClick={handleChannelClick} />
   } else if (view.page === 'settings') {
     content = <SettingsPage />
   } else {
@@ -54,7 +58,7 @@ export default function App() {
     <>
       <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} />
       <Layout>
-        <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} />
+        <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} />
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
             {content}
