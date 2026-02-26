@@ -39,6 +39,7 @@ from sirius_driver import SiriusDriver, SiriusFeil, SiriusIkkeFunnet
 from opendaq_bro import OpenDAQBro
 from mqtt_konfig import les_mqtt_konfig, lagre_mqtt_konfig, valider_mqtt_konfig, MqttKonfig
 from mqtt_klient import MqttKlient
+from enhet_konfig import les_enhet_konfig, lagre_enhet_konfig, valider_enhet_konfig, EnhetKonfig
 import usbip_manager
 
 logging.basicConfig(
@@ -104,6 +105,8 @@ _maaler = None
 _opendaq_bro: OpenDAQBro = None
 _mqtt_klient: MqttKlient = None
 _mqtt_konfig: MqttKonfig = None
+_enhet_konfig: EnhetKonfig = None
+_mqtt_straumings_stopp: threading.Event = None
 _args = None
 _lock = threading.Lock()
 
@@ -481,8 +484,68 @@ def oppdater_mqtt(ny_konfig: MqttKonfig):
         _mqtt_klient.start()
         log.info("MQTT-klient starta")
 
+    # Start/restart MQTT-strøymingstråd
+    _start_mqtt_straumings_traad()
+
     return True, ("MQTT konfig lagra. Restart openDAQ bridge for å oppdatere "
                    "kanaltallet i DewesoftX.")
+
+
+def hent_enhet_konfig_dict():
+    """Hent enheit-konfig som dict for web API."""
+    global _enhet_konfig
+    if _enhet_konfig is None:
+        _enhet_konfig = les_enhet_konfig()
+    return {"antal_adc_kanalar": _enhet_konfig.antal_adc_kanalar,
+            "modell": _enhet_konfig.modell}
+
+
+def oppdater_enhet(ny_konfig: EnhetKonfig):
+    """Oppdater enheit-konfig og lagre."""
+    global _enhet_konfig
+    lagre_enhet_konfig(ny_konfig)
+    _enhet_konfig = ny_konfig
+    return True, ("Enheit-konfig lagra. Restart openDAQ bridge for å aktivere "
+                   f"{ny_konfig.antal_adc_kanalar} ADC-kanalar.")
+
+
+def _mqtt_straumings_loop():
+    """Bakgrunnstråd som injiserer MQTT-data uavhengig av SIRIUS.
+
+    Køyrer med ~20 Hz (50 ms intervall). Hoppar over viss SIRIUS
+    allereie leverer data (callbacken handterer MQTT då).
+    """
+    global _mqtt_straumings_stopp
+    log.info("MQTT strøymingstråd starta (uavhengig av SIRIUS)")
+    while not _mqtt_straumings_stopp.is_set():
+        try:
+            if (_opendaq_bro and _opendaq_bro.tilgjengelig and
+                    _mqtt_klient is not None):
+                # Sjekk om SIRIUS er aktiv — i so fall handterer callbacken MQTT
+                sirius_aktiv = (
+                    _opendaq_bro._sirius_aktiv and
+                    (time.time() - _opendaq_bro._sirius_ts) < 3.0
+                )
+                if not sirius_aktiv:
+                    mqtt_verdiar = _mqtt_klient.hent_verdiar()
+                    if mqtt_verdiar:
+                        _opendaq_bro.oppdater_mqtt_data(mqtt_verdiar, 1024)
+        except Exception as e:
+            log.warning(f"MQTT strøyming feil: {e}")
+        _mqtt_straumings_stopp.wait(timeout=0.05)  # ~20 Hz
+    log.info("MQTT strøymingstråd stoppa")
+
+
+def _start_mqtt_straumings_traad():
+    """Start eller restart MQTT-strøymingstråden."""
+    global _mqtt_straumings_stopp
+    # Stopp eksisterande tråd
+    if _mqtt_straumings_stopp is not None:
+        _mqtt_straumings_stopp.set()
+    if _mqtt_klient is not None and _mqtt_konfig and _mqtt_konfig.broker.aktivert:
+        _mqtt_straumings_stopp = threading.Event()
+        t = threading.Thread(target=_mqtt_straumings_loop, daemon=True)
+        t.start()
 
 
 _port_probe_cache = {"ts": 0.0, "result": {}}
@@ -618,12 +681,14 @@ def restart_opendaq_bro():
 
     try:
         sn = server_status.get("serienummer", "")
-        enamn = server_status.get("enhet_navn", "")
-        # Les MQTT-konfig på nytt (kan ha endra seg sidan sist)
+        enamn = server_status.get("enhet_namn", "")
+        # Les konfig på nytt (kan ha endra seg sidan sist)
         _mqtt_konfig_fresh = les_mqtt_konfig()
+        _enhet_fresh = les_enhet_konfig()
         mqtt_k = _mqtt_konfig_fresh.kanalar if _mqtt_konfig_fresh.broker.aktivert else []
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
-                                  mqtt_kanalar=mqtt_k)
+                                  mqtt_kanalar=mqtt_k,
+                                  antal_adc=_enhet_fresh.antal_adc_kanalar)
         ok = _opendaq_bro.start()
         if ok:
             _opendaq_feil = None
@@ -1050,8 +1115,10 @@ def start_server(args):
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()
 
-    # Last MQTT-konfig og start klient
-    global _opendaq_bro, _opendaq_feil, _mqtt_klient, _mqtt_konfig
+    # Last enheit- og MQTT-konfig
+    global _opendaq_bro, _opendaq_feil, _mqtt_klient, _mqtt_konfig, _enhet_konfig
+    _enhet_konfig = les_enhet_konfig()
+    log.info(f"  ADC-kanalar: {_enhet_konfig.antal_adc_kanalar} ({_enhet_konfig.modell})")
     _mqtt_konfig = les_mqtt_konfig()
     mqtt_kanalar = _mqtt_konfig.kanalar if _mqtt_konfig.broker.aktivert else []
     if _mqtt_konfig.broker.aktivert and _mqtt_konfig.kanalar:
@@ -1070,7 +1137,8 @@ def start_server(args):
         sn = server_status.get("serienummer", "")
         enamn = server_status.get("enhet_namn", "")
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
-                                  mqtt_kanalar=mqtt_kanalar)
+                                  mqtt_kanalar=mqtt_kanalar,
+                                  antal_adc=_enhet_konfig.antal_adc_kanalar)
         ok = _opendaq_bro.start()
         if ok:
             log.info("openDAQ bridge starta OK")
@@ -1083,6 +1151,9 @@ def start_server(args):
         import traceback
         log.error(traceback.format_exc())
         _opendaq_bro = None
+
+    # Start MQTT-strøymingstråd (uavhengig av SIRIUS)
+    _start_mqtt_straumings_traad()
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet and _driver.ep2_ok:
@@ -1136,6 +1207,8 @@ def start_server(args):
         pass
 
     log.info("Stopper...")
+    if _mqtt_straumings_stopp is not None:
+        _mqtt_straumings_stopp.set()
     if _mqtt_klient:
         _mqtt_klient.stopp()
     if _maaler:

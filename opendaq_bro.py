@@ -52,7 +52,7 @@ class OpenDAQBro:
     """
 
     def __init__(self, module_path=None, serienummer="", enhetsnamn="",
-                 mqtt_kanalar=None):
+                 mqtt_kanalar=None, antal_adc=8):
         self._instance = None
         self._device = None
         self._tilgjengelig = False
@@ -62,6 +62,7 @@ class OpenDAQBro:
         self._serienummer = serienummer
         self._enhetsnamn = enhetsnamn
         self._mqtt_kanalar = mqtt_kanalar or []  # Liste av MqttKanalKonfig
+        self._antal_adc = antal_adc             # Antal ADC-kanalar (avheng av SIRIUS-modell)
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
         self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
@@ -167,7 +168,8 @@ class OpenDAQBro:
             # Konfigurer kanalar (8 ADC + N MQTT) som matchar SIRIUS Sundet-oppsett
             self._konfig_kanalar()
 
-            # Sett MQTT kanal-nøklar for data-injeksjon
+            # Sett kanal-nøklar for data-injeksjon (dynamisk basert på antal_adc)
+            self._KANAL_KEYS = [f"kanal_{i}" for i in range(self._antal_adc)]
             self._MQTT_KANAL_KEYS = [f"mqtt_{i}" for i in range(len(self._mqtt_kanalar))]
 
             # Legg til GetPossibleSampleRate eigenskapen.
@@ -702,7 +704,7 @@ class OpenDAQBro:
                 if verdi is None:
                     continue
 
-                kanal_idx = 8 + mi
+                kanal_idx = self._antal_adc + mi
                 if kanal_idx >= len(self._kanal_signal):
                     break
 
@@ -793,7 +795,7 @@ class OpenDAQBro:
                 # Generer simulerte verdiar frå SUNDET_KANALAR (berre ADC-kanalar)
                 t = time.time() - t0
                 for i, cfg in enumerate(self.SUNDET_KANALAR):
-                    if i >= 8:  # Berre 8 ADC-kanalar
+                    if i >= self._antal_adc:
                         break
                     key = f"kanal_{i}"
                     amp = cfg["amplitude"]
@@ -888,8 +890,8 @@ class OpenDAQBro:
         gc.collect()
         log.info("openDAQ nettverksbro stoppa")
 
-    # Fast kanal-nøklar for hot loop (unngår sorted() og list-oppretting per kall)
-    _KANAL_KEYS = [f"kanal_{i}" for i in range(8)]
+    # Kanal-nøklar for hot loop (sett dynamisk ved oppstart basert på antal_adc)
+    _KANAL_KEYS = [f"kanal_{i}" for i in range(8)]  # Default, vert oppdatert i start()
     # MQTT-kanal-nøklar (sett dynamisk ved oppstart)
     _MQTT_KANAL_KEYS = []
 
@@ -925,12 +927,13 @@ class OpenDAQBro:
           - GlobalSampleRate: Float, [1, 1000000]
         Verdiar vert klampa automatisk av _safe_set().
         """
+        n_adc = self._antal_adc
         n_mqtt = len(self._mqtt_kanalar)
-        n_total = 8 + n_mqtt
+        n_total = n_adc + n_mqtt
         if not self._safe_set(self._device, "NumberOfChannels", n_total):
             log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
             return
-        log.info(f"  NumberOfChannels sett til {n_total} (8 ADC + {n_mqtt} MQTT)")
+        log.info(f"  NumberOfChannels sett til {n_total} ({n_adc} ADC + {n_mqtt} MQTT)")
 
         # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
         # Les frå SAMPLE_RATE env var (default 20000 = SIRIUS hardware rate)
@@ -1019,9 +1022,9 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
 
-        # Konfigurer MQTT-kanalar (indeks 8+)
+        # Konfigurer MQTT-kanalar (indeks n_adc+)
         for mi, mk in enumerate(self._mqtt_kanalar):
-            ch_idx = 8 + mi
+            ch_idx = n_adc + mi
             if ch_idx >= len(channels):
                 break
             ch = channels[ch_idx]
@@ -1255,9 +1258,9 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  {kk.namn}: AmplifierName feilet: {e}")
 
-        # MQTT-kanalar (indeks 8+): sett descriptor med eining frå MQTT-konfig
+        # MQTT-kanalar (indeks n_adc+): sett descriptor med eining frå MQTT-konfig
         for mi, mk in enumerate(self._mqtt_kanalar):
-            ch_idx = 8 + mi
+            ch_idx = self._antal_adc + mi
             if ch_idx >= len(self._kanal_signal):
                 break
             ch, sig = self._kanal_signal[ch_idx]

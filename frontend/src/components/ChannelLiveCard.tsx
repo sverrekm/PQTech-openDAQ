@@ -97,9 +97,10 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, o
               </tr>
             )
           })}
-          {mqttStatus?.aktivert && mqttStatus.topics && Object.entries(mqttStatus.topics).map(([topic, info]) => {
+          {mqttStatus?.aktivert && mqttStatus.topics && Object.entries(mqttStatus.topics).map(([topic, info], topicIdx) => {
             const mqttKey = `mqtt_${topic}`
-            const mqttIdx = 1000 + Object.keys(mqttStatus.topics).indexOf(topic)
+            const mqttIdx = 1000 + topicIdx
+            const channelNum = (kanalar?.length ?? 0) + topicIdx + 1
             if (info.verdi !== null) {
               const arr = sparkDataRef.current.get(mqttIdx) || []
               arr.push(info.verdi)
@@ -110,7 +111,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, o
 
             return (
               <tr key={mqttKey} className="transition-colors duration-100 ease-in-out bg-purple-50/30">
-                <td className="px-1 py-1 border-b border-gray-100 align-middle text-purple-500 font-semibold text-xs">M</td>
+                <td className="px-1 py-1 border-b border-gray-100 align-middle text-purple-500 font-semibold">{channelNum}</td>
                 <td className="px-1 py-1 border-b border-gray-100 align-middle">
                   {info.namn || topic}
                   <span className="text-xs text-purple-400 ml-1">MQTT</span>

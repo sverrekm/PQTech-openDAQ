@@ -111,6 +111,24 @@ STANDARD_KONFIG: List[KanalKonfig] = [
 ]
 
 
+def generer_standard_konfig(antal: int = 8) -> List[KanalKonfig]:
+    """Generer standard-konfig for eit gjeve antal ADC-kanalar.
+
+    Brukar STANDARD_KONFIG for dei fyrste 8, deretter genererer
+    generiske voltage-kanalar for resten.
+    """
+    konfig = []
+    for i in range(antal):
+        if i < len(STANDARD_KONFIG):
+            k = KanalKonfig(**asdict(STANDARD_KONFIG[i]))
+        else:
+            k = KanalKonfig(i, f"AI {i}", False, "voltage",
+                            -10.0, 10.0, "V", 20000)
+        k.indeks = i
+        konfig.append(k)
+    return konfig
+
+
 def les_konfig() -> List[KanalKonfig]:
     """Les kanal-konfigurasjon frå JSON-fil. Returnerer standard viss fila ikkje finst.
 
@@ -140,11 +158,12 @@ def les_konfig() -> List[KanalKonfig]:
                 lagre_konfig(ny)
                 return ny
 
-            if isinstance(data, list) and len(data) == 8:
+            if isinstance(data, list) and 1 <= len(data) <= 32:
                 konfig = [KanalKonfig.fraa_dict(d) for d in data]
-                log.info(f"Lasta kanal-konfig v{lagra_versjon} fraa {KONFIG_STI}")
+                log.info(f"Lasta kanal-konfig v{lagra_versjon} fraa {KONFIG_STI} "
+                         f"({len(konfig)} kanalar)")
                 return konfig
-            log.warning(f"Konfig har {len(data)} kanalar (forventa 8), brukar standard")
+            log.warning(f"Konfig har {len(data)} kanalar (utanfor 1-32), brukar standard")
     except Exception as e:
         log.warning(f"Kunne ikkje lese kanal-konfig: {e}")
 
@@ -178,10 +197,10 @@ def valider_konfig(data: list) -> tuple:
         (konfig_liste, feilmelding) - konfig_liste er None viss validering feilar
     """
     if not isinstance(data, list):
-        return None, "Forventa ein liste med 8 kanalar"
+        return None, "Forventa ei liste med kanalar"
 
-    if len(data) != 8:
-        return None, f"Forventa 8 kanalar, fekk {len(data)}"
+    if len(data) < 1 or len(data) > 32:
+        return None, f"Forventa 1-32 kanalar, fekk {len(data)}"
 
     konfig = []
     for i, d in enumerate(data):

@@ -38,6 +38,8 @@ try:
         hent_mqtt_status as _mqtt_hent_status,
         hent_mqtt_konfig_dict as _mqtt_hent_konfig,
         oppdater_mqtt as _mqtt_oppdater,
+        hent_enhet_konfig_dict as _enhet_hent_konfig,
+        oppdater_enhet as _enhet_oppdater,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -45,6 +47,7 @@ except ImportError:
 
 from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
 from mqtt_konfig import valider_mqtt_konfig
+from enhet_konfig import valider_enhet_konfig
 
 app = Flask(__name__)
 
@@ -639,6 +642,34 @@ def api_mqtt_status():
         return jsonify(_mqtt_hent_status())
     except Exception as e:
         return jsonify({"feil": str(e)}), 500
+
+
+# --- Enheit-konfig API ---
+
+@app.route("/api/enhet/konfig")
+def api_enhet_konfig():
+    """Hent enheit-konfig (antal ADC-kanalar, modell)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"antal_adc_kanalar": 8, "modell": "SIRIUSi-HS-8xLV"})
+    try:
+        return jsonify(_enhet_hent_konfig())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/enhet/konfig", methods=["PUT"])
+def api_enhet_konfig_oppdater():
+    """Oppdater enheit-konfig."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "Ikkje SIRIUS-modus"}), 400
+    data = request.get_json()
+    if not data:
+        return jsonify({"suksess": False, "melding": "Tomt request body"}), 400
+    konfig, feil = valider_enhet_konfig(data)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    suksess, melding = _enhet_oppdater(konfig)
+    return jsonify({"suksess": suksess, "melding": melding})
 
 
 # --- USB/IP API ---

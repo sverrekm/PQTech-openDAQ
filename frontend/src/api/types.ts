@@ -198,3 +198,9 @@ export interface MqttStatus {
   meldingar_motteke: number
   topics: Record<string, MqttTopicStatus>
 }
+
+// --- /api/enhet/* ---
+export interface EnhetKonfig {
+  antal_adc_kanalar: number
+  modell: string
+}
