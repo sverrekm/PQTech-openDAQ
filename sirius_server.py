@@ -414,6 +414,14 @@ def frigjor_usb():
             })
 
             log.info("USB frigjort for USB/IP-deling")
+
+            # Restart bridge med antal_adc=0 (berre MQTT-kanalar)
+            def _delayed_bridge_restart_usbip():
+                time.sleep(0.5)
+                log.info("Restartar bridge utan ADC-kanalar (USB/IP-modus)...")
+                restart_opendaq_bro()
+            threading.Thread(target=_delayed_bridge_restart_usbip, daemon=True).start()
+
             return True, "USB frigjort - klar for USB/IP"
 
         except Exception as e:
@@ -687,9 +695,17 @@ def restart_opendaq_bro():
         _mqtt_konfig_fresh = les_mqtt_konfig()
         _enhet_fresh = les_enhet_konfig()
         mqtt_k = _mqtt_konfig_fresh.kanalar if _mqtt_konfig_fresh.broker.aktivert else []
+        # Berre vis ADC-kanalar viss SIRIUS er tilkobla OG vi ikkje er i USB/IP-modus
+        sirius_ok = server_status.get("tilkoblet", False)
+        modus = les_modus()
+        if sirius_ok and modus != MODUS_USBIP:
+            effektiv_adc = _enhet_fresh.antal_adc_kanalar
+        else:
+            effektiv_adc = 0
+            log.info(f"  Bridge restart: antal_adc=0 (tilkoblet={sirius_ok}, modus={modus})")
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_k,
-                                  antal_adc=_enhet_fresh.antal_adc_kanalar)
+                                  antal_adc=effektiv_adc)
         ok = _opendaq_bro.start()
         if ok:
             _opendaq_feil = None
