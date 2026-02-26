@@ -47,7 +47,7 @@ except ImportError:
 
 from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
 from mqtt_konfig import valider_mqtt_konfig
-from enhet_konfig import valider_enhet_konfig
+from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP
 
 app = Flask(__name__)
 
@@ -672,6 +672,14 @@ def api_enhet_konfig_oppdater():
     return jsonify({"suksess": suksess, "melding": melding})
 
 
+# --- Modus API ---
+
+@app.route("/api/modus")
+def api_modus():
+    """Returnerer gjeldande driftsmodus (direkte/usbip)."""
+    return jsonify({"modus": les_modus()})
+
+
 # --- USB/IP API ---
 
 @app.route("/api/usbip/status")
@@ -696,6 +704,8 @@ def api_usbip_del():
     time.sleep(1)  # Kort pause slik at USB-enheten vert tilgjengeleg
 
     suksess, melding = usbip_manager.del_enhet()
+    if suksess:
+        lagre_modus(MODUS_USBIP)
     status = usbip_manager.hent_usbip_status()
     return jsonify({"suksess": suksess, "melding": melding, "status": status})
 
@@ -704,6 +714,8 @@ def api_usbip_del():
 def api_usbip_stopp():
     """Stopp USB-deling (unbind) og rekoblar native driver."""
     suksess, melding = usbip_manager.stopp_deling()
+    if suksess:
+        lagre_modus(MODUS_DIREKTE)
 
     # Rekoblar native driver automatisk
     rekoble_msg = ""

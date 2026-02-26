@@ -39,7 +39,8 @@ from sirius_driver import SiriusDriver, SiriusFeil, SiriusIkkeFunnet
 from opendaq_bro import OpenDAQBro
 from mqtt_konfig import les_mqtt_konfig, lagre_mqtt_konfig, valider_mqtt_konfig, MqttKonfig
 from mqtt_klient import MqttKlient
-from enhet_konfig import les_enhet_konfig, lagre_enhet_konfig, valider_enhet_konfig, EnhetKonfig
+from enhet_konfig import (les_enhet_konfig, lagre_enhet_konfig, valider_enhet_konfig,
+                          EnhetKonfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP)
 import usbip_manager
 
 logging.basicConfig(
@@ -1063,22 +1064,30 @@ def start_server(args):
 
     _args = args
 
-    # Opprett og koble til driver
+    # Les lagra driftsmodus
+    _lagra_modus = les_modus()
+    log.info(f"Lagra driftsmodus: {_lagra_modus}")
+
+    # Opprett og koble til driver (hoppar over i USB/IP-modus)
     _driver = SiriusDriver()
     enhet_tilkoblet = False
 
-    try:
-        _driver.koble_til()
-        enhet_tilkoblet = True
-    except SiriusIkkeFunnet:
-        server_status["feil"] = "SIRIUS ikke funnet paa USB"
-        log.error("SIRIUS ikke funnet paa USB!")
-        log.error("Sjekk at enheten er koblet til og at USB-tilgang er gitt")
-        log.error("Web UI starter likevel - bruk Rekoble-knappen naar enheten er klar")
-    except SiriusFeil as e:
-        server_status["feil"] = str(e)
-        log.error(f"Tilkoblingsfeil: {e}")
-        log.error("Web UI starter likevel - bruk Rekoble-knappen naar enheten er klar")
+    if _lagra_modus == MODUS_USBIP:
+        log.info("USB/IP-modus var aktiv ved siste avslutning — hoppar over SIRIUS-tilkobling")
+        log.info("SIRIUS vert delt via USB/IP etter oppstart")
+    else:
+        try:
+            _driver.koble_til()
+            enhet_tilkoblet = True
+        except SiriusIkkeFunnet:
+            server_status["feil"] = "SIRIUS ikke funnet paa USB"
+            log.error("SIRIUS ikke funnet paa USB!")
+            log.error("Sjekk at enheten er koblet til og at USB-tilgang er gitt")
+            log.error("Web UI starter likevel - bruk Rekoble-knappen naar enheten er klar")
+        except SiriusFeil as e:
+            server_status["feil"] = str(e)
+            log.error(f"Tilkoblingsfeil: {e}")
+            log.error("Web UI starter likevel - bruk Rekoble-knappen naar enheten er klar")
 
     # Oppdater global status
     if enhet_tilkoblet:
@@ -1204,6 +1213,18 @@ def start_server(args):
         server_status["feil"] = "EP2 timeout - klikk Gjenoppliv EP2"
     else:
         log.info("Streaming og autonom lagring utsett til enhet er tilkobla")
+
+    # Auto-start USB/IP deling viss det var sist aktive modus
+    if _lagra_modus == MODUS_USBIP:
+        def _auto_start_usbip():
+            time.sleep(2)  # Vent litt slik at USB-systemet er klart
+            log.info("Auto-start USB/IP deling (sist aktive modus)...")
+            ok, melding = usbip_manager.del_enhet()
+            if ok:
+                log.info(f"USB/IP auto-start OK: {melding}")
+            else:
+                log.warning(f"USB/IP auto-start feilet: {melding}")
+        threading.Thread(target=_auto_start_usbip, daemon=True).start()
 
     # Hold serveren kjorende
     stopp = False

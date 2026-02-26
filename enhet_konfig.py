@@ -17,6 +17,11 @@ from pathlib import Path
 log = logging.getLogger('enhet_konfig')
 
 ENHET_KONFIG_STI = Path("/data/konfig/enhet.json")
+MODUS_KONFIG_STI = Path("/data/konfig/modus.json")
+
+# Gyldige driftsmodus
+MODUS_DIREKTE = "direkte"   # Container brukar SIRIUS direkte over USB
+MODUS_USBIP = "usbip"       # SIRIUS delast via USB/IP til Windows
 
 
 @dataclass
@@ -79,3 +84,38 @@ def valider_enhet_konfig(data: dict) -> tuple:
     modell = str(data.get("modell", "SIRIUSi-HS-8xLV"))
 
     return EnhetKonfig(antal_adc_kanalar=n, modell=modell), None
+
+
+# --- Modus-persistens ---
+
+def les_modus() -> str:
+    """Les sist brukte driftsmodus. Returnerer 'direkte' som standard."""
+    try:
+        if MODUS_KONFIG_STI.exists():
+            data = json.loads(MODUS_KONFIG_STI.read_text(encoding='utf-8'))
+            modus = data.get("modus", MODUS_DIREKTE)
+            if modus in (MODUS_DIREKTE, MODUS_USBIP):
+                log.info(f"Lasta modus: {modus}")
+                return modus
+            log.warning(f"Ukjend modus '{modus}' i {MODUS_KONFIG_STI}, brukar 'direkte'")
+    except Exception as e:
+        log.warning(f"Kunne ikkje lese modus: {e}")
+    return MODUS_DIREKTE
+
+
+def lagre_modus(modus: str) -> bool:
+    """Lagre gjeldande driftsmodus til fil."""
+    if modus not in (MODUS_DIREKTE, MODUS_USBIP):
+        log.error(f"Ugyldig modus: {modus}")
+        return False
+    try:
+        MODUS_KONFIG_STI.parent.mkdir(parents=True, exist_ok=True)
+        MODUS_KONFIG_STI.write_text(
+            json.dumps({"modus": modus}, indent=2),
+            encoding='utf-8'
+        )
+        log.info(f"Lagra modus: {modus}")
+        return True
+    except Exception as e:
+        log.error(f"Kunne ikkje lagre modus: {e}")
+        return False
