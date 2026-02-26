@@ -947,6 +947,7 @@ class OpenDAQBro:
             sundet = self.SUNDET_KANALAR[i] if i < len(self.SUNDET_KANALAR) else None
             try:
                 ch.name = kk.namn
+                ch.description = kk.namn
 
                 amp = sundet["amplitude"] if sundet else 0.0
                 freq = sundet["freq"] if sundet else 50.0
@@ -1009,6 +1010,7 @@ class OpenDAQBro:
             ch = channels[ch_idx]
             try:
                 ch.name = mk.namn or mk.topic
+                ch.description = mk.namn or mk.topic
                 self._safe_set(ch, "Amplitude", 0.0)
                 self._safe_set(ch, "Frequency", 1.0)
                 self._safe_set(ch, "DC", 0.0)
