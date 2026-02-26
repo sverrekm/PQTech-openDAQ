@@ -564,7 +564,12 @@ def api_kanalar_oppdater():
 
     ok = lagre_konfig(konfig)
     if ok:
-        return jsonify({"suksess": True, "melding": "Konfigurasjon lagra"})
+        # Restart openDAQ-broen slik at nye skaleringsfaktorar vert brukte
+        try:
+            _opendaq_restart()
+        except Exception as e:
+            log.warning(f"Bridge restart etter konfig-endring feila: {e}")
+        return jsonify({"suksess": True, "melding": "Konfigurasjon lagra — bridge restartar"})
     return jsonify({"suksess": False, "melding": "Kunne ikkje lagre konfigurasjon"}), 500
 
 

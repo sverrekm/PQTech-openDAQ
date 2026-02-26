@@ -72,7 +72,7 @@ class KanalKonfig:
 
 # Konfig-versjon: Auk denne ved endringar i STANDARD_KONFIG.
 # Viss lagra konfig har lågare versjon, vert den erstatta med ny standard.
-KONFIG_VERSJON = 11  # v11: Generisk standard (ikkje SIRIUS-spesifikk)
+KONFIG_VERSJON = 10  # Bump berre ved skjema-endringar, ikkje for nye standardverdiar
 
 # Generisk standard-konfigurasjon — fungerer med alle Dewesoft-instrument.
 # Brukarar konfigurerer kanalar via web UI etter at instrumentet er tilkobla.

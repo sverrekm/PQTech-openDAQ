@@ -10,7 +10,7 @@ import sys
 PI_HOST = '192.168.1.160'
 PI_USER = 'sverre'
 PI_PASS = 'Svkme6199!'
-CONTAINER = 'opendaq-sirius'
+CONTAINER = 'pqtech-opendaq'
 BASE = 'D:/Koding/dewesoft/OpenDackoConteiner'
 PI_REPO = '/home/sverre/OpenDackoConteiner'
 
@@ -28,6 +28,11 @@ container_files = [
     (f'{BASE}/kanal_konfig.py',       '/tmp/kanal_konfig.py',        '/app/kanal_konfig.py'),
     (f'{BASE}/sirius_server.py',      '/tmp/sirius_server.py',       '/app/sirius_server.py'),
     (f'{BASE}/sirius_protokoll_impl.py', '/tmp/sirius_protokoll_impl.py', '/app/sirius_protokoll_impl.py'),
+    (f'{BASE}/web_ui.py',             '/tmp/web_ui.py',              '/app/web_ui.py'),
+    (f'{BASE}/enhet_konfig.py',       '/tmp/enhet_konfig.py',        '/app/enhet_konfig.py'),
+    (f'{BASE}/mqtt_konfig.py',        '/tmp/mqtt_konfig.py',         '/app/mqtt_konfig.py'),
+    (f'{BASE}/mqtt_klient.py',        '/tmp/mqtt_klient.py',         '/app/mqtt_klient.py'),
+    (f'{BASE}/usbip_manager.py',      '/tmp/usbip_manager.py',       '/app/usbip_manager.py'),
 ]
 
 # docker-compose.yml oppdaterast på Pi-repo (for SAMPLE_RATE env + memory limit)
