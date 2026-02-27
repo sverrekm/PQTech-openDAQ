@@ -351,6 +351,11 @@ PYEOF
 # acquisition loop skips data generation (collectSamples, collectTimeSignalSamples).
 # This allows Python to inject real SIRIUS measurement data via
 # DataPacket + signal.send_packet() without conflicting with synthetic sine waves.
+#
+# VIKTIG: `continue` hoppar over HEILE loop-kroppen inkludert sleep/scheduling
+# på slutten. Utan sleep vert dette ein 100% CPU busy-loop som sveltir
+# OPC-UA, NativeStreaming og mDNS-trådar. Difor legg me til ein 50ms sleep
+# FØR continue, slik at andre trådar får CPU-tid.
 RUN python3 << 'PYEOF'
 import sys
 
@@ -374,8 +379,20 @@ if '#include <cstdlib>' not in content:
         print("FEIL: Ingen #include funne!", file=sys.stderr)
         sys.exit(1)
 
+# Sikre at <thread> og <chrono> er inkluderte (for sleep_for)
+for hdr in ['<thread>', '<chrono>']:
+    if f'#include {hdr}' not in content:
+        import re
+        last_inc = None
+        for m in re.finditer(r'^#include\s+.*$', content, re.MULTILINE):
+            last_inc = m
+        if last_inc:
+            content = content[:last_inc.end()] + f'\n#include {hdr}' + content[last_inc.end():]
+            print(f"OK: La til #include {hdr}")
+
 # Patch acqLoop: add env var guard after "if (!stopAcq) {"
 # to skip all data generation (collectTimeSignalSamples + collectSamples)
+# VIKTIG: Legg til 50ms sleep FØR continue for å unngå busy-loop.
 old_pattern = """        if (!stopAcq)
         {
             const auto curTime = getMicroSecondsSinceDeviceStart();"""
@@ -384,16 +401,21 @@ new_pattern = """        if (!stopAcq)
         {
             // Patch 5: Skip data generation when OPENDAQ_DISABLE_ACQ is set.
             // Real SIRIUS data is injected from Python via signal.send_packet().
+            // Sleep 50ms to avoid busy-loop that starves OPC-UA/NativeStreaming.
             {
                 static const bool disableAcq = std::getenv("OPENDAQ_DISABLE_ACQ") != nullptr;
-                if (disableAcq) continue;
+                if (disableAcq)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
             }
 
             const auto curTime = getMicroSecondsSinceDeviceStart();"""
 
 if old_pattern in content:
     content = content.replace(old_pattern, new_pattern, 1)
-    print("OK: Added OPENDAQ_DISABLE_ACQ guard in acqLoop")
+    print("OK: Added OPENDAQ_DISABLE_ACQ guard in acqLoop (with 50ms sleep)")
 else:
     # Fallback: search for getMicroSecondsSinceDeviceStart in acqLoop context
     import re
@@ -404,19 +426,24 @@ else:
     if match:
         indent = match.group(2)
         guard = (f"\n{indent}// Patch 5: Skip data generation (OPENDAQ_DISABLE_ACQ)\n"
+                 f"{indent}// Sleep 50ms to avoid busy-loop that starves other threads.\n"
                  f"{indent}{{\n"
                  f"{indent}    static const bool disableAcq = std::getenv(\"OPENDAQ_DISABLE_ACQ\") != nullptr;\n"
-                 f"{indent}    if (disableAcq) continue;\n"
+                 f"{indent}    if (disableAcq)\n"
+                 f"{indent}    {{\n"
+                 f"{indent}        std::this_thread::sleep_for(std::chrono::milliseconds(50));\n"
+                 f"{indent}        continue;\n"
+                 f"{indent}    }}\n"
                  f"{indent}}}\n\n{indent}")
         content = content[:match.end(1)] + guard + content[match.start(3):]
-        print("OK: Added OPENDAQ_DISABLE_ACQ guard (regex fallback)")
+        print("OK: Added OPENDAQ_DISABLE_ACQ guard with sleep (regex fallback)")
     else:
         print("FEIL: Could not find acqLoop pattern to patch!", file=sys.stderr)
         sys.exit(1)
 
 with open(path, "w") as f:
     f.write(content)
-print("Patch 5 komplett: disable acqLoop data generation")
+print("Patch 5 komplett: disable acqLoop data generation (with sleep)")
 PYEOF
 
 # ---- Patch 6: OPC-UA DataType coercion in writeValue ----

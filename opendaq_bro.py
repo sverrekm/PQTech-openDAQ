@@ -77,6 +77,7 @@ class OpenDAQBro:
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
         self._sirius_ts = 0.0       # Tidsstempel for siste SIRIUS-data
+        self._mqtt_pkt_teller = 0   # Antal MQTT-pakketar sendt
         self._leser_traad = None
         self._stopp_event = threading.Event()
         # DataPacket-injeksjon (fase 2: reelle SIRIUS-data)
@@ -241,6 +242,11 @@ class OpenDAQBro:
 
             # Sett signal descriptors med einingar og metadata (Nivå 1)
             self._sett_signal_descriptors()
+
+            # Send DataDescriptorChangedEventPacket ETTER at descriptors er sett.
+            # NativeStreaming treng dette event for å vidaresende DataPackets.
+            # Når OPENDAQ_DISABLE_ACQ er sett, sender aldri acqLoop det sjølv.
+            self.send_descriptor_events()
 
             # List kanalar og sjekk domain-signal (nil → DewesoftX krasj)
             kanalar = []
@@ -545,8 +551,45 @@ class OpenDAQBro:
             if not os.environ.get("OPENDAQ_DISABLE_ACQ"):
                 log.warning("  ADVARSEL: OPENDAQ_DISABLE_ACQ ikkje sett! "
                             "RefDevice genererer OGSAA syntetisk data!")
+
+            # DescriptorChanged events vert sendt separat etter
+            # _sett_signal_descriptors() — sjå send_descriptor_events().
         else:
             log.warning("  Pakett-injeksjon IKKJE klar — ingen domain-signal")
+
+    def send_descriptor_events(self):
+        """Send DataDescriptorChangedEventPacket til alle signalar.
+
+        NativeStreaming-serveren treng dette for å vite dataformatet
+        FØR den byrjar å vidaresende DataPackets til klientar.
+        Når OPENDAQ_DISABLE_ACQ er sett, køyrer aldri acqLoop si
+        collectSamples() som normalt sender det fyrste DescriptorChanged.
+
+        MÅ kallast ETTER _sett_signal_descriptors() slik at
+        self._val_desc[] har dei oppdaterte descriptors.
+        """
+        if not self._pakett_klar:
+            return
+        if not hasattr(_daq, 'DataDescriptorChangedEventPacket'):
+            log.warning("  DataDescriptorChangedEventPacket ikkje tilgjengeleg")
+            return
+
+        evt_sendt = 0
+        for idx in range(len(self._dom_signal)):
+            if (self._dom_signal[idx] is not None and
+                    self._val_desc[idx] is not None and
+                    self._dom_desc[idx] is not None):
+                try:
+                    evt = _daq.DataDescriptorChangedEventPacket(
+                        self._val_desc[idx], self._dom_desc[idx])
+                    _, sig = self._kanal_signal[idx]
+                    if sig is not None:
+                        sig.send_packet(evt)
+                        evt_sendt += 1
+                except Exception as e:
+                    log.warning(f"  DescriptorChanged event Ch{idx}: {e}")
+        if evt_sendt > 0:
+            log.info(f"  DescriptorChanged events sendt: {evt_sendt} kanalar")
 
     def oppdater_data(self, kanal_data):
         """
@@ -764,11 +807,18 @@ class OpenDAQBro:
                         dom_sig.send_packet(time_pkt)
                         sig.send_packet(val_pkt)
                         self._total_samples[kanal_idx] += blokk_storleik
+                        self._mqtt_pkt_teller += 1
+                        # Logg fyrste og deretter kvar 200. pakke (~10s)
+                        if self._mqtt_pkt_teller == 1 or self._mqtt_pkt_teller % 200 == 0:
+                            log.info(f"  MQTT pkt #{self._mqtt_pkt_teller}: "
+                                     f"Ch{kanal_idx} verdi={verdi:.2f}, "
+                                     f"samples={self._total_samples[kanal_idx]}")
                     except Exception as e:
-                        if self._data_teller % 1000 == 0:
-                            log.warning(f"  MQTT pakett Ch{kanal_idx}: {e}")
+                        self._mqtt_pkt_teller += 1
+                        if self._mqtt_pkt_teller <= 5 or self._mqtt_pkt_teller % 200 == 0:
+                            log.warning(f"  MQTT pakett Ch{kanal_idx} FEIL #{self._mqtt_pkt_teller}: {e}")
         except Exception as e:
-            if self._data_teller % 100 == 0:
+            if self._mqtt_pkt_teller % 100 == 0:
                 log.warning(f"oppdater_mqtt_data feil: {e}")
 
     def hent_siste_verdiar(self) -> dict:
@@ -776,8 +826,11 @@ class OpenDAQBro:
         result = dict(self._siste_verdiar)
         result["_debug"] = {
             "data_teller": self._data_teller,
+            "mqtt_pkt_teller": self._mqtt_pkt_teller,
             "sirius_aktiv": self._sirius_aktiv,
             "sirius_ts": self._sirius_ts,
+            "pakett_klar": self._pakett_klar,
+            "total_samples": list(self._total_samples),
         }
         return result
 
