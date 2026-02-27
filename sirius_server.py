@@ -414,14 +414,8 @@ def frigjor_usb():
             })
 
             log.info("USB frigjort for USB/IP-deling")
-
-            # Restart bridge med antal_adc=0 (berre MQTT-kanalar)
-            def _delayed_bridge_restart_usbip():
-                time.sleep(0.5)
-                log.info("Restartar bridge utan ADC-kanalar (USB/IP-modus)...")
-                restart_opendaq_bro()
-            threading.Thread(target=_delayed_bridge_restart_usbip, daemon=True).start()
-
+            # Ikkje restart bridge — hald same kanalar, ADC-data sluttar berre
+            # å kome. MQTT held fram uforstyrra. DewesoftX beheld tilkoblinga.
             return True, "USB frigjort - klar for USB/IP"
 
         except Exception as e:
