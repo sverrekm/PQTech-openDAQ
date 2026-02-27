@@ -350,6 +350,64 @@ class SiriusDriver:
                 "EP2 (ADC) svarte ikkje - bruk 'Gjenoppliv EP2' i web UI."
             )
 
+        # ---- Les Dewesoft-serienummer frå EEPROM (side 0x1E) ----
+        # Init-sekvensens EEPROM-lesingar feiler (timeout), men etter init
+        # er USB stabil og EEPROM-lesing fungerer.  Les side 0x1E som
+        # inneheld enhetsinfo inkludert det ekte Dewesoft-serienummeret
+        # (t.d. DB19106004) — ikkje FX2 USB-serial (D019274CF6).
+        if self._tilkoblet and self._proto:
+            try:
+                import re
+                info_bytes = self._proto.les_enhets_info_eeprom()
+                if info_bytes:
+                    # Logg hex+ASCII for feilsøking
+                    for offset in range(0, min(len(info_bytes), 128), 16):
+                        chunk = info_bytes[offset:offset + 16]
+                        hex_part = ' '.join(f'{b:02x}' for b in chunk)
+                        ascii_part = ''.join(
+                            chr(b) if 0x20 <= b < 0x7F else '.' for b in chunk
+                        )
+                        log.info(f"  DevInfo[{offset:04x}]: {hex_part:<48s} {ascii_part}")
+
+                    # Serienummer er lagra som 5 BCD-bytes i little-endian:
+                    #   DB19106004 → bytes db 19 10 60 04 → LE: 04 60 10 19 db
+                    #   D019274CF6 → bytes d0 19 27 4c f6 → LE: f6 4c 27 19 d0
+                    # USB-serial (FX2) ligg ved EEPROM ~0x0A.
+                    # Dewesoft-serial ligg ved ein annan offset.
+                    # Skann alle 5-byte-vindauge: dekod LE BCD → finn serienummer.
+                    usb_sn = self._enhetsinfo.serienummer.upper()
+                    dewesoft_sn = None
+                    for i in range(len(info_bytes) - 4):
+                        b = info_bytes[i:i + 5]
+                        # Hopp over trivielle mønster (nullar, 0xFF, berre eitt
+                        # ikkje-null byte) som gir falske positive
+                        nonzero = sum(1 for x in b if x != 0 and x != 0xFF)
+                        if nonzero < 3:
+                            continue
+                        # Dekod 5 BCD-bytes little-endian til hex-streng
+                        sn_hex = ''.join(f'{x:02X}' for x in reversed(b))
+                        # Dewesoft-serial: fyrste byte (BE, siste i LE) har
+                        # begge nibbles ≥ 0xA (t.d. 0xDB → D og B).
+                        last_byte = b[4]
+                        if (last_byte >> 4) < 0xA or (last_byte & 0xF) < 0xA:
+                            continue
+                        # Resterande 4 bytes (LE 0-3) er BCD-desimal (nibbles 0-9)
+                        if not all((x >> 4) <= 9 and (x & 0xF) <= 9 for x in b[:4]):
+                            continue
+                        if sn_hex == usb_sn:
+                            continue
+                        dewesoft_sn = sn_hex
+                        log.info(f"  EEPROM BCD-serial ved 0x{i:02X}: "
+                                 f"{b.hex()} → {sn_hex}")
+                        break  # Bruk fyrste treff
+                    if dewesoft_sn:
+                        log.info(f"  Dewesoft-serienummer frå EEPROM: {dewesoft_sn}")
+                        self._enhetsinfo.serienummer = dewesoft_sn
+                    else:
+                        log.info("  EEPROM side 0x1E: Dewesoft-SN ikkje funne")
+            except Exception as e:
+                log.warning(f"Kunne ikkje lese enhetsinfo-EEPROM: {e}")
+
         # ---- Skriv lisensdata til system_ds.lic for DewesoftX SCP ----
         # Køyrer alltid etter tilkobling, uavhengig av EP2-status.
         # DewesoftX sin GetUncompressedLicense forventar komprimert data.
@@ -1568,28 +1626,28 @@ class SiriusDriver:
                     feil_teller += 1
                     log.warning(f"  Cmd 0x{opcode:02X} feilet: {e}")
 
-        # Søk etter Dewesoft-serienummer i EEPROM-data.
-        # Ekte serienummer er ASCII-streng som "DB19106004" (2 bokstavar + 8 siffer).
-        # USB iSerialNumber (t.d. D019274CF6) er FX2-kontrollaren — ikkje Dewesoft.
+        # Søk etter Dewesoft-serienummer i EEPROM-data (BCD LE-format).
+        # Serienummer er 5 BCD-bytes i little-endian.
+        # Mønster: siste byte (BE fyrste) har begge nibbles ≥ 0xA,
+        # dei 4 fyrste bytes (BE resten) er BCD-desimal (nibbles 0-9).
         if eeprom_data:
-            import re
-            log.info(f"  EEPROM: {len(eeprom_data)} bytes samla")
-            # Logg fyrste 64 bytes for feilsøking (hex + ASCII)
-            for offset in range(0, min(len(eeprom_data), 128), 16):
-                chunk = eeprom_data[offset:offset + 16]
-                hex_part = ' '.join(f'{b:02x}' for b in chunk)
-                ascii_part = ''.join(chr(b) if 0x20 <= b < 0x7F else '.' for b in chunk)
-                log.info(f"  EEPROM[{offset:04x}]: {hex_part:<48s} {ascii_part}")
-
-            # Søk etter Dewesoft-serienummer: 2 store bokstavar + 8 siffer
-            eeprom_ascii = eeprom_data.decode('ascii', errors='replace')
-            match = re.search(r'[A-Z]{2}\d{8}', eeprom_ascii)
-            if match:
-                dewesoft_sn = match.group(0)
-                log.info(f"  EEPROM serienummer funne: {dewesoft_sn}")
-                self._enhetsinfo.serienummer = dewesoft_sn
-            else:
-                log.info("  EEPROM: Dewesoft-serienummer ikkje funne (held USB-serial)")
+            log.info(f"  EEPROM: {len(eeprom_data)} bytes samla (init-sekvens)")
+            usb_sn = self._enhetsinfo.serienummer.upper()
+            for i in range(len(eeprom_data) - 4):
+                b = eeprom_data[i:i + 5]
+                nonzero = sum(1 for x in b if x != 0 and x != 0xFF)
+                if nonzero < 3:
+                    continue
+                last_byte = b[4]
+                if (last_byte >> 4) < 0xA or (last_byte & 0xF) < 0xA:
+                    continue
+                if not all((x >> 4) <= 9 and (x & 0xF) <= 9 for x in b[:4]):
+                    continue
+                sn_hex = ''.join(f'{x:02X}' for x in reversed(b))
+                if sn_hex != usb_sn:
+                    log.info(f"  EEPROM init BCD-serial: {sn_hex}")
+                    self._enhetsinfo.serienummer = sn_hex
+                    break
 
         # ---- Lo-LV slot-initialisering (slot 4-7) ----
         # INIT_SEKVENS over initialiserer berre Hi-LV slot 0-3.

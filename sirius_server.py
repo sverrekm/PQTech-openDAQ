@@ -624,6 +624,48 @@ def _oppdater_system_ini_location(location: str):
         log.warning(f"  Kunne ikkje oppdatere system.ini: {e}")
 
 
+def _oppdater_serial_filer(sn: str):
+    """Oppdater serienummer i /etc/environment og system.xml.
+
+    Når EEPROM-serienummeret vert detektert dynamisk (t.d. DB19106004),
+    må det propagarast til:
+      1. /etc/environment — DewesoftX SSH les OPENDAQ_SERIAL herifrå
+      2. system.xml — DewesoftX SCP lastar ned denne fila
+    """
+    # 1. Oppdater /etc/environment
+    try:
+        env_sti = Path("/etc/environment")
+        if env_sti.exists():
+            linjer = env_sti.read_text(encoding='utf-8').splitlines()
+            nye_linjer = [l for l in linjer if not l.startswith("OPENDAQ_SERIAL=")]
+            nye_linjer.append(f"OPENDAQ_SERIAL={sn}")
+            env_sti.write_text('\n'.join(nye_linjer) + '\n', encoding='utf-8')
+            log.info(f"  /etc/environment: OPENDAQ_SERIAL={sn}")
+    except Exception as e:
+        log.debug(f"  Kunne ikkje oppdatere /etc/environment: {e}")
+
+    # 2. Oppdater system.xml (erstatt SerialNumber-element)
+    try:
+        xml_sti = Path("/opt/dewesoft/scripts/system.xml")
+        if xml_sti.exists():
+            import re
+            xml_tekst = xml_sti.read_text(encoding='utf-8')
+            xml_tekst = re.sub(
+                r'<SerialNumber>[^<]*</SerialNumber>',
+                f'<SerialNumber>{sn}</SerialNumber>',
+                xml_tekst
+            )
+            xml_tekst = re.sub(
+                r'<SystemSerialNumber>[^<]*</SystemSerialNumber>',
+                f'<SystemSerialNumber>{sn}</SystemSerialNumber>',
+                xml_tekst
+            )
+            xml_sti.write_text(xml_tekst, encoding='utf-8')
+            log.info(f"  system.xml: SerialNumber={sn}")
+    except Exception as e:
+        log.debug(f"  Kunne ikkje oppdatere system.xml: {e}")
+
+
 def restart_opendaq_bro():
     """Manuell restart av openDAQ bridge (for debugging/retry).
 
@@ -1048,9 +1090,13 @@ def rekoble_driver():
             })
 
             # Oppdater openDAQ bridge med nytt serienummer
-            if _opendaq_bro and info.get("serienummer"):
+            sn = info.get("serienummer", "")
+            if sn:
+                os.environ["OPENDAQ_SERIAL"] = sn
+                _oppdater_serial_filer(sn)
+            if _opendaq_bro and sn:
                 _opendaq_bro.oppdater_enhetsinfo(
-                    serienummer=info.get("serienummer", ""),
+                    serienummer=sn,
                     enhetsnamn=info.get("enhetsstreng", ""),
                 )
 
@@ -1198,6 +1244,17 @@ def start_server(args):
         # slik at DewesoftX kan sjaa dei via OPC-UA device info.
         sn = server_status.get("serienummer", "")
         enamn = server_status.get("enhet_namn", "")
+
+        # Sett OPENDAQ_SERIAL dynamisk frå EEPROM-detektert serienummer.
+        # C++ Patch 3 i Dockerfile les denne env var ved device-oppstart
+        # for å sette DeviceInfo.serialNumber (som er frosen etter build).
+        # Utan dette vert standard "DevSer0" brukt.
+        if sn:
+            os.environ["OPENDAQ_SERIAL"] = sn
+            log.info(f"  OPENDAQ_SERIAL sett dynamisk: {sn}")
+            # Oppdater /etc/environment slik at DewesoftX SSH-sesjonar
+            # (platform_control.sh sysinfo) også ser riktig serienummer.
+            _oppdater_serial_filer(sn)
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_kanalar,
                                   antal_adc=effektiv_adc)

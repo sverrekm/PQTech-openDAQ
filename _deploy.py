@@ -78,7 +78,7 @@ print('\nSjekkar loggar (siste 30 linjer)...')
 stdin, stdout, stderr = ssh.exec_command(
     f'sudo docker logs --tail 30 {CONTAINER} 2>&1', timeout=15)
 logs = stdout.read().decode('utf-8', errors='replace')
-print(logs)
+print(logs.encode('ascii', errors='replace').decode('ascii'))
 
 ssh.close()
 print('Deploy ferdig!')

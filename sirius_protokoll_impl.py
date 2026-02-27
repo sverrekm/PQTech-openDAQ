@@ -271,6 +271,39 @@ class SiriusProtokoll:
         log.info(f"Lisens-EEPROM lese: {len(lisens_data)} bytes")
         return bytes(lisens_data)
 
+    def les_enhets_info_eeprom(self):
+        """Les enhetsinfo frå EEPROM side 0x1E (serienummer, kalibrering etc.).
+
+        Les same adresser som DewesoftX gjer i pcapng init-sekvensen.
+        Returnerer rå binærdata der Dewesoft-serienummeret (t.d. DB19106004)
+        ligg som ASCII-streng.
+        """
+        # Side 0x1E adresser frå init-sekvensen (sirius_init_sekvens.py)
+        reads = [
+            (0x1E, 0x00, 0x10),
+            (0x1E, 0x10, 0x04),
+            (0x1E, 0x14, 0x0C),
+            (0x1E, 0x50, 0x10),
+            (0x1E, 0x60, 0x0C),
+            (0x1E, 0x80, 0x10),
+            (0x1E, 0x90, 0x04),
+            (0x1E, 0xA0, 0x10),
+            (0x1E, 0xB0, 0x0C),
+            (0x1E, 0xC0, 0x10),
+            (0x1E, 0xD0, 0x08),
+        ]
+        info_data = bytearray()
+        for page, offset, length in reads:
+            try:
+                svar = self.send_raa_kommando(
+                    bytes([OPCODE_EEPROM, page, offset, length])
+                )
+                info_data.extend(svar[:length])
+            except Exception as e:
+                log.warning(f"EEPROM side 0x{page:02X} offset 0x{offset:02X}: {e}")
+        log.info(f"Enhetsinfo-EEPROM lese: {len(info_data)} bytes")
+        return bytes(info_data)
+
     def init_kommando(self):
         """Send B0 3F 0C, initialiser/reset enheten."""
         svar = self.send_raa_kommando(bytes([OPCODE_INIT, 0x3F, 0x0C]))
