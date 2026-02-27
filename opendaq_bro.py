@@ -407,6 +407,14 @@ class OpenDAQBro:
                 except Exception as e_disc:
                     log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
 
+            # Fiks stale OPC-UA verdiar: C++ writeValue()-callbacken feiler
+            # med "DataType incompatible" for visse eigenskapar. Python SDK
+            # set_property_value() endrar intern state (kanalar VERT oppretta),
+            # men OPC-UA-noden beheld gammal verdi (t.d. NumberOfChannels=2).
+            # Skriv riktig verdi direkte til OPC-UA via asyncua.
+            n_total = self._antal_adc + len(self._mqtt_kanalar)
+            self._fiks_opcua_verdiar(n_total)
+
             with self._lock:
                 self._status.update({
                     "tilgjengelig": True,
@@ -1522,6 +1530,63 @@ class OpenDAQBro:
         except Exception as e:
             log.warning(f"  _safe_set({namn}, {verdi!r}): {e}")
             return False
+
+    def _fiks_opcua_verdiar(self, n_kanalar):
+        """Skriv stale OPC-UA eigenskapar direkte via asyncua.
+
+        C++ writeValue()-callbacken i open62541 feiler med 'DataType
+        incompatible' for Int/Float-eigenskapar fordi VariantConverter
+        sender feil type.  Kanalane VERT oppretta av Python SDK, men
+        OPC-UA-noden NumberOfChannels beheld gammal verdi (default 2).
+        DewesoftX les denne noden og viser berre 2 kanalar.
+
+        Løysing: Skriv riktig verdi direkte til OPC-UA etter oppstart.
+        """
+        try:
+            import asyncio
+            from asyncua import Client as OpcClient, ua as opcua
+        except ImportError:
+            log.warning("  asyncua ikkje installert — kan ikkje fikse OPC-UA verdiar")
+            return
+
+        async def _skriv():
+            c = OpcClient("opc.tcp://127.0.0.1:4840", timeout=5)
+            await c.connect()
+            fiksa = 0
+            try:
+                # NumberOfChannels (Int64)
+                node = c.get_node(opcua.NodeId("/RefDev0/NumberOfChannels", 4))
+                old = await node.read_value()
+                if old != n_kanalar:
+                    dv = opcua.DataValue(opcua.Variant(n_kanalar, opcua.VariantType.Int64))
+                    await node.write_value(dv)
+                    log.info(f"  OPC-UA fiks: NumberOfChannels {old} → {n_kanalar}")
+                    fiksa += 1
+
+                # GlobalSampleRate (Double/Float64)
+                sr = float(os.environ.get("SAMPLE_RATE", "20000"))
+                sr_node = c.get_node(opcua.NodeId("/RefDev0/GlobalSampleRate", 4))
+                old_sr = await sr_node.read_value()
+                if abs(old_sr - sr) > 0.1:
+                    dv = opcua.DataValue(opcua.Variant(sr, opcua.VariantType.Double))
+                    await sr_node.write_value(dv)
+                    log.info(f"  OPC-UA fiks: GlobalSampleRate {old_sr} → {sr}")
+                    fiksa += 1
+            except Exception as e:
+                log.warning(f"  OPC-UA fiks feilet: {e}")
+            finally:
+                await c.disconnect()
+            return fiksa
+
+        try:
+            # Køyr asynkron OPC-UA skriving synkront
+            loop = asyncio.new_event_loop()
+            n = loop.run_until_complete(_skriv())
+            loop.close()
+            if n:
+                log.info(f"  OPC-UA: {n} stale verdiar fiksa")
+        except Exception as e:
+            log.warning(f"  OPC-UA fixup feilet: {e}")
 
     def _fiks_nil_strings(self, obj, label=""):
         """Sett nil string-eigenskapar til tom streng.
