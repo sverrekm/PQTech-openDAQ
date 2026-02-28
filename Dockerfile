@@ -362,15 +362,11 @@ with open(path, "r") as f:
     content = f.read()
 
 # Sikre at nødvendige headers er inkluderte
+# Bruk enkel prepend — robust uavhengig av eksisterande includes
 for hdr in ['<cstdlib>', '<thread>', '<chrono>', '<unistd.h>']:
     if f'#include {hdr}' not in content:
-        import re
-        last_inc = None
-        for m in re.finditer(r'^#include\s+.*$', content, re.MULTILINE):
-            last_inc = m
-        if last_inc:
-            content = content[:last_inc.end()] + f'\n#include {hdr}' + content[last_inc.end():]
-            print(f"OK: La til #include {hdr}")
+        content = f'#include {hdr}\n' + content
+        print(f"OK: La til #include {hdr} (prepend)")
 
 # Patch acqLoop: add FILE-based guard after "if (!stopAcq) {"
 # to skip all data generation (collectTimeSignalSamples + collectSamples)
