@@ -744,7 +744,7 @@ def restart_opendaq_bro():
         return True, "Container restartar for å frigjere portar (10-15s)..."
 
     try:
-        sn = server_status.get("serienummer", "")
+        sn = server_status.get("serienummer", "") or "DB00000000"
         enamn = server_status.get("enhet_namn", "")
         # Les konfig på nytt (kan ha endra seg sidan sist)
         _mqtt_konfig_fresh = les_mqtt_konfig()
@@ -753,6 +753,8 @@ def restart_opendaq_bro():
         # Oppdater location env var og system.ini slik at C++ og DewesoftX ser ny verdi
         os.environ["OPENDAQ_LOCATION"] = _enhet_fresh.location
         _oppdater_system_ini_location(_enhet_fresh.location)
+        os.environ["OPENDAQ_SERIAL"] = sn
+        _oppdater_serial_filer(sn)
         # Alltid opprett ALLE kanalar — MQTT må alltid vere på riktig indeks.
         # ADC-kanalane er stille utan SIRIUS, men MQTT-data flyt alltid.
         effektiv_adc = _enhet_fresh.antal_adc_kanalar
@@ -1243,12 +1245,14 @@ def start_server(args):
         # C++ Patch 3 i Dockerfile les denne env var ved device-oppstart
         # for å sette DeviceInfo.serialNumber (som er frosen etter build).
         # Utan dette vert standard "DevSer0" brukt.
-        if sn:
-            os.environ["OPENDAQ_SERIAL"] = sn
-            log.info(f"  OPENDAQ_SERIAL sett dynamisk: {sn}")
-            # Oppdater /etc/environment slik at DewesoftX SSH-sesjonar
-            # (platform_control.sh sysinfo) også ser riktig serienummer.
-            _oppdater_serial_filer(sn)
+        # Fallback DB00000000 når SIRIUS ikkje er tilkobla — DewesoftX
+        # krev eit gyldig serienummer for å koble til.
+        if not sn:
+            sn = "DB00000000"
+            log.info(f"  Fallback serienummer: {sn} (SIRIUS ikkje tilkobla)")
+        os.environ["OPENDAQ_SERIAL"] = sn
+        log.info(f"  OPENDAQ_SERIAL sett dynamisk: {sn}")
+        _oppdater_serial_filer(sn)
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_kanalar,
                                   antal_adc=effektiv_adc)
