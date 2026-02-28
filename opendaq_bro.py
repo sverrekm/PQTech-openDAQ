@@ -78,6 +78,7 @@ class OpenDAQBro:
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
         self._sirius_ts = 0.0       # Tidsstempel for siste SIRIUS-data
         self._mqtt_pkt_teller = 0   # Antal MQTT-pakketar sendt
+        self._acqloop_disabled = False  # Sporing av om acqLoop er deaktivert
         self._leser_traad = None
         self._stopp_event = threading.Event()
         # DataPacket-injeksjon (fase 2: reelle SIRIUS-data)
@@ -115,6 +116,73 @@ class OpenDAQBro:
         with self._lock:
             return dict(self._status)
 
+    # Fil som styrer C++ acqLoop: når fila finst → acqLoop sover.
+    # Python oppretter fila når SIRIUS strøymer (send_packet handterer data).
+    # Python slettar fila når SIRIUS er fråkobla (acqLoop held NativeStreaming varm).
+    _ACQLOOP_TOGGLE = "/tmp/opendaq_disable_acq"
+
+    def _disable_acqloop(self):
+        """Deaktiver C++ acqLoop (opprett toggle-fil)."""
+        if not self._acqloop_disabled:
+            try:
+                with open(self._ACQLOOP_TOGGLE, "w") as f:
+                    f.write("1")
+                self._acqloop_disabled = True
+                log.info("  acqLoop DEAKTIVERT (send_packet overtek)")
+            except Exception as e:
+                log.warning(f"  acqLoop toggle-fil feil: {e}")
+
+    def _enable_acqloop(self):
+        """Aktiver C++ acqLoop (slett toggle-fil)."""
+        if self._acqloop_disabled:
+            try:
+                os.remove(self._ACQLOOP_TOGGLE)
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                log.warning(f"  acqLoop toggle-fil feil: {e}")
+            self._acqloop_disabled = False
+            log.info("  acqLoop AKTIVERT (NativeStreaming varm)")
+
+    def oppdater_mqtt_eigenskapar(self, mqtt_verdiar):
+        """Oppdater MQTT-kanalane via RefDevice eigenskapar (DC).
+
+        Når acqLoop køyrer (SIRIUS fråkobla), set DC-eigenskapen
+        på MQTT-kanalane slik at acqLoop genererer korrekte verdiar.
+        Amplitude er allereie 0, so output = DC = mqtt_verdi.
+        """
+        if not self._tilgjengelig or not self._mqtt_kanalar:
+            return
+        try:
+            channels = list(self._device.channels)
+            for mi, mk in enumerate(self._mqtt_kanalar):
+                verdi = mqtt_verdiar.get(mk.topic)
+                if verdi is None:
+                    continue
+                kanal_idx = self._antal_adc + mi
+                if kanal_idx >= len(channels):
+                    break
+                ch = channels[kanal_idx]
+                # DC er FloatProperty [-10, 10] — _safe_set klampar
+                self._safe_set(ch, "DC", float(verdi))
+
+                # Oppdater web UI-verdiar
+                mqtt_key = f"mqtt_{mi}"
+                self._siste_verdiar[mqtt_key] = {
+                    "snitt": round(verdi, 4),
+                    "rms": round(abs(verdi), 4),
+                    "topp": round(abs(verdi), 4),
+                    "siste": round(verdi, 4),
+                    "antall": 0,
+                    "kjelde": "mqtt-acqloop",
+                    "topic": mk.topic,
+                    "enhet": mk.enhet,
+                }
+                self._mqtt_pkt_teller += 1
+        except Exception as e:
+            if self._mqtt_pkt_teller % 100 == 0:
+                log.warning(f"oppdater_mqtt_eigenskapar feil: {e}")
+
     def start(self) -> bool:
         """Start openDAQ instance med root device, deretter servere."""
         if _daq is None:
@@ -125,6 +193,14 @@ class OpenDAQBro:
             return False
 
         try:
+            # Slett acqLoop toggle-fil slik at acqLoop køyrer ved oppstart.
+            # Held NativeStreaming varm til SIRIUS evt. tek over.
+            try:
+                os.remove(self._ACQLOOP_TOGGLE)
+            except FileNotFoundError:
+                pass
+            self._acqloop_disabled = False
+
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
 
@@ -480,8 +556,9 @@ class OpenDAQBro:
         Hentar domain-signal-referansar og descriptors frå kvar kanal
         slik at oppdater_data() kan opprette DataPackets med ekte ADC-samples.
 
-        Krev OPENDAQ_DISABLE_ACQ=1 i env for å hindre RefDevice si
-        interne acqLoop frå å generere konfliktande syntetisk data.
+        Brukar device-relativ tid (start frå 0) for å matche acqLoop sitt
+        domene. Når SIRIUS koplar til, deaktiverer _disable_acqloop()
+        acqLoop slik at send_packet er einaste datakjelde.
         """
         self._dom_signal = []
         self._dom_desc = []
@@ -495,9 +572,10 @@ class OpenDAQBro:
                         "kan ikkje injisere reelle data")
             return
 
-        # Starttid: mikrosekund sidan epoch (matchar RefDevice-mønster)
-        import time
-        self._start_ticks = int(time.time() * 1_000_000)
+        # Starttid: device-relativ (0-basert) for å matche acqLoop si tidsbase.
+        # Når acqLoop deaktiverast og send_packet tek over, fortset vi
+        # frå der acqLoop slutta (same domene-tidsline).
+        self._start_ticks = 0
 
         kanalar_klar = 0
         for idx, (ch, sig) in enumerate(self._kanal_signal):
@@ -556,9 +634,8 @@ class OpenDAQBro:
             self._pakett_klar = True
             log.info(f"  Pakett-injeksjon klar: {kanalar_klar} kanalar, "
                      f"delta={self._tick_delta} ticks/sample")
-            if not os.environ.get("OPENDAQ_DISABLE_ACQ"):
-                log.warning("  ADVARSEL: OPENDAQ_DISABLE_ACQ ikkje sett! "
-                            "RefDevice genererer OGSAA syntetisk data!")
+            log.info(f"  acqLoop toggle-fil: {self._ACQLOOP_TOGGLE} "
+                     f"(finst={'JA' if os.path.exists(self._ACQLOOP_TOGGLE) else 'NEI'})")
 
             # DescriptorChanged events vert sendt separat etter
             # _sett_signal_descriptors() — sjå send_descriptor_events().
@@ -607,8 +684,8 @@ class OpenDAQBro:
         direkte til openDAQ-signalane via send_packet(). DewesoftX
         mottek verdiane via NativeStreaming/OPC-UA.
 
-        Krev OPENDAQ_DISABLE_ACQ=1 for å unngå konflikt med
-        RefDevice si interne datagenering.
+        Deaktiverer acqLoop ved fyrste kall slik at send_packet
+        er einaste datakjelde (unngår interleaving).
 
         Args:
             kanal_data: dict {"kanal_0": np.array(int16), ...} fraa SiriusDriver
@@ -617,6 +694,9 @@ class OpenDAQBro:
             return
 
         import time
+        # Deaktiver acqLoop ved fyrste SIRIUS-data (ein gong)
+        if not self._sirius_aktiv:
+            self._disable_acqloop()
         self._sirius_aktiv = True
         self._sirius_ts = time.time()
 
@@ -750,6 +830,10 @@ class OpenDAQBro:
         Lagar ein flat float64-array fylt med siste MQTT-verdi og sender
         den som ein DataPacket, synkronisert med SIRIUS-datablokker.
 
+        NB: Denne metoden vert berre kalla når acqLoop er DEAKTIVERT
+        (SIRIUS aktiv). Når SIRIUS er fråkobla, brukast
+        oppdater_mqtt_eigenskapar() i staden (acqLoop genererer data).
+
         Args:
             mqtt_verdiar: dict {topic: float_verdi} frå MqttKlient.hent_verdiar()
             blokk_storleik: Antal samples per pakke (matchar SIRIUS-blokk)
@@ -829,6 +913,37 @@ class OpenDAQBro:
             if self._mqtt_pkt_teller % 100 == 0:
                 log.warning(f"oppdater_mqtt_data feil: {e}")
 
+    def _send_idle_adc(self, blokk_storleik):
+        """Send null-fylte DataPackets på ADC-kanalar når SIRIUS er inaktiv.
+
+        DewesoftX/NativeStreaming krev kontinuerleg data på ALLE abonnerte
+        signal. Utan dette vert MQTT-data ikkje vist fordi DewesoftX ventar
+        på ADC-data som aldri kjem.
+        """
+        for idx in range(self._antal_adc):
+            if (idx >= len(self._dom_signal) or
+                    self._dom_signal[idx] is None):
+                continue
+            try:
+                dom_sig = self._dom_signal[idx]
+                dom_desc = self._dom_desc[idx]
+                val_desc = self._val_desc[idx]
+
+                offset = (self._start_ticks +
+                          self._total_samples[idx] * self._tick_delta)
+
+                time_pkt = _daq.DataPacket(dom_desc, blokk_storleik, offset)
+                val_pkt = _daq.DataPacketWithDomain(
+                    time_pkt, val_desc, blokk_storleik, 0)
+
+                # Buffer er allereie null-initialisert (C++ allokerer med zeros)
+                _, sig = self._kanal_signal[idx]
+                dom_sig.send_packet(time_pkt)
+                sig.send_packet(val_pkt)
+                self._total_samples[idx] += blokk_storleik
+            except Exception:
+                pass  # Stille feil — idle-data er ikkje kritisk
+
     def hent_siste_verdiar(self) -> dict:
         """Returner siste kanal-verdiar for web UI live-visning."""
         result = dict(self._siste_verdiar)
@@ -839,6 +954,7 @@ class OpenDAQBro:
             "sirius_ts": self._sirius_ts,
             "pakett_klar": self._pakett_klar,
             "total_samples": list(self._total_samples),
+            "acqloop_disabled": self._acqloop_disabled,
         }
         return result
 
@@ -875,6 +991,12 @@ class OpenDAQBro:
         log.info("openDAQ nettverksbro stoppar...")
         self._tilgjengelig = False
         self._stopp_event.set()
+        # Slett toggle-fil slik at acqLoop ikkje er deaktivert ved neste oppstart
+        try:
+            os.remove(self._ACQLOOP_TOGGLE)
+        except FileNotFoundError:
+            pass
+        self._acqloop_disabled = False
         if self._leser_traad and self._leser_traad.is_alive():
             self._leser_traad.join(timeout=3)
         with self._lock:

@@ -64,15 +64,50 @@ for local, remote in repo_files:
 
 sftp.close()
 
-# 3. Restart container (plukkar opp nye Python-filer)
-print('\nRestartar container...')
+import time
+
+# 3. Recreate container via docker-compose for å plukke opp nye env vars.
+#    docker restart les IKKJE docker-compose.yml — berre docker-compose down/up gjer det.
+print('\nRecreating container via docker-compose (plukkar opp env-endringar)...')
+stdin, stdout, stderr = ssh.exec_command(
+    f'cd {PI_REPO} && sudo docker compose down', timeout=60)
+out = stdout.read().decode(errors='replace').strip()
+err = stderr.read().decode(errors='replace').strip()
+print(f'  down: {out or err or "OK"}')
+
+stdin, stdout, stderr = ssh.exec_command(
+    f'cd {PI_REPO} && sudo docker compose up -d', timeout=60)
+out = stdout.read().decode(errors='replace').strip()
+err = stderr.read().decode(errors='replace').strip()
+print(f'  up: {out or err or "OK"}')
+
+# Vent på at containeren er oppe
+time.sleep(3)
+
+# 4. Kopier Python-filer inn i den nye containeren (docker cp)
+print('\nKopierer Python-filer til ny container...')
+sftp2 = ssh.open_sftp()
+for local, remote_tmp, container_path in container_files:
+    filename = local.split('/')[-1]
+    sftp2.put(local, remote_tmp)
+    stdin, stdout, stderr = ssh.exec_command(
+        f'sudo docker cp {remote_tmp} {CONTAINER}:{container_path}', timeout=15)
+    stdout.read()
+    err = stderr.read().decode(errors='replace').strip()
+    if err:
+        print(f'  {filename}: FEIL: {err}')
+    else:
+        print(f'  {filename} -> {container_path}')
+sftp2.close()
+
+# 5. Restart for å plukke opp dei nye Python-filene
+print('\nRestartar container (nye Python-filer)...')
 stdin, stdout, stderr = ssh.exec_command(f'sudo docker restart {CONTAINER}', timeout=60)
 out = stdout.read().decode(errors='replace').strip()
 err = stderr.read().decode(errors='replace').strip()
 print(f'  {out or err}')
 
-# 4. Vent litt og sjekk loggar
-import time
+# 6. Vent litt og sjekk loggar
 time.sleep(5)
 print('\nSjekkar loggar (siste 30 linjer)...')
 stdin, stdout, stderr = ssh.exec_command(

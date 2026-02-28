@@ -518,6 +518,12 @@ def _mqtt_straumings_loop():
 
     Køyrer med ~20 Hz (50 ms intervall). Hoppar over viss SIRIUS
     allereie leverer data (callbacken handterer MQTT då).
+
+    Når SIRIUS er fråkobla: acqLoop køyrer og genererer data på alle
+    kanalar. MQTT-verdiar vert injiserte via DC-eigenskapane (ikkje
+    send_packet), slik at acqLoop brukar dei direkte.
+
+    Når SIRIUS er aktiv: callbacken handterer MQTT via send_packet.
     """
     global _mqtt_straumings_stopp
     log.info("MQTT strøymingstråd starta (uavhengig av SIRIUS)")
@@ -531,9 +537,11 @@ def _mqtt_straumings_loop():
                     (time.time() - _opendaq_bro._sirius_ts) < 3.0
                 )
                 if not sirius_aktiv:
+                    # SIRIUS fråkobla: aktiver acqLoop og bruk eigenskapar
+                    _opendaq_bro._enable_acqloop()
                     mqtt_verdiar = _mqtt_klient.hent_verdiar()
                     if mqtt_verdiar:
-                        _opendaq_bro.oppdater_mqtt_data(mqtt_verdiar, 1024)
+                        _opendaq_bro.oppdater_mqtt_eigenskapar(mqtt_verdiar)
         except Exception as e:
             log.warning(f"MQTT strøyming feil: {e}")
         _mqtt_straumings_stopp.wait(timeout=0.05)  # ~20 Hz
@@ -744,7 +752,7 @@ def restart_opendaq_bro():
         return True, "Container restartar for å frigjere portar (10-15s)..."
 
     try:
-        sn = server_status.get("serienummer", "") or "PQT0000000"
+        sn = server_status.get("serienummer", "") or "DB00000001"
         enamn = server_status.get("enhet_namn", "")
         # Les konfig på nytt (kan ha endra seg sidan sist)
         _mqtt_konfig_fresh = les_mqtt_konfig()
@@ -1245,10 +1253,10 @@ def start_server(args):
         # C++ Patch 3 i Dockerfile les denne env var ved device-oppstart
         # for å sette DeviceInfo.serialNumber (som er frosen etter build).
         # Utan dette vert standard "DevSer0" brukt.
-        # Fallback PQT0000000 når SIRIUS ikkje er tilkobla — DewesoftX
+        # Fallback DB00000001 når SIRIUS ikkje er tilkobla — DewesoftX
         # krev eit gyldig serienummer for å koble til.
         if not sn:
-            sn = "PQT0000000"
+            sn = "DB00000001"
             log.info(f"  Fallback serienummer: {sn} (SIRIUS ikkje tilkobla)")
         os.environ["OPENDAQ_SERIAL"] = sn
         log.info(f"  OPENDAQ_SERIAL sett dynamisk: {sn}")

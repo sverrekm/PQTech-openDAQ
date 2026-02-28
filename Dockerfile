@@ -346,16 +346,14 @@ with open(path, "w") as f:
 print("Patch 4/4 komplett: createOptionalNode")
 PYEOF
 
-# ---- Patch 5: Disable RefDevice acqLoop data generation ----
-# When OPENDAQ_DISABLE_ACQ env var is set, the RefDevice's internal
-# acquisition loop skips data generation (collectSamples, collectTimeSignalSamples).
-# This allows Python to inject real SIRIUS measurement data via
-# DataPacket + signal.send_packet() without conflicting with synthetic sine waves.
+# ---- Patch 5: Dynamic acqLoop toggle via file ----
+# When /tmp/opendaq_disable_acq EXISTS, the RefDevice's internal acquisition
+# loop skips data generation. Python creates this file when SIRIUS is streaming
+# (real data injected via send_packet) and deletes it when SIRIUS disconnects
+# (letting acqLoop generate data to keep NativeStreaming pipeline warm).
 #
-# VIKTIG: `continue` hoppar over HEILE loop-kroppen inkludert sleep/scheduling
-# på slutten. Utan sleep vert dette ein 100% CPU busy-loop som sveltir
-# OPC-UA, NativeStreaming og mDNS-trådar. Difor legg me til ein 50ms sleep
-# FØR continue, slik at andre trådar får CPU-tid.
+# VIKTIG: Checked EVERY iteration (ikkje static!) slik at Python kan toggle
+# dynamisk. access() er billeg (~1 syscall per 50ms).
 RUN python3 << 'PYEOF'
 import sys
 
@@ -363,24 +361,8 @@ path = "/src/modules/ref_device_module/src/ref_device_impl.cpp"
 with open(path, "r") as f:
     content = f.read()
 
-# Sikre at <cstdlib> er inkludert (for std::getenv)
-# Patch 3 legg den berre til viss device_type_factory.h manglar,
-# men v3.30.0 har den allereie → cstdlib vert aldri lagt til.
-if '#include <cstdlib>' not in content:
-    # Legg til etter fyrste #include-blokk
-    import re
-    last_inc = None
-    for m in re.finditer(r'^#include\s+.*$', content, re.MULTILINE):
-        last_inc = m
-    if last_inc:
-        content = content[:last_inc.end()] + '\n#include <cstdlib>' + content[last_inc.end():]
-        print("OK: La til #include <cstdlib>")
-    else:
-        print("FEIL: Ingen #include funne!", file=sys.stderr)
-        sys.exit(1)
-
-# Sikre at <thread> og <chrono> er inkluderte (for sleep_for)
-for hdr in ['<thread>', '<chrono>']:
+# Sikre at nødvendige headers er inkluderte
+for hdr in ['<cstdlib>', '<thread>', '<chrono>', '<unistd.h>']:
     if f'#include {hdr}' not in content:
         import re
         last_inc = None
@@ -390,7 +372,7 @@ for hdr in ['<thread>', '<chrono>']:
             content = content[:last_inc.end()] + f'\n#include {hdr}' + content[last_inc.end():]
             print(f"OK: La til #include {hdr}")
 
-# Patch acqLoop: add env var guard after "if (!stopAcq) {"
+# Patch acqLoop: add FILE-based guard after "if (!stopAcq) {"
 # to skip all data generation (collectTimeSignalSamples + collectSamples)
 # VIKTIG: Legg til 50ms sleep FØR continue for å unngå busy-loop.
 old_pattern = """        if (!stopAcq)
@@ -399,12 +381,13 @@ old_pattern = """        if (!stopAcq)
 
 new_pattern = """        if (!stopAcq)
         {
-            // Patch 5: Skip data generation when OPENDAQ_DISABLE_ACQ is set.
-            // Real SIRIUS data is injected from Python via signal.send_packet().
-            // Sleep 50ms to avoid busy-loop that starves OPC-UA/NativeStreaming.
+            // Patch 5: Skip data generation when /tmp/opendaq_disable_acq exists.
+            // Python creates this file when SIRIUS streams real data.
+            // Deletes it when SIRIUS disconnects, letting acqLoop keep
+            // NativeStreaming warm (DewesoftX requires continuous data flow).
+            // Non-static: checked every iteration for dynamic toggling.
             {
-                static const bool disableAcq = std::getenv("OPENDAQ_DISABLE_ACQ") != nullptr;
-                if (disableAcq)
+                if (access("/tmp/opendaq_disable_acq", F_OK) == 0)
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     continue;
@@ -415,7 +398,7 @@ new_pattern = """        if (!stopAcq)
 
 if old_pattern in content:
     content = content.replace(old_pattern, new_pattern, 1)
-    print("OK: Added OPENDAQ_DISABLE_ACQ guard in acqLoop (with 50ms sleep)")
+    print("OK: Added file-based acqLoop guard (dynamic toggle)")
 else:
     # Fallback: search for getMicroSecondsSinceDeviceStart in acqLoop context
     import re
@@ -425,25 +408,24 @@ else:
     )
     if match:
         indent = match.group(2)
-        guard = (f"\n{indent}// Patch 5: Skip data generation (OPENDAQ_DISABLE_ACQ)\n"
-                 f"{indent}// Sleep 50ms to avoid busy-loop that starves other threads.\n"
+        guard = (f"\n{indent}// Patch 5: Dynamic acqLoop toggle via file\n"
+                 f"{indent}// Non-static: checked every iteration.\n"
                  f"{indent}{{\n"
-                 f"{indent}    static const bool disableAcq = std::getenv(\"OPENDAQ_DISABLE_ACQ\") != nullptr;\n"
-                 f"{indent}    if (disableAcq)\n"
+                 f"{indent}    if (access(\"/tmp/opendaq_disable_acq\", F_OK) == 0)\n"
                  f"{indent}    {{\n"
                  f"{indent}        std::this_thread::sleep_for(std::chrono::milliseconds(50));\n"
                  f"{indent}        continue;\n"
                  f"{indent}    }}\n"
                  f"{indent}}}\n\n{indent}")
         content = content[:match.end(1)] + guard + content[match.start(3):]
-        print("OK: Added OPENDAQ_DISABLE_ACQ guard with sleep (regex fallback)")
+        print("OK: Added file-based acqLoop guard (regex fallback)")
     else:
         print("FEIL: Could not find acqLoop pattern to patch!", file=sys.stderr)
         sys.exit(1)
 
 with open(path, "w") as f:
     f.write(content)
-print("Patch 5 komplett: disable acqLoop data generation (with sleep)")
+print("Patch 5 komplett: dynamic file-based acqLoop toggle")
 PYEOF
 
 # ---- Patch 6: OPC-UA DataType coercion in writeValue ----

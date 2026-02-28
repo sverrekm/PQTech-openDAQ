@@ -50,8 +50,9 @@ services:
       # Sett til "true" for aa bruke direkte SIRIUS USB-driver
       # (reverse-engineered protokoll — kun for SIRIUS-instrument)
       - NATIVE_SIRIUS=true
-      # Deaktiver RefDevice intern datagenering (Python injiserer ekte data)
-      - OPENDAQ_DISABLE_ACQ=1
+      # acqLoop-toggle: /tmp/opendaq_disable_acq fil (Python styrer dynamisk)
+      # Når fila finst → acqLoop sover (Python injiserer ekte SIRIUS-data)
+      # Når fila manglar → acqLoop køyrer (held NativeStreaming varm)
       # Serienummer (tom = auto-detektert fraa instrumentet)
       - OPENDAQ_SERIAL=
       # Modellnamn som visest i DewesoftX (tom = "PQTech-openDAQ")
