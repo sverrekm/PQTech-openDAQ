@@ -753,14 +753,9 @@ def restart_opendaq_bro():
         # Oppdater location env var og system.ini slik at C++ og DewesoftX ser ny verdi
         os.environ["OPENDAQ_LOCATION"] = _enhet_fresh.location
         _oppdater_system_ini_location(_enhet_fresh.location)
-        # Berre vis ADC-kanalar viss SIRIUS er tilkobla OG vi ikkje er i USB/IP-modus
-        sirius_ok = server_status.get("tilkoblet", False)
-        modus = les_modus()
-        if sirius_ok and modus != MODUS_USBIP:
-            effektiv_adc = _enhet_fresh.antal_adc_kanalar
-        else:
-            effektiv_adc = 0
-            log.info(f"  Bridge restart: antal_adc=0 (tilkoblet={sirius_ok}, modus={modus})")
+        # Alltid opprett ALLE kanalar — MQTT må alltid vere på riktig indeks.
+        # ADC-kanalane er stille utan SIRIUS, men MQTT-data flyt alltid.
+        effektiv_adc = _enhet_fresh.antal_adc_kanalar
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_k,
                                   antal_adc=effektiv_adc)
@@ -1222,13 +1217,12 @@ def start_server(args):
     _mqtt_konfig = les_mqtt_konfig()
     mqtt_kanalar = _mqtt_konfig.kanalar if _mqtt_konfig.broker.aktivert else []
 
-    # Berre vis ADC-kanalar i broen viss SIRIUS faktisk er tilkobla.
-    # Utan SIRIUS har ADC-kanalane ingen data og kan forstyrre DewesoftX.
-    effektiv_adc = _enhet_konfig.antal_adc_kanalar if enhet_tilkoblet else 0
-    if not enhet_tilkoblet and mqtt_kanalar:
-        log.info(f"  SIRIUS ikkje tilkobla — berre MQTT-kanalar i broen ({len(mqtt_kanalar)} stk)")
-    elif not enhet_tilkoblet:
-        log.info("  SIRIUS ikkje tilkobla — broen startar med 0 kanalar")
+    # Alltid opprett ALLE kanalar (ADC + MQTT) uansett SIRIUS-tilstand.
+    # ADC-kanalane er stille utan SIRIUS, men MQTT-data flyt alltid.
+    # Viss vi endrar antal kanalar ved reconnect, forsvinn MQTT frå riktig indeks.
+    effektiv_adc = _enhet_konfig.antal_adc_kanalar
+    if not enhet_tilkoblet:
+        log.info(f"  SIRIUS ikkje tilkobla — ADC-kanalar stille, MQTT flyt ({len(mqtt_kanalar)} stk)")
     if _mqtt_konfig.broker.aktivert and _mqtt_konfig.kanalar:
         _mqtt_klient = MqttKlient(_mqtt_konfig)
         _mqtt_klient.start()
