@@ -744,7 +744,7 @@ def restart_opendaq_bro():
         return True, "Container restartar for å frigjere portar (10-15s)..."
 
     try:
-        sn = server_status.get("serienummer", "") or "DB00000000"
+        sn = server_status.get("serienummer", "") or "PQT0000000"
         enamn = server_status.get("enhet_namn", "")
         # Les konfig på nytt (kan ha endra seg sidan sist)
         _mqtt_konfig_fresh = les_mqtt_konfig()
@@ -1245,10 +1245,10 @@ def start_server(args):
         # C++ Patch 3 i Dockerfile les denne env var ved device-oppstart
         # for å sette DeviceInfo.serialNumber (som er frosen etter build).
         # Utan dette vert standard "DevSer0" brukt.
-        # Fallback DB00000000 når SIRIUS ikkje er tilkobla — DewesoftX
+        # Fallback PQT0000000 når SIRIUS ikkje er tilkobla — DewesoftX
         # krev eit gyldig serienummer for å koble til.
         if not sn:
-            sn = "DB00000000"
+            sn = "PQT0000000"
             log.info(f"  Fallback serienummer: {sn} (SIRIUS ikkje tilkobla)")
         os.environ["OPENDAQ_SERIAL"] = sn
         log.info(f"  OPENDAQ_SERIAL sett dynamisk: {sn}")
