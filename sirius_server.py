@@ -414,9 +414,12 @@ def frigjor_usb():
             })
 
             log.info("USB frigjort for USB/IP-deling")
-            # Ikkje restart bridge — hald same kanalar, ADC-data sluttar berre
-            # å kome. MQTT held fram uforstyrra. DewesoftX beheld tilkoblinga.
-            return True, "USB frigjort - klar for USB/IP"
+            log.info("Restartar bridge med 0 ADC (berre MQTT-kanalar)")
+            def _delayed_restart():
+                time.sleep(0.5)
+                restart_opendaq_bro(force_adc=0)
+            threading.Thread(target=_delayed_restart, daemon=True).start()
+            return True, "USB frigjort - bridge restartar med MQTT-kanalar"
 
         except Exception as e:
             log.error(f"Feil ved frigjering av USB: {e}")
@@ -674,7 +677,7 @@ def _oppdater_serial_filer(sn: str):
         log.debug(f"  Kunne ikkje oppdatere system.xml: {e}")
 
 
-def restart_opendaq_bro():
+def restart_opendaq_bro(force_adc=None):
     """Manuell restart av openDAQ bridge (for debugging/retry).
 
     Stoppar serverar eksplisitt, ventar på port-frigjering, og startar på nytt.
@@ -763,9 +766,15 @@ def restart_opendaq_bro():
         _oppdater_system_ini_location(_enhet_fresh.location)
         os.environ["OPENDAQ_SERIAL"] = sn
         _oppdater_serial_filer(sn)
-        # Alltid opprett ALLE kanalar — MQTT må alltid vere på riktig indeks.
-        # ADC-kanalane er stille utan SIRIUS, men MQTT-data flyt alltid.
-        effektiv_adc = _enhet_fresh.antal_adc_kanalar
+        if force_adc is not None:
+            effektiv_adc = force_adc
+        else:
+            sirius_aktiv = server_status.get("tilkoblet", False) and server_status.get("streamer", False)
+            if sirius_aktiv:
+                effektiv_adc = _enhet_fresh.antal_adc_kanalar
+            else:
+                effektiv_adc = 0
+                log.info("  SIRIUS fråkobla — restart med 0 ADC, berre MQTT")
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_k,
                                   antal_adc=effektiv_adc)
@@ -1109,13 +1118,13 @@ def rekoble_driver():
             # (antal_adc=0 fordi SIRIUS ikkje var tilkobla ved oppstart).
             _enhet_fresh = les_enhet_konfig()
             bro_adc = _opendaq_bro._antal_adc if _opendaq_bro else 0
-            if bro_adc != _enhet_fresh.antal_adc_kanalar:
-                log.info(f"Rekoble: planlegg bridge-restart ({bro_adc} → "
-                         f"{_enhet_fresh.antal_adc_kanalar} ADC-kanalar)")
+            nye_adc = _enhet_fresh.antal_adc_kanalar
+            if bro_adc != nye_adc:
+                log.info(f"Rekoble: planlegg bridge-restart ({bro_adc} → {nye_adc} ADC-kanalar)")
                 # Restart i bakgrunn etter at lock er frigjeven
                 def _delayed_bridge_restart():
                     time.sleep(0.5)
-                    restart_opendaq_bro()
+                    restart_opendaq_bro(force_adc=nye_adc)
                 threading.Thread(target=_delayed_bridge_restart, daemon=True).start()
 
             # Start streaming (EP2 recovery skjer automatisk i koble_til)
@@ -1227,12 +1236,11 @@ def start_server(args):
     _mqtt_konfig = les_mqtt_konfig()
     mqtt_kanalar = _mqtt_konfig.kanalar if _mqtt_konfig.broker.aktivert else []
 
-    # Alltid opprett ALLE kanalar (ADC + MQTT) uansett SIRIUS-tilstand.
-    # ADC-kanalane er stille utan SIRIUS, men MQTT-data flyt alltid.
-    # Viss vi endrar antal kanalar ved reconnect, forsvinn MQTT frå riktig indeks.
-    effektiv_adc = _enhet_konfig.antal_adc_kanalar
-    if not enhet_tilkoblet:
-        log.info(f"  SIRIUS ikkje tilkobla — ADC-kanalar stille, MQTT flyt ({len(mqtt_kanalar)} stk)")
+    if enhet_tilkoblet:
+        effektiv_adc = _enhet_konfig.antal_adc_kanalar
+    else:
+        effektiv_adc = 0
+        log.info(f"  SIRIUS fråkobla — startar med 0 ADC, berre MQTT ({len(mqtt_kanalar)} stk)")
     if _mqtt_konfig.broker.aktivert and _mqtt_konfig.kanalar:
         _mqtt_klient = MqttKlient(_mqtt_konfig)
         _mqtt_klient.start()
