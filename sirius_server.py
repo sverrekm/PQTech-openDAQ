@@ -473,10 +473,7 @@ def hent_mqtt_konfig_dict():
 
 
 def oppdater_mqtt(ny_konfig: MqttKonfig):
-    """Oppdater MQTT-konfig, lagre, og restart klienten.
-
-    Krev bridge-restart for å endre openDAQ-kanaltallet.
-    """
+    """Oppdater MQTT-konfig, lagre, restart klient og bridge."""
     global _mqtt_klient, _mqtt_konfig
 
     lagre_mqtt_konfig(ny_konfig)
@@ -493,8 +490,14 @@ def oppdater_mqtt(ny_konfig: MqttKonfig):
     # Start/restart MQTT-strøymingstråd
     _start_mqtt_straumings_traad()
 
-    return True, ("MQTT konfig lagra. Restart openDAQ bridge for å oppdatere "
-                   "kanaltallet i DewesoftX.")
+    # Restart bridge slik at nye MQTT-kanalar vert synlege i DewesoftX
+    log.info("MQTT-konfig endra — restartar openDAQ bridge")
+    def _delayed_restart():
+        time.sleep(0.5)
+        restart_opendaq_bro()
+    threading.Thread(target=_delayed_restart, daemon=True).start()
+
+    return True, "MQTT konfig lagra — bridge restartar med nye kanalar"
 
 
 def hent_enhet_konfig_dict():
