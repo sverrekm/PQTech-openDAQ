@@ -1681,14 +1681,34 @@ class OpenDAQBro:
             await c.connect()
             fiksa = 0
             try:
-                # NumberOfChannels (Int64)
+                # NumberOfChannels — alltid skriv for å sikre OPC-UA-noden er riktig.
+                # C++ writeValue-callbacken kan avvise Python SDK sin set_property_value(),
+                # so OPC-UA-noden kan ha stale verdi sjølv om intern state er korrekt.
                 node = c.get_node(opcua.NodeId("/RefDev0/NumberOfChannels", 4))
                 old = await node.read_value()
-                if old != n_kanalar:
-                    dv = opcua.DataValue(opcua.Variant(n_kanalar, opcua.VariantType.Int64))
-                    await node.write_value(dv)
-                    log.info(f"  OPC-UA fiks: NumberOfChannels {old} → {n_kanalar}")
-                    fiksa += 1
+                # Prøv Int64 fyrst, deretter Int32 viss C++ avviser typen
+                written = False
+                for vtype in (opcua.VariantType.Int64, opcua.VariantType.Int32):
+                    try:
+                        dv = opcua.DataValue(opcua.Variant(n_kanalar, vtype))
+                        await node.write_value(dv)
+                        written = True
+                        if old != n_kanalar:
+                            log.info(f"  OPC-UA fiks: NumberOfChannels {old} → {n_kanalar} ({vtype})")
+                            fiksa += 1
+                        else:
+                            log.info(f"  OPC-UA fiks: NumberOfChannels stadfesta {n_kanalar} ({vtype})")
+                        break
+                    except Exception as e_type:
+                        log.info(f"  OPC-UA NumberOfChannels {vtype} avvist: {e_type}")
+                if not written:
+                    log.warning(f"  OPC-UA fiks: kunne ikkje skrive NumberOfChannels={n_kanalar}")
+
+                # Verifiser at verdien faktisk vart skrive
+                verify = await node.read_value()
+                if verify != n_kanalar:
+                    log.warning(f"  OPC-UA fiks: NumberOfChannels verifisering feila — "
+                                f"forventa {n_kanalar}, fekk {verify}")
 
                 # GlobalSampleRate (Double/Float64)
                 sr = float(os.environ.get("SAMPLE_RATE", "20000"))
