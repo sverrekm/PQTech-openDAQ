@@ -543,11 +543,15 @@ def _mqtt_straumings_loop():
                     (time.time() - _opendaq_bro._sirius_ts) < 3.0
                 )
                 if not sirius_aktiv:
-                    # SIRIUS fråkobla: aktiver acqLoop og bruk eigenskapar
-                    _opendaq_bro._enable_acqloop()
                     mqtt_verdiar = _mqtt_klient.hent_verdiar()
                     if mqtt_verdiar:
-                        _opendaq_bro.oppdater_mqtt_eigenskapar(mqtt_verdiar)
+                        if _opendaq_bro._antal_adc == 0:
+                            # MQTT-only: send DataPackets direkte (ingen DC range-grense)
+                            _opendaq_bro.oppdater_mqtt_data(mqtt_verdiar)
+                        else:
+                            # Har ADC-kanalar: bruk acqLoop + DC-eigenskapar
+                            _opendaq_bro._enable_acqloop()
+                            _opendaq_bro.oppdater_mqtt_eigenskapar(mqtt_verdiar)
         except Exception as e:
             log.warning(f"MQTT strøyming feil: {e}")
         _mqtt_straumings_stopp.wait(timeout=0.05)  # ~20 Hz

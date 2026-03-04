@@ -193,13 +193,18 @@ class OpenDAQBro:
             return False
 
         try:
-            # Slett acqLoop toggle-fil slik at acqLoop køyrer ved oppstart.
-            # Held NativeStreaming varm til SIRIUS evt. tek over.
-            try:
-                os.remove(self._ACQLOOP_TOGGLE)
-            except FileNotFoundError:
-                pass
-            self._acqloop_disabled = False
+            if self._antal_adc == 0 and self._mqtt_kanalar:
+                # MQTT-only: deaktiver acqLoop, bruk send_packet direkte
+                self._disable_acqloop()
+                log.info("  MQTT-only modus: acqLoop deaktivert, brukar send_packet")
+            else:
+                # Slett acqLoop toggle-fil slik at acqLoop køyrer ved oppstart.
+                # Held NativeStreaming varm til SIRIUS evt. tek over.
+                try:
+                    os.remove(self._ACQLOOP_TOGGLE)
+                except FileNotFoundError:
+                    pass
+                self._acqloop_disabled = False
 
             log.info("Startar openDAQ nettverksbro...")
             log.info(f"  Modulsti: {self._module_path}")
