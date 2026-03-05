@@ -1097,8 +1097,13 @@ class OpenDAQBro:
         if n_total < 1:
             n_total = 1
             log.info("  Ingen kanalar konfigurert — brukar 1 dummy-kanal")
-        if not self._safe_set(self._device, "NumberOfChannels", n_total):
-            log.warning("  Kunne ikkje sette NumberOfChannels — avbryt kanalkonfig")
+        # Sett NumberOfChannels DIREKTE — ikkje via _safe_set() som klampar
+        # til prop.max_value. RefDevice sin standardmaks kan vere for låg
+        # for dynamiske MQTT-kanalar (t.d. maks=2 default).
+        try:
+            self._device.set_property_value("NumberOfChannels", n_total)
+        except Exception as e:
+            log.warning(f"  Kunne ikkje sette NumberOfChannels={n_total}: {e}")
             return
         log.info(f"  NumberOfChannels sett til {n_total} ({n_adc} ADC + {n_mqtt} MQTT)")
 
