@@ -205,3 +205,25 @@ export interface EnhetKonfig {
   modell: string
   location: string
 }
+
+// --- /api/system/* ---
+export interface VersjonInfo {
+  sha: string
+  melding: string
+  dato: string
+}
+
+export interface OppdateringSjekk {
+  noverande: VersjonInfo
+  github: { sha: string; melding: string; dato: string; forfattar: string }
+  oppdatering_tilgjengeleg: boolean
+  feil?: string
+}
+
+export interface OppdateringsResultat {
+  suksess: boolean
+  versjon?: string
+  melding?: string
+  oppdaterte_filer?: string[]
+  feil?: string
+}

@@ -18,6 +18,7 @@ import glob as glob_mod
 from flask import Flask, jsonify, request, send_file
 
 import usbip_manager
+import oppdatering
 
 # Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
 try:
@@ -739,6 +740,41 @@ def api_usbip_stopp():
         "melding": melding + rekoble_msg,
         "status": status,
     })
+
+
+# --- System / Oppdatering API ---
+
+@app.route("/api/system/versjon")
+def api_system_versjon():
+    """Noverande versjon (frå versjon.json)."""
+    return jsonify(oppdatering.les_versjon())
+
+
+@app.route("/api/system/sjekk-oppdatering")
+def api_system_sjekk_oppdatering():
+    """Sjekk GitHub for ny versjon."""
+    try:
+        noverande = oppdatering.les_versjon()
+        github = oppdatering.sjekk_github()
+        return jsonify({
+            "noverande": noverande,
+            "github": github,
+            "oppdatering_tilgjengeleg": noverande.get("sha") != github["sha"],
+        })
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/system/oppdater", methods=["POST"])
+def api_system_oppdater():
+    """Last ned og installer oppdatering frå GitHub, deretter restart."""
+    try:
+        resultat = oppdatering.last_ned_og_oppdater()
+        # Planlegg restart etter at responsen er sendt
+        threading.Timer(2.0, lambda: os._exit(0)).start()
+        return jsonify(resultat)
+    except Exception as e:
+        return jsonify({"suksess": False, "feil": str(e)}), 500
 
 
 # --- React Frontend ---

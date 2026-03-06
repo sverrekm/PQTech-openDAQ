@@ -33,11 +33,13 @@ container_files = [
     (f'{BASE}/mqtt_konfig.py',        '/tmp/mqtt_konfig.py',         '/app/mqtt_konfig.py'),
     (f'{BASE}/mqtt_klient.py',        '/tmp/mqtt_klient.py',         '/app/mqtt_klient.py'),
     (f'{BASE}/usbip_manager.py',      '/tmp/usbip_manager.py',       '/app/usbip_manager.py'),
+    (f'{BASE}/oppdatering.py',        '/tmp/oppdatering.py',         '/app/oppdatering.py'),
 ]
 
 # docker-compose.yml oppdaterast på Pi-repo (for SAMPLE_RATE env + memory limit)
 repo_files = [
     (f'{BASE}/docker-compose.yml', f'{PI_REPO}/docker-compose.yml'),
+    (f'{BASE}/docker-entrypoint.sh', f'{PI_REPO}/docker-entrypoint.sh'),
 ]
 
 print(f'=== Deploy til {PI_HOST} ({CONTAINER}) ===\n')
@@ -63,6 +65,32 @@ for local, remote in repo_files:
     print(f'  Uploaded {filename} -> {remote}')
 
 sftp.close()
+
+# Frontend dist: kopier heile mappa via tar
+print('\nKopierer frontend/dist/ til container...')
+import subprocess, os
+dist_dir = f'{BASE}/frontend/dist'
+tar_path = '/tmp/frontend_dist.tar.gz'
+# Lag tarball lokalt
+subprocess.run(
+    ['tar', 'czf', tar_path, '-C', f'{BASE}/frontend', 'dist'],
+    check=True,
+)
+sftp_fe = ssh.open_sftp()
+sftp_fe.put(tar_path, '/tmp/frontend_dist.tar.gz')
+sftp_fe.close()
+os.remove(tar_path)
+stdin, stdout, stderr = ssh.exec_command(
+    f'sudo docker exec {CONTAINER} mkdir -p /app/frontend && '
+    f'sudo docker cp /tmp/frontend_dist.tar.gz {CONTAINER}:/tmp/frontend_dist.tar.gz && '
+    f'sudo docker exec {CONTAINER} tar xzf /tmp/frontend_dist.tar.gz -C /app/frontend',
+    timeout=30)
+stdout.read()
+err = stderr.read().decode(errors='replace').strip()
+if err:
+    print(f'  FEIL: {err}')
+else:
+    print(f'  frontend/dist/ -> /app/frontend/dist/')
 
 import time
 

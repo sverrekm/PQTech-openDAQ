@@ -366,6 +366,12 @@ for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module 
     fi
 done
 
+# Skriv versjonsinfo ved oppstart (viss ikkje allereie sett)
+mkdir -p /data/konfig
+if [ ! -f /data/konfig/versjon.json ]; then
+    echo '{"sha": "ukjend", "melding": "Ikkje sett", "dato": ""}' > /data/konfig/versjon.json
+fi
+
 export PYTHONPATH=/app
 
 if [ "${NATIVE_SIRIUS}" = "true" ]; then
