@@ -6,11 +6,12 @@ interface Props {
   kanalar: KanalKonfig[] | null
   liveData: KanalLive | null
   mqttStatus?: MqttStatus | null
+  siriusTilkoblet?: boolean
   onChannelClick: (index: number) => void
   loading?: boolean
 }
 
-export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, onChannelClick, loading = false }: Props) {
+export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, loading = false }: Props) {
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
 
   if (loading || !kanalar) {
@@ -56,7 +57,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, o
           </tr>
         </thead>
         <tbody>
-          {kanalar.map((k, i) => {
+          {siriusTilkoblet && kanalar.map((k, i) => {
             const cv = getChannelValue(i)
             if (cv !== null) {
               const arr = sparkDataRef.current.get(i) || []
@@ -100,7 +101,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, o
           {mqttStatus?.aktivert && mqttStatus.topics && Object.entries(mqttStatus.topics).map(([topic, info], topicIdx) => {
             const mqttKey = `mqtt_${topic}`
             const mqttIdx = 1000 + topicIdx
-            const channelNum = (kanalar?.length ?? 0) + topicIdx + 1
+            const channelNum = (siriusTilkoblet ? (kanalar?.length ?? 0) : 0) + topicIdx + 1
             if (info.verdi !== null) {
               const arr = sparkDataRef.current.get(mqttIdx) || []
               arr.push(info.verdi)

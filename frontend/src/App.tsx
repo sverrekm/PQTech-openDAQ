@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { fetchStatus } from './api/status'
 import { fetchKanalar, fetchKanalLive } from './api/kanalar'
 import { fetchMqttStatus } from './api/mqtt'
+import { fetchSiriusStatus } from './api/sirius'
 import { usePolling } from './hooks/usePolling'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
@@ -27,6 +28,9 @@ export default function App() {
   const mqttFetcher = useCallback(() => fetchMqttStatus(), [])
   const { data: mqttStatus } = usePolling(mqttFetcher, 3000)
 
+  const siriusFetcher = useCallback(() => fetchSiriusStatus(), [])
+  const { data: siriusStatus } = usePolling(siriusFetcher, 5000)
+
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
   }
@@ -47,7 +51,7 @@ export default function App() {
       </div>
     );
   } else if (view.page === 'dashboard') {
-    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} onChannelClick={handleChannelClick} />
+    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} />
   } else if (view.page === 'settings') {
     content = <SettingsPage />
   } else {
