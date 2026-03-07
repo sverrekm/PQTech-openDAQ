@@ -325,7 +325,7 @@ fi
 # Detekter MAC-adresse frå same grensesnitt som IP (for DeviceInfo)
 if [ -z "${OPENDAQ_MAC}" ]; then
     for IFACE in eth0 end0 lan0 wlan0; do
-        IF_MAC=$(cat /sys/class/net/"$IFACE"/address 2>/dev/null)
+        IF_MAC=$(cat /sys/class/net/"$IFACE"/address 2>/dev/null) || true
         if [ -n "$IF_MAC" ] && [ "$IF_MAC" != "00:00:00:00:00:00" ]; then
             export OPENDAQ_MAC="$IF_MAC"
             echo "  MAC fraa $IFACE: $OPENDAQ_MAC"
