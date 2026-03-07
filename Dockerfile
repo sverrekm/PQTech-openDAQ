@@ -701,6 +701,7 @@ COPY kanal_konfig.py .
 COPY mqtt_konfig.py .
 COPY mqtt_klient.py .
 COPY enhet_konfig.py .
+COPY oppdatering.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
