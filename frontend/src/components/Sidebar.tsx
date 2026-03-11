@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import type { KanalKonfig, KanalLive, MqttStatus, HubStatus } from '../api/types'
+import type { KanalKonfig, KanalLive, MqttStatus } from '../api/types'
 import { fetchHubStatus } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 
@@ -15,10 +15,9 @@ interface Props {
   kanalar: KanalKonfig[] | null
   liveData: KanalLive | null
   mqttStatus?: MqttStatus | null
-  isHub?: boolean
 }
 
-export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus, isHub }: Props) {
+export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus }: Props) {
   const hasData = (idx: number): boolean => {
     if (!liveData) return false
     const key = `kanal_${idx}`
@@ -37,29 +36,6 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
   const inactiveKanalClass = "text-gray-400 hover:bg-gray-800 hover:text-white"
   const baseKanalClass = "flex items-center gap-2 py-1.5 px-4 text-sm cursor-pointer border-l-4 border-transparent transition-colors duration-150 ease-in-out select-none"
 
-  if (isHub) {
-    return (
-      <nav className="w-56 min-w-56 bg-[#1a1a1a] text-gray-200 flex flex-col overflow-y-auto border-r border-gray-800">
-        <div className="py-2">
-          <div
-            className={`${baseNavItemClass} ${view.page === 'hub' ? activeNavItemClass : inactiveNavItemClass}`}
-            onClick={() => onNavigate({ page: 'hub' })}
-          >
-            Hub
-          </div>
-          <div
-            className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}
-            onClick={() => onNavigate({ page: 'settings' })}
-          >
-            Innstillingar
-          </div>
-        </div>
-
-        <HubNodeList />
-      </nav>
-    )
-  }
-
   return (
     <nav className="w-56 min-w-56 bg-[#1a1a1a] text-gray-200 flex flex-col overflow-y-auto border-r border-gray-800">
       <div className="py-2">
@@ -68,6 +44,12 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
           onClick={() => onNavigate({ page: 'dashboard' })}
         >
           Oversikt
+        </div>
+        <div
+          className={`${baseNavItemClass} ${view.page === 'hub' ? activeNavItemClass : inactiveNavItemClass}`}
+          onClick={() => onNavigate({ page: 'hub' })}
+        >
+          Hub
         </div>
         <div
           className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}
@@ -112,6 +94,9 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
           ))}
         </>
       )}
+
+      {/* Hub-nodar i sidepanelet (viss det finst konfigurerte nodar) */}
+      <HubNodeList />
     </nav>
   )
 }
@@ -127,14 +112,14 @@ function HubNodeList() {
 
   return (
     <>
-      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">Nodar</div>
+      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">Hub-nodar</div>
       {hub.nodar.map(node => (
         <div
           key={node.id}
           className={`${baseKanalClass} ${inactiveKanalClass}`}
         >
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-            node.tilkobla ? 'bg-green-500' : 'bg-red-500'
+            node.tilkobla ? 'bg-green-500' : hub.aktiv === false ? 'bg-gray-500' : 'bg-red-500'
           }`} />
           <span className="truncate">{node.namn}</span>
           {node.tilkobla && (

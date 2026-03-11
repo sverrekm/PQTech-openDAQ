@@ -224,6 +224,7 @@ export interface HubNodeStatus {
 
 export interface HubStatus {
   modus: string
+  aktiv?: boolean
   startet: string | null
   totalt_kanalar: number
   totalt_nodar: number

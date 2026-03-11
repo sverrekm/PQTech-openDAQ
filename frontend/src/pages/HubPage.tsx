@@ -78,6 +78,8 @@ export default function HubPage() {
     )
   }
 
+  const hubAktiv = hub?.aktiv !== false  // hub-modus returnerer ikkje aktiv-feltet, node-modus set aktiv=false
+
   return (
     <>
       {/* Samandrag */}
@@ -85,12 +87,19 @@ export default function HubPage() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900">openDAQ Hub</h2>
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
-            hub ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+            hubAktiv ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
           }`}>
-            <span className={`w-2 h-2 rounded-full ${hub ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
-            Hub aktiv
+            <span className={`w-2 h-2 rounded-full ${hubAktiv ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+            {hubAktiv ? 'Hub aktiv' : 'Hub ikkje aktiv'}
           </div>
         </div>
+
+        {!hubAktiv && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm rounded-lg p-3 mb-3">
+            Hub-tenesta køyrer ikkje. Nodar kan konfigurerast her, men tilkoblingar vert fyrst aktive
+            når containeren startar med <code className="bg-yellow-100 px-1 rounded">OPENDAQ_MODUS=hub</code>.
+          </div>
+        )}
 
         <div className="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-2">
           <InfoCell label="Tilkobla nodar" value={`${hub?.tilkobla_nodar ?? 0} / ${hub?.totalt_nodar ?? 0}`} />
