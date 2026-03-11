@@ -15,10 +15,11 @@ import socket
 import threading
 import glob as glob_mod
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, session, send_file
 
 import usbip_manager
 import oppdatering
+import brukar_auth
 
 # Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
 try:
@@ -51,6 +52,43 @@ from mqtt_konfig import valider_mqtt_konfig
 from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP
 
 app = Flask(__name__)
+brukar_auth.init_app(app)
+
+
+# --- Auth API ---
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    data = request.get_json(silent=True) or {}
+    brukarnavn = data.get("brukarnavn", "")
+    passord = data.get("passord", "")
+    if brukar_auth.sjekk_passord(brukarnavn, passord):
+        session["brukar"] = brukarnavn
+        return jsonify({"suksess": True})
+    return jsonify({"suksess": False, "melding": "Feil brukarnavn eller passord"}), 401
+
+
+@app.route("/api/auth/status")
+def api_auth_status():
+    if "brukar" in session:
+        return jsonify({"innlogga": True, "brukarnavn": session["brukar"]})
+    return jsonify({"innlogga": False})
+
+
+@app.route("/api/auth/endre-passord", methods=["POST"])
+def api_auth_endre_passord():
+    data = request.get_json(silent=True) or {}
+    brukarnavn = session.get("brukar", "")
+    ok, melding = brukar_auth.endre_passord(
+        brukarnavn, data.get("gammalt", ""), data.get("nytt", "")
+    )
+    return jsonify({"suksess": ok, "melding": melding})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    session.pop("brukar", None)
+    return jsonify({"suksess": True})
 
 
 def kjor(cmd):

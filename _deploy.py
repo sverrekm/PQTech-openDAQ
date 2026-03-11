@@ -34,6 +34,7 @@ container_files = [
     (f'{BASE}/mqtt_klient.py',        '/tmp/mqtt_klient.py',         '/app/mqtt_klient.py'),
     (f'{BASE}/usbip_manager.py',      '/tmp/usbip_manager.py',       '/app/usbip_manager.py'),
     (f'{BASE}/oppdatering.py',        '/tmp/oppdatering.py',         '/app/oppdatering.py'),
+    (f'{BASE}/brukar_auth.py',        '/tmp/brukar_auth.py',         '/app/brukar_auth.py'),
 ]
 
 # docker-compose.yml oppdaterast på Pi-repo (for SAMPLE_RATE env + memory limit)
@@ -66,33 +67,7 @@ for local, remote in repo_files:
 
 sftp.close()
 
-# Frontend dist: kopier heile mappa via tar
-print('\nKopierer frontend/dist/ til container...')
-import subprocess, os
-dist_dir = f'{BASE}/frontend/dist'
-tar_path = '/tmp/frontend_dist.tar.gz'
-# Lag tarball lokalt
-subprocess.run(
-    ['tar', 'czf', tar_path, '-C', f'{BASE}/frontend', 'dist'],
-    check=True,
-)
-sftp_fe = ssh.open_sftp()
-sftp_fe.put(tar_path, '/tmp/frontend_dist.tar.gz')
-sftp_fe.close()
-os.remove(tar_path)
-stdin, stdout, stderr = ssh.exec_command(
-    f'sudo docker exec {CONTAINER} mkdir -p /app/frontend && '
-    f'sudo docker cp /tmp/frontend_dist.tar.gz {CONTAINER}:/tmp/frontend_dist.tar.gz && '
-    f'sudo docker exec {CONTAINER} tar xzf /tmp/frontend_dist.tar.gz -C /app/frontend',
-    timeout=30)
-stdout.read()
-err = stderr.read().decode(errors='replace').strip()
-if err:
-    print(f'  FEIL: {err}')
-else:
-    print(f'  frontend/dist/ -> /app/frontend/dist/')
-
-import time
+import subprocess, os, time
 
 # 3. Recreate container via docker-compose for å plukke opp nye env vars.
 #    docker restart les IKKJE docker-compose.yml — berre docker-compose down/up gjer det.
@@ -128,7 +103,30 @@ for local, remote_tmp, container_path in container_files:
         print(f'  {filename} -> {container_path}')
 sftp2.close()
 
-# 5. Restart for å plukke opp dei nye Python-filene
+# 5. Kopier frontend/dist/ til ny container via tar
+print('\nKopierer frontend/dist/ til container...')
+tar_path = '/tmp/frontend_dist.tar.gz'
+subprocess.run(
+    ['tar', 'czf', tar_path, '-C', f'{BASE}/frontend', 'dist'],
+    check=True,
+)
+sftp3 = ssh.open_sftp()
+sftp3.put(tar_path, '/tmp/frontend_dist.tar.gz')
+sftp3.close()
+os.remove(tar_path)
+stdin, stdout, stderr = ssh.exec_command(
+    f'sudo docker exec {CONTAINER} mkdir -p /app/frontend && '
+    f'sudo docker cp /tmp/frontend_dist.tar.gz {CONTAINER}:/tmp/frontend_dist.tar.gz && '
+    f'sudo docker exec {CONTAINER} tar xzf /tmp/frontend_dist.tar.gz -C /app/frontend',
+    timeout=30)
+stdout.read()
+err = stderr.read().decode(errors='replace').strip()
+if err:
+    print(f'  FEIL: {err}')
+else:
+    print(f'  frontend/dist/ -> /app/frontend/dist/')
+
+# 6. Restart for å plukke opp dei nye Python-filene
 print('\nRestartar container (nye Python-filer)...')
 stdin, stdout, stderr = ssh.exec_command(f'sudo docker restart {CONTAINER}', timeout=60)
 out = stdout.read().decode(errors='replace').strip()
