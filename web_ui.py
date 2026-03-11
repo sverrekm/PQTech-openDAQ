@@ -51,6 +51,16 @@ from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, 
 from mqtt_konfig import valider_mqtt_konfig
 from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP
 
+# Betinget import av hub-modular (kun i OPENDAQ_MODUS=hub)
+HUB_MODUS = os.environ.get("OPENDAQ_MODUS") == "hub"
+if HUB_MODUS:
+    from hub_server import (
+        hent_hub_status, hent_hub_konfig_dict,
+        oppdater_hub_konfig, legg_til_node_api,
+        fjern_node_api, rekoble_node, hent_logg as _hub_hent_logg,
+    )
+    from hub_konfig import valider_hub_konfig
+
 app = Flask(__name__)
 brukar_auth.init_app(app)
 
@@ -720,7 +730,9 @@ def api_enhet_konfig_oppdater():
 
 @app.route("/api/modus")
 def api_modus():
-    """Returnerer gjeldande driftsmodus (direkte/usbip)."""
+    """Returnerer gjeldande driftsmodus (direkte/usbip/hub)."""
+    if HUB_MODUS:
+        return jsonify({"modus": "hub"})
     return jsonify({"modus": les_modus()})
 
 
@@ -778,6 +790,80 @@ def api_usbip_stopp():
         "melding": melding + rekoble_msg,
         "status": status,
     })
+
+
+# --- Hub API (kun i hub-modus) ---
+
+@app.route("/api/hub/status")
+def api_hub_status():
+    """Hub-status med per-node info."""
+    if not HUB_MODUS:
+        return jsonify({"feil": "Ikkje hub-modus"}), 400
+    return jsonify(hent_hub_status())
+
+
+@app.route("/api/hub/konfig")
+def api_hub_konfig_hent():
+    """Hent hub-konfigurasjon."""
+    if not HUB_MODUS:
+        return jsonify({"feil": "Ikkje hub-modus"}), 400
+    return jsonify(hent_hub_konfig_dict())
+
+
+@app.route("/api/hub/konfig", methods=["PUT"])
+def api_hub_konfig_oppdater():
+    """Oppdater hub-konfigurasjon."""
+    if not HUB_MODUS:
+        return jsonify({"suksess": False, "melding": "Ikkje hub-modus"}), 400
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"suksess": False, "melding": "Ugyldig JSON"}), 400
+    konfig, feil = valider_hub_konfig(data)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    ok, melding = oppdater_hub_konfig(konfig)
+    return jsonify({"suksess": ok, "melding": melding})
+
+
+@app.route("/api/hub/nodar", methods=["POST"])
+def api_hub_legg_til_node():
+    """Legg til ein ny fjern-node."""
+    if not HUB_MODUS:
+        return jsonify({"suksess": False, "melding": "Ikkje hub-modus"}), 400
+    data = request.get_json(silent=True) or {}
+    ok, melding, node = legg_til_node_api(data)
+    result = {"suksess": ok, "melding": melding}
+    if node:
+        result["node"] = node
+    return jsonify(result), 200 if ok else 400
+
+
+@app.route("/api/hub/nodar/<node_id>", methods=["DELETE"])
+def api_hub_fjern_node(node_id):
+    """Fjern ein fjern-node."""
+    if not HUB_MODUS:
+        return jsonify({"suksess": False, "melding": "Ikkje hub-modus"}), 400
+    ok, melding = fjern_node_api(node_id)
+    return jsonify({"suksess": ok, "melding": melding}), 200 if ok else 404
+
+
+@app.route("/api/hub/nodar/<node_id>/rekoble", methods=["POST"])
+def api_hub_rekoble_node(node_id):
+    """Tving rekobling av ein node."""
+    if not HUB_MODUS:
+        return jsonify({"suksess": False, "melding": "Ikkje hub-modus"}), 400
+    ok, melding = rekoble_node(node_id)
+    return jsonify({"suksess": ok, "melding": melding})
+
+
+@app.route("/api/hub/logg")
+def api_hub_logg():
+    """Hub-loggar (ringbuffer)."""
+    if not HUB_MODUS:
+        return jsonify({"linjer": [], "feil": "Ikkje hub-modus"})
+    antall = request.args.get("antall", 200, type=int)
+    linjer = _hub_hent_logg(min(antall, 500))
+    return jsonify({"linjer": linjer, "antall": len(linjer)})
 
 
 # --- System / Oppdatering API ---

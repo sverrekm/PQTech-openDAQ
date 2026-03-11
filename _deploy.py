@@ -32,6 +32,8 @@ container_files = [
     (f'{BASE}/enhet_konfig.py',       '/tmp/enhet_konfig.py',        '/app/enhet_konfig.py'),
     (f'{BASE}/mqtt_konfig.py',        '/tmp/mqtt_konfig.py',         '/app/mqtt_konfig.py'),
     (f'{BASE}/mqtt_klient.py',        '/tmp/mqtt_klient.py',         '/app/mqtt_klient.py'),
+    (f'{BASE}/hub_konfig.py',         '/tmp/hub_konfig.py',          '/app/hub_konfig.py'),
+    (f'{BASE}/hub_server.py',         '/tmp/hub_server.py',          '/app/hub_server.py'),
     (f'{BASE}/usbip_manager.py',      '/tmp/usbip_manager.py',       '/app/usbip_manager.py'),
     (f'{BASE}/oppdatering.py',        '/tmp/oppdatering.py',         '/app/oppdatering.py'),
     (f'{BASE}/brukar_auth.py',        '/tmp/brukar_auth.py',         '/app/brukar_auth.py'),

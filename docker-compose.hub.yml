@@ -1,0 +1,17 @@
+services:
+  opendaq-hub:
+    image: pqtech-opendaq:latest
+    container_name: pqtech-opendaq-hub
+    network_mode: host
+    environment:
+      - OPENDAQ_MODUS=hub
+      - OPENDAQ_MODEL=PQTech-Hub
+      - WEB_PORT=8080
+      - NATIVE_SIRIUS=false
+    volumes:
+      - ./konfig:/data/konfig
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: unless-stopped

@@ -206,6 +206,60 @@ export interface EnhetKonfig {
   location: string
 }
 
+// --- /api/hub/* ---
+export interface HubNodeStatus {
+  id: string
+  namn: string
+  adresse: string
+  port: number
+  protokoll: string
+  lokasjon: string
+  aktivert: boolean
+  tilkobla: boolean
+  feil: string | null
+  sist_sett: string | null
+  tilkobla_sidan: string | null
+  antal_kanalar: number
+}
+
+export interface HubStatus {
+  modus: string
+  startet: string | null
+  totalt_kanalar: number
+  totalt_nodar: number
+  tilkobla_nodar: number
+  nodar: HubNodeStatus[]
+  ip: string
+}
+
+export interface HubKonfig {
+  nodar: Array<{
+    id: string
+    namn: string
+    adresse: string
+    port: number
+    aktivert: boolean
+    protokoll: string
+    lokasjon: string
+  }>
+  reconnect_intervall: number
+  helsesjekk_intervall: number
+}
+
+export interface HubNodeResult {
+  suksess: boolean
+  melding: string
+  node?: {
+    id: string
+    namn: string
+    adresse: string
+    port: number
+    aktivert: boolean
+    protokoll: string
+    lokasjon: string
+  }
+}
+
 // --- /api/system/* ---
 export interface VersjonInfo {
   sha: string

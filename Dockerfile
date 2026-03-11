@@ -701,6 +701,8 @@ COPY kanal_konfig.py .
 COPY mqtt_konfig.py .
 COPY mqtt_klient.py .
 COPY enhet_konfig.py .
+COPY hub_konfig.py .
+COPY hub_server.py .
 COPY oppdatering.py .
 COPY brukar_auth.py .
 COPY docker-entrypoint.sh .
@@ -719,7 +721,7 @@ ENV WEB_PORT=8080
 ENV TILKOBLING=""
 
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
-    CMD pgrep -f "opendaq_server.py\|sirius_server.py" > /dev/null || exit 1
+    CMD pgrep -f "opendaq_server.py\|sirius_server.py\|hub_server.py" > /dev/null || exit 1
 
 # DewesoftRT-kompatibilitet (SSH-kommandoar fraa DewesoftX)
 RUN mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system \

@@ -356,15 +356,29 @@ echo "$OPENDAQ_IP $OPENDAQ_IP" >> /etc/hosts 2>/dev/null || true
 echo "  OPC-UA endpoint: hostname=$OPENDAQ_IP (var: $ORIG_HOST)"
 echo ""
 
-# Deaktiver modular som ikkje trengst for server-modus og kan foraarsake
-# feil i DewesoftX-klienten (t.d. 0x80000014 ved GetAvailableFunctionBlockTypes)
-for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libsimulator_device_module; do
-    MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
-    if [ -n "$MODULFIL" ]; then
-        mv "$MODULFIL" "${MODULFIL}.disabled"
-        echo "  $(basename "$MODULFIL") deaktivert"
-    fi
-done
+# Deaktiver modular som ikkje trengst og kan foraarsake feil i DewesoftX-klienten
+# (t.d. 0x80000014 ved GetAvailableFunctionBlockTypes).
+# Hub-modus treng klient-modular (opcua_client, native_stream_cl) for add_device().
+if [ "${OPENDAQ_MODUS}" = "hub" ]; then
+    # Hub: berre deaktiver simulator, behald klient-modular
+    for MODUL in libsimulator_device_module; do
+        MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
+        if [ -n "$MODULFIL" ]; then
+            mv "$MODULFIL" "${MODULFIL}.disabled"
+            echo "  $(basename "$MODULFIL") deaktivert"
+        fi
+    done
+    echo "  Hub-modus: klient-modular (opcua_client, native_stream_cl) AKTIVE"
+else
+    # Node-modus: deaktiver klient-modular (eksisterande åtferd)
+    for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libsimulator_device_module; do
+        MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
+        if [ -n "$MODULFIL" ]; then
+            mv "$MODULFIL" "${MODULFIL}.disabled"
+            echo "  $(basename "$MODULFIL") deaktivert"
+        fi
+    done
+fi
 
 # Skriv versjonsinfo ved oppstart (viss ikkje allereie sett)
 mkdir -p /data/konfig
@@ -374,7 +388,21 @@ fi
 
 export PYTHONPATH=/app
 
-if [ "${NATIVE_SIRIUS}" = "true" ]; then
+# ========================================
+# Hub-modus (aggregator for fleire nodar)
+# ========================================
+if [ "${OPENDAQ_MODUS}" = "hub" ]; then
+    echo "Modus: openDAQ Hub (aggregator)"
+    echo ""
+
+    # openDAQ laster moduler fra CWD via '' i sys.path
+    cd /usr/local/lib
+
+    echo "Startar hub server + web UI..."
+    echo ""
+    exec python3 -m hub_server
+
+elif [ "${NATIVE_SIRIUS}" = "true" ]; then
     # ========================================
     # SIRIUS Direkte-modus (uten openDAQ SDK)
     # Bruker reverse-engineered USB-protokoll

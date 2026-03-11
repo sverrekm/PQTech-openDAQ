@@ -38,3 +38,13 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) throw new Error(`PUT ${path}: ${res.status}`)
   return res.json()
 }
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  handle401(res)
+  if (!res.ok) throw new Error(`DELETE ${path}: ${res.status}`)
+  return res.json()
+}
