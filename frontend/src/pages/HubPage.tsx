@@ -1,7 +1,20 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import type { HubStatus, HubKanal } from '../api/types'
 import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, fetchHubKanalar, byttModus } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
+
+export const HUB_SYNLEGE_KEY = 'hub_synlege_kanalar'
+
+export function hentSynlegeKanalar(): Set<string> {
+  try {
+    const raw = localStorage.getItem(HUB_SYNLEGE_KEY)
+    return raw ? new Set(JSON.parse(raw)) : new Set()
+  } catch { return new Set() }
+}
+
+function lagreSynlegeKanalar(set: Set<string>) {
+  localStorage.setItem(HUB_SYNLEGE_KEY, JSON.stringify([...set]))
+}
 
 export default function HubPage() {
   const hubFetcher = useCallback(() => fetchHubStatus(), [])
@@ -323,6 +336,37 @@ function HubKanalTabell() {
   const kanalar: HubKanal[] = data?.kanalar ?? []
   const feil = (data as Record<string, unknown>)?.feil as string | undefined
 
+  const [synlege, setSynlege] = useState<Set<string>>(() => hentSynlegeKanalar())
+
+  // Sync to localStorage
+  useEffect(() => {
+    lagreSynlegeKanalar(synlege)
+  }, [synlege])
+
+  const toggleSynleg = (key: string) => {
+    setSynlege(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const kanalKey = (k: HubKanal) => `${k.node_id}:${k.namn}`
+
+  const alleValgt = kanalar.length > 0 && kanalar.every(k => synlege.has(kanalKey(k)))
+  const toggleAlle = () => {
+    setSynlege(prev => {
+      const next = new Set(prev)
+      if (alleValgt) {
+        kanalar.forEach(k => next.delete(kanalKey(k)))
+      } else {
+        kanalar.forEach(k => next.add(kanalKey(k)))
+      }
+      return next
+    })
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">Hub-kanalar</h3>
@@ -335,6 +379,9 @@ function HubKanalTabell() {
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr>
+              <th className="text-center px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 40 }}>
+                <input type="checkbox" checked={alleValgt} onChange={toggleAlle} title="Vel alle / fjern alle" className="accent-[#D76428]" />
+              </th>
               <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">Node</th>
               <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">Kanal</th>
               <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 70 }}>Eining</th>
@@ -342,16 +389,22 @@ function HubKanalTabell() {
             </tr>
           </thead>
           <tbody>
-            {kanalar.map((k, i) => (
-              <tr key={`${k.node_id}-${k.namn}-${i}`} className="hover:bg-gray-50 transition-colors">
-                <td className="px-1 py-1.5 border-b border-gray-100 text-gray-700">{k.node_namn}</td>
-                <td className="px-1 py-1.5 border-b border-gray-100 text-gray-900">{k.namn}</td>
-                <td className="px-1 py-1.5 border-b border-gray-100 text-gray-500">{k.eining || '-'}</td>
-                <td className="px-1 py-1.5 border-b border-gray-100 text-right font-mono text-sm text-green-700">
-                  {k.verdi !== null ? k.verdi.toFixed(2) : '-'}
-                </td>
-              </tr>
-            ))}
+            {kanalar.map((k, i) => {
+              const key = kanalKey(k)
+              return (
+                <tr key={`${k.node_id}-${k.namn}-${i}`} className="hover:bg-gray-50 transition-colors">
+                  <td className="text-center px-1 py-1.5 border-b border-gray-100">
+                    <input type="checkbox" checked={synlege.has(key)} onChange={() => toggleSynleg(key)} className="accent-[#D76428]" title="Vis i oversikt og sidepanel" />
+                  </td>
+                  <td className="px-1 py-1.5 border-b border-gray-100 text-gray-700">{k.node_namn}</td>
+                  <td className="px-1 py-1.5 border-b border-gray-100 text-gray-900">{k.namn}</td>
+                  <td className="px-1 py-1.5 border-b border-gray-100 text-gray-500">{k.eining || '-'}</td>
+                  <td className="px-1 py-1.5 border-b border-gray-100 text-right font-mono text-sm text-green-700">
+                    {k.verdi !== null ? k.verdi.toFixed(2) : '-'}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       )}

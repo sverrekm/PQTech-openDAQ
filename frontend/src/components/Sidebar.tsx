@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
-import type { KanalKonfig, KanalLive, MqttStatus } from '../api/types'
+import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import { fetchHubStatus } from '../api/hub'
+import { hentSynlegeKanalar } from '../pages/HubPage'
 import { usePolling } from '../hooks/usePolling'
 
 export type View =
@@ -15,9 +16,10 @@ interface Props {
   kanalar: KanalKonfig[] | null
   liveData: KanalLive | null
   mqttStatus?: MqttStatus | null
+  hubKanalar?: HubKanal[]
 }
 
-export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus }: Props) {
+export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus, hubKanalar }: Props) {
   const hasData = (idx: number): boolean => {
     if (!liveData) return false
     const key = `kanal_${idx}`
@@ -95,9 +97,42 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
         </>
       )}
 
+      {/* Hub-kanalar (dei som er markerte som synlege i HubPage) */}
+      <HubKanalListe kanalar={hubKanalar} />
+
       {/* Hub-nodar i sidepanelet (viss det finst konfigurerte nodar) */}
       <HubNodeList />
     </nav>
+  )
+}
+
+function HubKanalListe({ kanalar }: { kanalar?: HubKanal[] }) {
+  const synlege = hentSynlegeKanalar()
+  const synlegeKanalar = (kanalar ?? []).filter(k => synlege.has(`${k.node_id}:${k.namn}`))
+
+  if (synlegeKanalar.length === 0) return null
+
+  const baseKanalClass = "flex items-center gap-2 py-1.5 px-4 text-sm border-l-4 border-transparent select-none"
+  const inactiveKanalClass = "text-gray-400 cursor-default"
+
+  return (
+    <>
+      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">Hub-kanalar</div>
+      {synlegeKanalar.map(k => (
+        <div
+          key={`${k.node_id}:${k.namn}`}
+          className={`${baseKanalClass} ${inactiveKanalClass}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${k.verdi !== null ? 'bg-green-500' : 'bg-gray-500'}`} />
+          <span className="truncate">{k.namn}</span>
+          {k.verdi !== null && (
+            <span className="ml-auto text-xs font-mono text-gray-400">
+              {k.verdi.toFixed(1)}{k.eining ? ` ${k.eining}` : ''}
+            </span>
+          )}
+        </div>
+      ))}
+    </>
   )
 }
 

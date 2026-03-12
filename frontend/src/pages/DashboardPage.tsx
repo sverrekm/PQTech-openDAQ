@@ -1,4 +1,4 @@
-import type { ServerStatus, KanalKonfig, KanalLive, MqttStatus } from '../api/types'
+import type { ServerStatus, KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import SiriusStatusCard from '../components/SiriusStatusCard'
 import UsbIpCard from '../components/UsbIpCard'
 import ChannelLiveCard from '../components/ChannelLiveCard'
@@ -14,14 +14,15 @@ interface Props {
   mqttStatus?: MqttStatus | null
   siriusTilkoblet: boolean
   onChannelClick: (index: number) => void
+  hubKanalar?: HubKanal[]
 }
 
-export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick }: Props) {
+export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, hubKanalar }: Props) {
   return (
     <>
       <SiriusStatusCard />
       <UsbIpCard ip={status?.ip || '-'} />
-      <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} />
+      <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} hubKanalar={hubKanalar} />
       <OpenDaqBridgeCard />
       <ServerStatusCard status={status} />
       <LogViewer />

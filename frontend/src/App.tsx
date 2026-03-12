@@ -3,6 +3,7 @@ import { fetchStatus } from './api/status'
 import { fetchKanalar, fetchKanalLive } from './api/kanalar'
 import { fetchMqttStatus } from './api/mqtt'
 import { fetchSiriusStatus } from './api/sirius'
+import { fetchHubKanalar } from './api/hub'
 import { sjekkAuth } from './api/auth'
 import { usePolling } from './hooks/usePolling'
 import Header from './components/Header'
@@ -61,6 +62,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const siriusFetcher = useCallback(() => fetchSiriusStatus(), [])
   const { data: siriusStatus } = usePolling(siriusFetcher, 5000)
 
+  const hubKanalFetcher = useCallback(() => fetchHubKanalar(), [])
+  const { data: hubKanalData } = usePolling(hubKanalFetcher, 3000)
+  const hubKanalar = hubKanalData?.kanalar ?? []
+
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
   }
@@ -83,7 +88,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   } else if (view.page === 'hub') {
     content = <HubPage />
   } else if (view.page === 'dashboard') {
-    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} />
+    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} hubKanalar={hubKanalar} />
   } else if (view.page === 'settings') {
     content = <SettingsPage />
   } else {
@@ -94,7 +99,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     <>
       <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} />
       <Layout>
-        <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} />
+        <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} />
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
             {content}

@@ -1,5 +1,6 @@
 import { useRef } from 'react'
-import type { KanalKonfig, KanalLive, MqttStatus } from '../api/types'
+import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
+import { hentSynlegeKanalar } from '../pages/HubPage'
 import SparklineChart from './SparklineChart'
 
 interface Props {
@@ -9,10 +10,12 @@ interface Props {
   siriusTilkoblet?: boolean
   onChannelClick: (index: number) => void
   loading?: boolean
+  hubKanalar?: HubKanal[]
 }
 
-export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, loading = false }: Props) {
+export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, loading = false, hubKanalar }: Props) {
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
+  const hubSparkRef = useRef<Map<string, number[]>>(new Map())
 
   if (loading || !kanalar) {
     return (
@@ -137,6 +140,49 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
               </tr>
             )
           })}
+          {(() => {
+            const synlege = hentSynlegeKanalar()
+            const synlegeHub = (hubKanalar ?? []).filter(k => synlege.has(`${k.node_id}:${k.namn}`))
+            if (synlegeHub.length === 0) return null
+            const baseNum = (siriusTilkoblet ? (kanalar?.length ?? 0) : 0)
+              + (mqttStatus?.aktivert && mqttStatus.topics ? Object.keys(mqttStatus.topics).length : 0)
+            return synlegeHub.map((k, i) => {
+              const sparkKey = `hub_${k.node_id}:${k.namn}`
+              if (k.verdi !== null) {
+                const arr = hubSparkRef.current.get(sparkKey) || []
+                arr.push(k.verdi)
+                if (arr.length > 30) arr.shift()
+                hubSparkRef.current.set(sparkKey, arr)
+              }
+              const sparkArr = hubSparkRef.current.get(sparkKey) || []
+              return (
+                <tr key={sparkKey} className="transition-colors duration-100 ease-in-out bg-teal-50/30">
+                  <td className="px-1 py-1 border-b border-gray-100 align-middle text-teal-600 font-semibold">{baseNum + i + 1}</td>
+                  <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                    {k.namn}
+                    <span className="text-xs text-teal-500 ml-1">{k.node_namn}</span>
+                  </td>
+                  <td className="px-1 py-1 border-b border-gray-100 align-middle">{k.eining || '-'}</td>
+                  <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                    <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${k.verdi !== null ? 'bg-teal-100 text-teal-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                      {k.verdi !== null ? 'Ja' : 'Ventar'}
+                    </span>
+                  </td>
+                  <td className="font-mono text-sm text-right px-1 py-1 border-b border-gray-100 align-middle" style={{ color: '#0d9488' }}>
+                    {k.verdi !== null ? (
+                      <>
+                        {k.verdi.toFixed(2)}
+                        <span className="text-xs opacity-70 ml-1">Hub</span>
+                      </>
+                    ) : '-'}
+                  </td>
+                  <td className="px-1 py-1 border-b border-gray-100 align-middle">
+                    <SparklineChart data={[...sparkArr]} />
+                  </td>
+                </tr>
+              )
+            })
+          })()}
         </tbody>
       </table>
     </div>
