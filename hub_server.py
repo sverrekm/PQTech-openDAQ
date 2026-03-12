@@ -186,6 +186,91 @@ def _tel_kanalar(device) -> int:
         return 0
 
 
+# --- Kanal-readers cache for live-verdiar ---
+
+_kanal_readers = {}  # (node_id, signal_id) -> StreamReader
+
+
+def hent_hub_kanalar() -> list:
+    """Les kanal-metadata og siste verdi frå alle tilkobla nodar.
+
+    Brukar ein cached StreamReader per signal for å lese siste verdi.
+    """
+    import opendaq as daq
+
+    kanalar = []
+    with _hub_lock:
+        nodar_snapshot = list(_node_devices.items())
+        konfig_nodar = {n.id: n for n in _hub_konfig.nodar}
+
+    for node_id, device in nodar_snapshot:
+        node_info = konfig_nodar.get(node_id)
+        node_namn = node_info.namn if node_info else node_id
+
+        try:
+            channels = device.channels
+        except Exception:
+            continue
+
+        if not channels:
+            continue
+
+        for ch in channels:
+            try:
+                ch_namn = ch.name
+            except Exception:
+                ch_namn = "ukjent"
+
+            # Hent signal og descriptor
+            eining = ""
+            verdi = None
+            try:
+                signals = ch.signals
+                if signals and len(signals) > 0:
+                    sig = signals[0]
+                    sig_id = sig.global_id
+
+                    # Eining frå descriptor
+                    try:
+                        desc = sig.descriptor
+                        if desc and desc.unit:
+                            eining = desc.unit.symbol or ""
+                    except Exception:
+                        pass
+
+                    # Les siste verdi via cached StreamReader
+                    reader_key = (node_id, sig_id)
+                    if reader_key not in _kanal_readers:
+                        try:
+                            _kanal_readers[reader_key] = daq.StreamReader(sig)
+                        except Exception:
+                            pass
+
+                    reader = _kanal_readers.get(reader_key)
+                    if reader:
+                        try:
+                            count = reader.available_count
+                            if count > 0:
+                                values = reader.read(count)
+                                if values is not None and len(values) > 0:
+                                    verdi = float(values[-1])
+                        except Exception:
+                            # Reader kan vere ugyldig — fjern frå cache
+                            _kanal_readers.pop(reader_key, None)
+            except Exception:
+                pass
+
+            kanalar.append({
+                "node_id": node_id,
+                "node_namn": node_namn,
+                "namn": ch_namn,
+                "verdi": verdi,
+                "eining": eining,
+            })
+
+    return kanalar
+
+
 def _start_serverar():
     """Start OPC-UA + NativeStreaming serverar på hub-instansen."""
     global _instance

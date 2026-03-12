@@ -279,6 +279,15 @@ export interface HubNodeResult {
   }
 }
 
+// --- /api/hub/kanalar ---
+export interface HubKanal {
+  node_id: string
+  node_namn: string
+  namn: string
+  verdi: number | null
+  eining: string
+}
+
 // --- /api/system/* ---
 export interface VersjonInfo {
   sha: string

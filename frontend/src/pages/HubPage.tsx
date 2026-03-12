@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
-import type { HubStatus } from '../api/types'
-import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, byttModus } from '../api/hub'
+import type { HubStatus, HubKanal } from '../api/types'
+import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, fetchHubKanalar, byttModus } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 
 export default function HubPage() {
@@ -245,6 +245,9 @@ export default function HubPage() {
         )}
       </div>
 
+      {/* Kanal-tabell */}
+      {hubAktiv && <HubKanalTabell />}
+
       {/* Logg */}
       <HubLogViewer />
     </>
@@ -310,6 +313,44 @@ function InfoCell({ label, value, small }: { label: string; value: string; small
       <div className={`mt-0.5 font-semibold text-gray-900 ${small ? 'text-xs' : 'text-sm'}`}>
         {value || '-'}
       </div>
+    </div>
+  )
+}
+
+function HubKanalTabell() {
+  const kanalFetcher = useCallback(() => fetchHubKanalar(), [])
+  const { data } = usePolling(kanalFetcher, 3000)
+  const kanalar: HubKanal[] = data?.kanalar ?? []
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">Hub-kanalar</h3>
+      {kanalar.length === 0 ? (
+        <p className="text-sm text-gray-500 py-4 text-center">Ingen kanalar tilgjengelege</p>
+      ) : (
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">Node</th>
+              <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">Kanal</th>
+              <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 70 }}>Eining</th>
+              <th className="text-right px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 110 }}>Verdi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {kanalar.map((k, i) => (
+              <tr key={`${k.node_id}-${k.namn}-${i}`} className="hover:bg-gray-50 transition-colors">
+                <td className="px-1 py-1.5 border-b border-gray-100 text-gray-700">{k.node_namn}</td>
+                <td className="px-1 py-1.5 border-b border-gray-100 text-gray-900">{k.namn}</td>
+                <td className="px-1 py-1.5 border-b border-gray-100 text-gray-500">{k.eining || '-'}</td>
+                <td className="px-1 py-1.5 border-b border-gray-100 text-right font-mono text-sm text-green-700">
+                  {k.verdi !== null ? k.verdi.toFixed(2) : '-'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }

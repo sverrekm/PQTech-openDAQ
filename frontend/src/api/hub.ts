@@ -1,5 +1,5 @@
 import { apiGet, apiPut, apiPost, apiDelete } from './client'
-import type { HubStatus, HubKonfig, HubNodeResult, ActionResult } from './types'
+import type { HubStatus, HubKonfig, HubNodeResult, HubKanal, ActionResult } from './types'
 
 export async function fetchHubStatus(): Promise<HubStatus> {
   return apiGet<HubStatus>('/api/hub/status')
@@ -29,6 +29,10 @@ export async function fjernNode(nodeId: string): Promise<ActionResult> {
 
 export async function rekobleNode(nodeId: string): Promise<ActionResult> {
   return apiPost<ActionResult>(`/api/hub/nodar/${nodeId}/rekoble`)
+}
+
+export async function fetchHubKanalar(): Promise<{ kanalar: HubKanal[] }> {
+  return apiGet<{ kanalar: HubKanal[] }>('/api/hub/kanalar')
 }
 
 export async function byttModus(modus: string): Promise<ActionResult> {

@@ -62,6 +62,7 @@ if HUB_MODUS:
         hent_hub_status, hent_hub_konfig_dict,
         oppdater_hub_konfig, legg_til_node_api,
         fjern_node_api, rekoble_node, hent_logg as _hub_hent_logg,
+        hent_hub_kanalar,
     )
 
 app = Flask(__name__)
@@ -990,6 +991,17 @@ def api_hub_rekoble_node(node_id):
         return jsonify({"suksess": False, "melding": "Hub ikkje aktiv — start med OPENDAQ_MODUS=hub"})
     ok, melding = rekoble_node(node_id)
     return jsonify({"suksess": ok, "melding": melding})
+
+
+@app.route("/api/hub/kanalar")
+def api_hub_kanalar():
+    """Kanal-metadata og live-verdiar frå tilkobla nodar."""
+    if not HUB_MODUS:
+        return jsonify({"kanalar": []})
+    try:
+        return jsonify({"kanalar": hent_hub_kanalar()})
+    except Exception as e:
+        return jsonify({"kanalar": [], "feil": str(e)})
 
 
 @app.route("/api/hub/logg")
