@@ -203,6 +203,8 @@ def hent_hub_kanalar() -> list:
         nodar_snapshot = list(_node_devices.items())
         konfig_nodar = {n.id: n for n in _hub_konfig.nodar}
 
+    log.info(f"hent_hub_kanalar: {len(nodar_snapshot)} nodar tilkobla")
+
     for node_id, device in nodar_snapshot:
         node_info = konfig_nodar.get(node_id)
         node_namn = node_info.namn if node_info else node_id
@@ -210,7 +212,7 @@ def hent_hub_kanalar() -> list:
         try:
             channels = device.channels
         except Exception as e:
-            log.debug(f"hent_hub_kanalar: Kan ikkje lese channels frå {node_id}: {e}")
+            log.info(f"hent_hub_kanalar: Kan ikkje lese channels frå '{node_namn}': {e}")
             continue
 
         try:
@@ -218,16 +220,16 @@ def hent_hub_kanalar() -> list:
         except Exception:
             ch_count = 0
 
+        log.info(f"hent_hub_kanalar: Node '{node_namn}' — {ch_count} kanalar")
+
         if ch_count == 0:
             continue
-
-        log.debug(f"hent_hub_kanalar: Node '{node_namn}' har {ch_count} kanalar")
 
         for idx in range(ch_count):
             try:
                 ch = channels[idx]
             except Exception as e:
-                log.debug(f"hent_hub_kanalar: Kan ikkje hente kanal [{idx}] frå {node_id}: {e}")
+                log.info(f"hent_hub_kanalar: Kan ikkje hente kanal [{idx}] frå '{node_namn}': {e}")
                 continue
 
             try:
@@ -241,7 +243,6 @@ def hent_hub_kanalar() -> list:
             try:
                 signals = ch.signals
                 sig_count = len(signals) if signals else 0
-                log.debug(f"hent_hub_kanalar: Kanal '{ch_namn}' har {sig_count} signal")
 
                 if sig_count > 0:
                     sig = signals[0]
@@ -263,7 +264,7 @@ def hent_hub_kanalar() -> list:
                     if reader_key not in _kanal_readers:
                         try:
                             _kanal_readers[reader_key] = daq.StreamReader(sig)
-                            log.debug(f"hent_hub_kanalar: Oppretta StreamReader for '{ch_namn}'")
+                            log.info(f"hent_hub_kanalar: Oppretta StreamReader for '{ch_namn}'")
                         except Exception as e:
                             log.warning(f"hent_hub_kanalar: StreamReader feil for '{ch_namn}': {e}")
 
@@ -275,13 +276,13 @@ def hent_hub_kanalar() -> list:
                                 values = reader.read(count)
                                 if values is not None and len(values) > 0:
                                     verdi = float(values[-1])
-                            else:
-                                log.debug(f"hent_hub_kanalar: '{ch_namn}' available_count=0")
                         except Exception as e:
                             log.warning(f"hent_hub_kanalar: Lesefeil for '{ch_namn}': {e}")
                             _kanal_readers.pop(reader_key, None)
+                else:
+                    log.info(f"hent_hub_kanalar: Kanal '{ch_namn}' har 0 signal")
             except Exception as e:
-                log.debug(f"hent_hub_kanalar: Signal-feil for '{ch_namn}': {e}")
+                log.info(f"hent_hub_kanalar: Signal-feil for '{ch_namn}': {e}")
 
             kanalar.append({
                 "node_id": node_id,
@@ -291,6 +292,8 @@ def hent_hub_kanalar() -> list:
                 "eining": eining,
             })
 
+    log.info(f"hent_hub_kanalar: Returnerer {len(kanalar)} kanalar "
+             f"({sum(1 for k in kanalar if k['verdi'] is not None)} med verdi)")
     return kanalar
 
 
