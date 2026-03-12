@@ -1,6 +1,7 @@
 import DeviceSettingsCard from '../components/DeviceSettingsCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
+import TailscaleCard from '../components/TailscaleCard'
 import DeviceConnectionCard from '../components/DeviceConnectionCard'
 import DebugConsoleCard from '../components/DebugConsoleCard'
 import ProbeAnalysisCard from '../components/ProbeAnalysisCard'
@@ -12,6 +13,7 @@ export default function SettingsPage() {
       <DeviceSettingsCard />
       <ChannelConfigCard />
       <MqttSettingsCard />
+      <TailscaleCard />
       <DeviceConnectionCard />
       <DebugConsoleCard />
       <ProbeAnalysisCard />

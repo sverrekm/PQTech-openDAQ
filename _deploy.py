@@ -37,6 +37,7 @@ container_files = [
     (f'{BASE}/usbip_manager.py',      '/tmp/usbip_manager.py',       '/app/usbip_manager.py'),
     (f'{BASE}/oppdatering.py',        '/tmp/oppdatering.py',         '/app/oppdatering.py'),
     (f'{BASE}/brukar_auth.py',        '/tmp/brukar_auth.py',         '/app/brukar_auth.py'),
+    (f'{BASE}/tailscale_manager.py',  '/tmp/tailscale_manager.py',   '/app/tailscale_manager.py'),
 ]
 
 # docker-compose.yml oppdaterast på Pi-repo (for SAMPLE_RATE env + memory limit)

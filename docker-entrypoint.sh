@@ -9,6 +9,10 @@ set -e
 
 WEB_PORT="${WEB_PORT:-8080}"
 
+# Tailscale: opprett TUN device og state-dir
+mkdir -p /dev/net /data/tailscale /var/run/tailscale
+[ ! -c /dev/net/tun ] && mknod /dev/net/tun c 10 200 2>/dev/null || true
+
 echo "=============================================="
 echo "  openDAQ Server - Dewesoft SIRIUS"
 echo "  $(date)"

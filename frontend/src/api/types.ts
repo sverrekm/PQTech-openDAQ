@@ -114,6 +114,24 @@ export interface KanalLive {
   }
 }
 
+// --- /api/tailscale/* ---
+export interface TailscaleNode {
+  hostname: string
+  ip: string
+  online: boolean
+}
+
+export interface TailscaleStatus {
+  installert: boolean
+  daemon_køyrer: boolean
+  tilkobla: boolean
+  ip: string | null
+  hostname: string
+  tailnet: string
+  nodar: TailscaleNode[]
+  feil: string | null
+}
+
 // --- /api/usbip/* ---
 export interface UsbIpStatus {
   sirius_paa_usb: boolean

@@ -30,6 +30,8 @@ services:
       - ./maalinger:/data/maalinger
       # Konfigurasjon (lagres mellom omstarter)
       - ./konfig:/data/konfig
+      # Tailscale VPN state (persistent)
+      - ./tailscale:/data/tailscale
 
     environment:
       # Tilkoblingsstreng (tom = auto-oppdagelse av Dewesoft USB-instrument)

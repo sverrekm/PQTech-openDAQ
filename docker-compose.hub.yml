@@ -10,6 +10,12 @@ services:
       - NATIVE_SIRIUS=false
     volumes:
       - ./konfig:/data/konfig
+      - ./tailscale:/data/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     deploy:
       resources:
         limits:

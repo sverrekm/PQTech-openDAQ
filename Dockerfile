@@ -675,6 +675,9 @@ RUN git clone --depth 1 https://github.com/mvp/uhubctl /tmp/uhubctl \
 
 RUN pip install --no-cache-dir numpy flask pyusb paho-mqtt asyncua
 
+# Tailscale VPN (mesh-nettverk mellom nodar/hub)
+RUN curl -fsSL https://tailscale.com/install.sh | sh
+
 COPY --from=builder /opt/opendaq/lib/ /usr/local/lib/
 COPY --from=builder /opt/opendaq/python/ /usr/local/lib/python3.11/site-packages/opendaq/
 
@@ -705,6 +708,7 @@ COPY hub_konfig.py .
 COPY hub_server.py .
 COPY oppdatering.py .
 COPY brukar_auth.py .
+COPY tailscale_manager.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 

@@ -18,6 +18,7 @@ import glob as glob_mod
 from flask import Flask, jsonify, request, session, send_file
 
 import usbip_manager
+import tailscale_manager
 import oppdatering
 import brukar_auth
 
@@ -792,6 +793,35 @@ def api_usbip_stopp():
         "melding": melding + rekoble_msg,
         "status": status,
     })
+
+
+# --- Tailscale API ---
+
+@app.route("/api/tailscale/status")
+def api_tailscale_status():
+    """Returnerer Tailscale VPN-status."""
+    return jsonify(tailscale_manager.hent_status())
+
+
+@app.route("/api/tailscale/start", methods=["POST"])
+def api_tailscale_start():
+    """Start Tailscale VPN."""
+    data = request.get_json(silent=True) or {}
+    authkey = data.get("authkey", "").strip()
+    if not authkey:
+        return jsonify({"suksess": False, "melding": "Auth key manglar"}), 400
+    hostname = data.get("hostname", "").strip() or None
+    suksess, melding = tailscale_manager.start(authkey, hostname)
+    status = tailscale_manager.hent_status()
+    return jsonify({"suksess": suksess, "melding": melding, "status": status})
+
+
+@app.route("/api/tailscale/stopp", methods=["POST"])
+def api_tailscale_stopp():
+    """Stopp Tailscale VPN."""
+    suksess, melding = tailscale_manager.stopp()
+    status = tailscale_manager.hent_status()
+    return jsonify({"suksess": suksess, "melding": melding, "status": status})
 
 
 # --- Hub API (tilgjengeleg i alle moduser) ---
