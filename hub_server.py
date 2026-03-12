@@ -100,14 +100,41 @@ def _opprett_instance():
 
 
 def _koble_til_node(node: FjernNode) -> bool:
-    """Prøv å koble til ein fjern-node via add_device()."""
+    """Prøv å koble til ein fjern-node via add_device().
+
+    OPC-UA-serverar annonserer endpoint-URL med si eiga IP (t.d. macvlan).
+    Når hub-en koplar via Tailscale-IP, feilar OPC-UA-klienten fordi den
+    prøver å rekoble til serveren si annonserte IP. Vi brukar device-config
+    for å overstyre dette.
+    """
     global _instance, _node_devices, _node_status
+
+    import opendaq as daq
 
     tilkobling = node.tilkobling_streng
     log.info(f"Koplar til node '{node.namn}' ({tilkobling})...")
 
     try:
-        device = _instance.add_device(tilkobling)
+        # Prøv å hente device-config for å overstyre endpoint-URL
+        config = None
+        try:
+            dev_types = _instance.available_device_types
+            # Prøv OPC-UA config-type
+            for type_id in dev_types:
+                if 'opcua' in type_id.lower() or 'daq.opcua' in type_id.lower():
+                    config = dev_types[type_id].create_default_config()
+                    # Logg tilgjengelege eigenskapar
+                    for p in config.visible_properties:
+                        try:
+                            v = config.get_property_value(p.name)
+                            log.info(f"  DeviceConfig [{type_id}] {p.name} = {v!r}")
+                        except Exception:
+                            pass
+                    break
+        except Exception as e:
+            log.info(f"  Ingen device-config tilgjengeleg: {e}")
+
+        device = _instance.add_device(tilkobling, config)
         with _hub_lock:
             _node_devices[node.id] = device
             _node_status[node.id] = {
