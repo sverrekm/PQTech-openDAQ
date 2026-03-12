@@ -1,6 +1,12 @@
 import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { fetchTailscaleStatus, startTailscale, stoppTailscale } from '../api/tailscale'
+import {
+  fetchTailscaleStatus,
+  startTailscale,
+  stoppTailscale,
+  installerTailscale,
+  avinstallerTailscale,
+} from '../api/tailscale'
 import type { TailscaleStatus } from '../api/types'
 
 export default function TailscaleCard() {
@@ -29,6 +35,44 @@ export default function TailscaleCard() {
       if (res.suksess) {
         setMelding(res.melding)
         setAuthkey('')
+      } else {
+        setFeil(res.melding)
+      }
+      refresh()
+    } catch (e) {
+      setFeil(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLaddar(false)
+    }
+  }
+
+  const handleInstaller = async () => {
+    setLaddar(true)
+    setFeil(null)
+    setMelding(null)
+    try {
+      const res = await installerTailscale()
+      if (res.suksess) {
+        setMelding(res.melding)
+      } else {
+        setFeil(res.melding)
+      }
+      refresh()
+    } catch (e) {
+      setFeil(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLaddar(false)
+    }
+  }
+
+  const handleAvinstaller = async () => {
+    setLaddar(true)
+    setFeil(null)
+    setMelding(null)
+    try {
+      const res = await avinstallerTailscale()
+      if (res.suksess) {
+        setMelding(res.melding)
       } else {
         setFeil(res.melding)
       }
@@ -191,27 +235,44 @@ export default function TailscaleCard() {
       )}
 
       {/* Knappar */}
-      {status?.installert && (
-        <div className="flex gap-2">
-          {!status.tilkobla ? (
-            <button
-              onClick={handleStart}
-              disabled={laddar}
-              className="px-3 py-1.5 text-sm bg-[#D76428] text-white rounded hover:bg-[#c05520] disabled:opacity-50"
-            >
-              {laddar ? 'Startar...' : 'Start Tailscale'}
-            </button>
-          ) : (
-            <button
-              onClick={handleStopp}
-              disabled={laddar}
-              className="px-3 py-1.5 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
-            >
-              {laddar ? 'Stoppar...' : 'Stopp Tailscale'}
-            </button>
-          )}
-        </div>
-      )}
+      <div className="flex gap-2">
+        {status && !status.installert && (
+          <button
+            onClick={handleInstaller}
+            disabled={laddar}
+            className="px-3 py-1.5 text-sm bg-[#D76428] text-white rounded hover:bg-[#c05520] disabled:opacity-50"
+          >
+            {laddar ? 'Installerer...' : 'Installer Tailscale'}
+          </button>
+        )}
+        {status?.installert && !status.tilkobla && (
+          <button
+            onClick={handleStart}
+            disabled={laddar}
+            className="px-3 py-1.5 text-sm bg-[#D76428] text-white rounded hover:bg-[#c05520] disabled:opacity-50"
+          >
+            {laddar ? 'Startar...' : 'Start Tailscale'}
+          </button>
+        )}
+        {status?.installert && status.tilkobla && (
+          <button
+            onClick={handleStopp}
+            disabled={laddar}
+            className="px-3 py-1.5 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+          >
+            {laddar ? 'Stoppar...' : 'Stopp Tailscale'}
+          </button>
+        )}
+        {status?.installert && !status.tilkobla && (
+          <button
+            onClick={handleAvinstaller}
+            disabled={laddar}
+            className="px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded hover:bg-red-50 disabled:opacity-50"
+          >
+            {laddar ? 'Avinstallerer...' : 'Avinstaller'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

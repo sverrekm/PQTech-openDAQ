@@ -33,6 +33,53 @@ def er_installert():
     return shutil.which("tailscale") is not None
 
 
+def installer():
+    """Installer Tailscale via offisiell install-script.
+
+    Returns:
+        (suksess: bool, melding: str)
+    """
+    with _lock:
+        if er_installert():
+            return True, "Tailscale er allereie installert"
+
+        out, err, rc = _kjor("curl -fsSL https://tailscale.com/install.sh | sh", timeout=120)
+        if rc != 0:
+            return False, f"Installasjon feila: {err or out}"
+
+        if er_installert():
+            return True, "Tailscale installert"
+        return False, "Installasjon fullført men tailscale vart ikkje funne"
+
+
+def avinstaller():
+    """Avinstaller Tailscale.
+
+    Stoppar daemon og fjernar pakken.
+
+    Returns:
+        (suksess: bool, melding: str)
+    """
+    with _lock:
+        if not er_installert():
+            return True, "Tailscale er ikkje installert"
+
+        # Stopp daemon fyrst
+        _kjor("tailscale down", timeout=10)
+        _kjor("killall tailscaled", timeout=5)
+
+        out, err, rc = _kjor(
+            "apt-get remove --purge -y tailscale tailscaled 2>&1 && apt-get autoremove -y 2>&1",
+            timeout=60,
+        )
+        if rc != 0:
+            return False, f"Avinstallering feila: {err or out}"
+
+        if not er_installert():
+            return True, "Tailscale avinstallert"
+        return False, "Avinstallering fullført men tailscale er framleis tilgjengeleg"
+
+
 def hent_status():
     """Hent Tailscale-status som dict.
 

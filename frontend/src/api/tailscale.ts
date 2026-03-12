@@ -12,3 +12,11 @@ export async function startTailscale(data: { authkey: string; hostname?: string 
 export async function stoppTailscale(): Promise<ActionResult> {
   return apiPost<ActionResult>('/api/tailscale/stopp')
 }
+
+export async function installerTailscale(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/tailscale/installer')
+}
+
+export async function avinstallerTailscale(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/tailscale/avinstaller')
+}

@@ -816,6 +816,22 @@ def api_tailscale_start():
     return jsonify({"suksess": suksess, "melding": melding, "status": status})
 
 
+@app.route("/api/tailscale/installer", methods=["POST"])
+def api_tailscale_installer():
+    """Installer Tailscale i containeren."""
+    suksess, melding = tailscale_manager.installer()
+    status = tailscale_manager.hent_status()
+    return jsonify({"suksess": suksess, "melding": melding, "status": status})
+
+
+@app.route("/api/tailscale/avinstaller", methods=["POST"])
+def api_tailscale_avinstaller():
+    """Avinstaller Tailscale frå containeren."""
+    suksess, melding = tailscale_manager.avinstaller()
+    status = tailscale_manager.hent_status()
+    return jsonify({"suksess": suksess, "melding": melding, "status": status})
+
+
 @app.route("/api/tailscale/stopp", methods=["POST"])
 def api_tailscale_stopp():
     """Stopp Tailscale VPN."""
