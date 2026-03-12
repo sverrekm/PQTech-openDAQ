@@ -321,10 +321,14 @@ function HubKanalTabell() {
   const kanalFetcher = useCallback(() => fetchHubKanalar(), [])
   const { data } = usePolling(kanalFetcher, 3000)
   const kanalar: HubKanal[] = data?.kanalar ?? []
+  const feil = (data as Record<string, unknown>)?.feil as string | undefined
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">Hub-kanalar</h3>
+      {feil && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-2 mb-2">{feil}</div>
+      )}
       {kanalar.length === 0 ? (
         <p className="text-sm text-gray-500 py-4 text-center">Ingen kanalar tilgjengelege</p>
       ) : (
