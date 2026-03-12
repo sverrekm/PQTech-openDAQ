@@ -8,6 +8,7 @@ Brukt av web_ui.py for /api/tailscale/* endepunkt.
 Følgjer same mønster som usbip_manager.py.
 """
 
+import os
 import subprocess
 import threading
 import time
@@ -15,6 +16,9 @@ import json
 import shutil
 
 _lock = threading.Lock()
+
+# Vanlege installasjonsstadar for tailscale
+_TAILSCALE_PATHS = ["/usr/bin/tailscale", "/usr/sbin/tailscale", "/usr/local/bin/tailscale"]
 
 
 def _kjor(cmd, timeout=15):
@@ -29,8 +33,12 @@ def _kjor(cmd, timeout=15):
 
 
 def er_installert():
-    """Sjekk om tailscale CLI finst."""
-    return shutil.which("tailscale") is not None
+    """Sjekk om tailscale CLI finst (which + kjende stiar)."""
+    if shutil.which("tailscale") is not None:
+        return True
+    # Fallback: sjekk kjende stiar direkte (PATH i Python-prosessen
+    # inkluderer ikkje alltid /usr/sbin etter installasjon)
+    return any(os.path.isfile(p) and os.access(p, os.X_OK) for p in _TAILSCALE_PATHS)
 
 
 def installer():
@@ -46,6 +54,12 @@ def installer():
         out, err, rc = _kjor("curl -fsSL https://tailscale.com/install.sh | sh", timeout=120)
         if rc != 0:
             return False, f"Installasjon feila: {err or out}"
+
+        # Oppdater PATH for denne prosessen slik at which() og
+        # subprocess finn tailscale/tailscaled etter installasjon
+        for d in ["/usr/bin", "/usr/sbin", "/usr/local/bin"]:
+            if d not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = os.environ.get("PATH", "") + ":" + d
 
         if er_installert():
             return True, "Tailscale installert"
