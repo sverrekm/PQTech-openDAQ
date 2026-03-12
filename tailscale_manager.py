@@ -168,19 +168,19 @@ def hent_status():
     current_tailnet = data.get("CurrentTailnet") or {}
     status["tailnet"] = current_tailnet.get("Name", "")
 
-    # Eigen IP
-    tailscale_ips = self_node.get("TailscaleIPs", [])
+    # Eigen IP (kan vere None viss ikkje autentisert)
+    tailscale_ips = self_node.get("TailscaleIPs") or []
     for ip in tailscale_ips:
         if "." in ip:  # IPv4
             status["ip"] = ip
             break
 
-    # Andre nodar i tailnet
-    peers = data.get("Peer", {})
+    # Andre nodar i tailnet (kan vere None viss ikkje autentisert)
+    peers = data.get("Peer") or {}
     for _key, peer in peers.items():
         peer_dns = peer.get("DNSName", "")
         peer_hostname = peer_dns.rstrip(".").split(".")[0] if peer_dns else peer.get("HostName", "")
-        peer_ips = peer.get("TailscaleIPs", [])
+        peer_ips = peer.get("TailscaleIPs") or []
         peer_ip = ""
         for ip in peer_ips:
             if "." in ip:
