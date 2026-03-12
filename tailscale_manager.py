@@ -159,13 +159,13 @@ def hent_status():
     backend_state = data.get("BackendState", "")
     status["tilkobla"] = backend_state == "Running"
 
-    # Eigen node-info
-    self_node = data.get("Self", {})
+    # Eigen node-info (kan vere None viss ikkje autentisert)
+    self_node = data.get("Self") or {}
     dns_name = self_node.get("DNSName", "")
     status["hostname"] = dns_name.rstrip(".").split(".")[0] if dns_name else ""
 
-    # Tailnet-namn
-    current_tailnet = data.get("CurrentTailnet", {})
+    # Tailnet-namn (kan vere None viss ikkje autentisert)
+    current_tailnet = data.get("CurrentTailnet") or {}
     status["tailnet"] = current_tailnet.get("Name", "")
 
     # Eigen IP
