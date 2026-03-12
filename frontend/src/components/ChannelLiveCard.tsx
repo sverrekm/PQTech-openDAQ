@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import { hentSynlegeKanalar } from '../pages/HubPage'
 import SparklineChart from './SparklineChart'
+import { useI18n } from '../i18n'
 
 interface Props {
   kanalar: KanalKonfig[] | null
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, loading = false, hubKanalar }: Props) {
+  const { t } = useI18n()
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
   const hubSparkRef = useRef<Map<string, number[]>>(new Map())
 
@@ -47,16 +49,16 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Kanalar - Live</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Channels - Live')}</h2>
       <table className="w-full border-collapse text-sm mt-3">
         <thead>
           <tr>
             <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 30 }}>#</th>
-            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">Namn</th>
-            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 55 }}>Eining</th>
-            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 45 }}>Aktiv</th>
-            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 100 }}>Verdi</th>
-            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 80 }}>Trend</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">{t('Name')}</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 55 }}>{t('Unit')}</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 45 }}>{t('Active')}</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 100 }}>{t('Value')}</th>
+            <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 80 }}>{t('Trend')}</th>
           </tr>
         </thead>
         <tbody>
@@ -84,7 +86,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
                 <td className="px-1 py-1 border-b border-gray-100 align-middle">{k.enhet}</td>
                 <td className="px-1 py-1 border-b border-gray-100 align-middle">
                   <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${k.aktiv ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
-                    {k.aktiv ? 'Ja' : 'Nei'}
+                    {k.aktiv ? t('Yes') : t('No')}
                   </span>
                 </td>
                 <td className="font-mono text-sm text-right px-1 py-1 border-b border-gray-100 align-middle" style={{ color: cv?.color || '#6b6b6b' }}>
@@ -123,7 +125,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
                 <td className="px-1 py-1 border-b border-gray-100 align-middle">{info.enhet || '-'}</td>
                 <td className="px-1 py-1 border-b border-gray-100 align-middle">
                   <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${info.verdi !== null ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                    {info.verdi !== null ? 'Ja' : 'Ventar'}
+                    {info.verdi !== null ? t('Yes') : t('Waiting')}
                   </span>
                 </td>
                 <td className="font-mono text-sm text-right px-1 py-1 border-b border-gray-100 align-middle" style={{ color: '#8b5cf6' }}>
@@ -165,7 +167,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
                   <td className="px-1 py-1 border-b border-gray-100 align-middle">{k.eining || '-'}</td>
                   <td className="px-1 py-1 border-b border-gray-100 align-middle">
                     <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${k.verdi !== null ? 'bg-teal-100 text-teal-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                      {k.verdi !== null ? 'Ja' : 'Ventar'}
+                      {k.verdi !== null ? t('Yes') : t('Waiting')}
                     </span>
                   </td>
                   <td className="font-mono text-sm text-right px-1 py-1 border-b border-gray-100 align-middle" style={{ color: '#0d9488' }}>

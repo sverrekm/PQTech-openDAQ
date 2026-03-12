@@ -1,5 +1,6 @@
 import { loggUt } from '../api/auth'
 import StatusBadge from './StatusBadge'
+import { useI18n } from '../i18n'
 
 interface Props {
   serverOk: boolean
@@ -8,6 +9,8 @@ interface Props {
 }
 
 export default function Header({ serverOk, loading, onLogout }: Props) {
+  const { t } = useI18n()
+
   const handleLogout = async () => {
     await loggUt()
     onLogout?.()
@@ -25,7 +28,7 @@ export default function Header({ serverOk, loading, onLogout }: Props) {
             onClick={handleLogout}
             className="text-sm text-gray-400 hover:text-white border border-gray-600 hover:border-gray-400 rounded px-3 py-1 transition-colors"
           >
-            Logg ut
+            {t('Log out')}
           </button>
         )}
       </div>

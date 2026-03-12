@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { fetchMqttKonfig, oppdaterMqttKonfig, fetchMqttStatus } from '../api/mqtt'
 import type { MqttKonfig, MqttKanalKonfig, MqttStatus } from '../api/types'
+import { useI18n } from '../i18n'
 
 const TOM_KANAL: MqttKanalKonfig = {
   topic: '',
@@ -25,13 +26,13 @@ const TOM_KONFIG: MqttKonfig = {
 }
 
 export default function MqttSettingsCard() {
+  const { t } = useI18n()
   const [konfig, setKonfig] = useState<MqttKonfig>(TOM_KONFIG)
   const [lasta, setLasta] = useState(false)
   const [lagrar, setLagrar] = useState(false)
   const [melding, setMelding] = useState<string | null>(null)
   const [feil, setFeil] = useState<string | null>(null)
 
-  // Hent konfig ved oppstart
   useEffect(() => {
     fetchMqttKonfig()
       .then((k) => {
@@ -44,7 +45,6 @@ export default function MqttSettingsCard() {
       })
   }, [])
 
-  // Poll status
   const statusFetcher = useCallback(() => fetchMqttStatus(), [])
   const { data: status } = usePolling<MqttStatus>(statusFetcher, 3000)
 
@@ -103,20 +103,19 @@ export default function MqttSettingsCard() {
   if (!lasta) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-        <h2 className="text-base font-semibold text-gray-900 mb-3">MQTT-kanalar</h2>
-        <p className="text-sm text-gray-500">Lastar...</p>
+        <h2 className="text-base font-semibold text-gray-900 mb-3">{t('MQTT channels')}</h2>
+        <p className="text-sm text-gray-500">{t('Loading...')}</p>
       </div>
     )
   }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-base font-semibold text-gray-900 mb-1">MQTT-kanalar</h2>
+      <h2 className="text-base font-semibold text-gray-900 mb-1">{t('MQTT channels')}</h2>
       <p className="text-xs text-gray-500 mb-4">
-        Abonner på MQTT-topics og vis dei som ekstra kanalar i systemet.
+        {t('Subscribe to MQTT topics and display them as extra channels in the system.')}
       </p>
 
-      {/* Status-badge */}
       {status && (
         <div className="flex items-center gap-2 mb-4 text-xs">
           <span
@@ -130,20 +129,19 @@ export default function MqttSettingsCard() {
           />
           <span className="text-gray-600">
             {status.tilkobla
-              ? `Tilkobla (${status.meldingar_motteke} meldingar)`
+              ? `${t('Connected')} (${status.meldingar_motteke} ${t('messages')})`
               : status.aktivert
-                ? status.feil || 'Koplar til...'
-                : 'Deaktivert'}
+                ? status.feil || t('Connecting to broker...')
+                : t('Disabled')}
           </span>
         </div>
       )}
 
-      {/* Broker-innstillingar */}
       <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-        <h3 className="text-sm font-medium text-gray-700 mb-2">Broker-tilkobling</h3>
+        <h3 className="text-sm font-medium text-gray-700 mb-2">{t('Broker connection')}</h3>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Host / IP</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('Host / IP')}</label>
             <input
               type="text"
               className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] focus:border-[#D76428] outline-none"
@@ -153,7 +151,7 @@ export default function MqttSettingsCard() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Port</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('Port')}</label>
             <input
               type="number"
               className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] focus:border-[#D76428] outline-none"
@@ -162,23 +160,23 @@ export default function MqttSettingsCard() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Brukarnavn</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('Username')}</label>
             <input
               type="text"
               className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] focus:border-[#D76428] outline-none"
               value={konfig.broker.brukarnavn}
               onChange={(e) => oppdaterBroker('brukarnavn', e.target.value)}
-              placeholder="(valfritt)"
+              placeholder={t('(optional)')}
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Passord</label>
+            <label className="block text-xs text-gray-500 mb-1">{t('Password')}</label>
             <input
               type="password"
               className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] focus:border-[#D76428] outline-none"
               value={konfig.broker.passord}
               onChange={(e) => oppdaterBroker('passord', e.target.value)}
-              placeholder="(valfritt)"
+              placeholder={t('(optional)')}
             />
           </div>
         </div>
@@ -190,28 +188,27 @@ export default function MqttSettingsCard() {
               checked={konfig.broker.aktivert}
               onChange={(e) => oppdaterBroker('aktivert', e.target.checked)}
             />
-            Aktiver MQTT
+            {t('Enable MQTT')}
           </label>
         </div>
       </div>
 
-      {/* Kanal-tabell */}
       <div className="mb-3">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium text-gray-700">
-            Topics ({konfig.kanalar.length})
+            {t('Topics')} ({konfig.kanalar.length})
           </h3>
           <button
             className="px-2 py-1 text-xs bg-[#D76428] text-white rounded hover:bg-[#c05520] transition-colors"
             onClick={leggTilKanal}
           >
-            + Legg til
+            {t('+ Add')}
           </button>
         </div>
 
         {konfig.kanalar.length === 0 ? (
           <p className="text-xs text-gray-400 italic">
-            Ingen topics konfigurert. Klikk &quot;Legg til&quot; for aa starte.
+            {t('No topics configured. Click "Add" to start.')}
           </p>
         ) : (
           <div className="space-y-2">
@@ -222,38 +219,38 @@ export default function MqttSettingsCard() {
               >
                 <div className="grid grid-cols-[1fr_1fr_auto] gap-2 mb-1">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-0.5">Topic</label>
+                    <label className="block text-xs text-gray-500 mb-0.5">{t('Topic')}</label>
                     <input
                       type="text"
                       className="block w-full rounded border border-gray-300 px-2 py-1 text-xs focus:ring-1 focus:ring-[#D76428] outline-none"
                       value={k.topic}
                       onChange={(e) => oppdaterKanal(i, 'topic', e.target.value)}
-                      placeholder="sensor/temperatur"
+                      placeholder="sensor/temperature"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-0.5">Namn</label>
+                    <label className="block text-xs text-gray-500 mb-0.5">{t('Name')}</label>
                     <input
                       type="text"
                       className="block w-full rounded border border-gray-300 px-2 py-1 text-xs focus:ring-1 focus:ring-[#D76428] outline-none"
                       value={k.namn}
                       onChange={(e) => oppdaterKanal(i, 'namn', e.target.value)}
-                      placeholder="Temperatur"
+                      placeholder="Temperature"
                     />
                   </div>
                   <div className="flex items-end">
                     <button
                       className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
                       onClick={() => fjernKanal(i)}
-                      title="Fjern"
+                      title={t('Remove')}
                     >
-                      Fjern
+                      {t('Remove')}
                     </button>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-0.5">Eining</label>
+                    <label className="block text-xs text-gray-500 mb-0.5">{t('Unit')}</label>
                     <input
                       type="text"
                       className="block w-full rounded border border-gray-300 px-2 py-1 text-xs focus:ring-1 focus:ring-[#D76428] outline-none"
@@ -263,18 +260,18 @@ export default function MqttSettingsCard() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-0.5">JSON-sti</label>
+                    <label className="block text-xs text-gray-500 mb-0.5">{t('JSON path')}</label>
                     <input
                       type="text"
                       className="block w-full rounded border border-gray-300 px-2 py-1 text-xs focus:ring-1 focus:ring-[#D76428] outline-none"
                       value={k.json_sti}
                       onChange={(e) => oppdaterKanal(i, 'json_sti', e.target.value)}
-                      placeholder="value (tom = heile payload)"
+                      placeholder="value"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-1">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Min</label>
+                      <label className="block text-xs text-gray-500 mb-0.5">{t('Min')}</label>
                       <input
                         type="number"
                         className="block w-full rounded border border-gray-300 px-1.5 py-1 text-xs focus:ring-1 focus:ring-[#D76428] outline-none"
@@ -283,7 +280,7 @@ export default function MqttSettingsCard() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Maks</label>
+                      <label className="block text-xs text-gray-500 mb-0.5">{t('Max')}</label>
                       <input
                         type="number"
                         className="block w-full rounded border border-gray-300 px-1.5 py-1 text-xs focus:ring-1 focus:ring-[#D76428] outline-none"
@@ -293,10 +290,9 @@ export default function MqttSettingsCard() {
                     </div>
                   </div>
                 </div>
-                {/* Live-verdi frå status */}
                 {status?.topics?.[k.topic] && (
                   <div className="mt-1 text-xs text-gray-500">
-                    Verdi:{' '}
+                    {t('Value')}:{' '}
                     <span className="font-mono font-semibold text-gray-800">
                       {status.topics[k.topic].verdi !== null
                         ? `${status.topics[k.topic].verdi} ${k.enhet}`
@@ -310,7 +306,6 @@ export default function MqttSettingsCard() {
         )}
       </div>
 
-      {/* Meldingar */}
       {melding && (
         <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded text-xs text-green-800">
           {melding}
@@ -322,13 +317,12 @@ export default function MqttSettingsCard() {
         </div>
       )}
 
-      {/* Lagre-knapp */}
       <button
         className="w-full py-2 bg-[#D76428] text-white text-sm font-medium rounded-lg hover:bg-[#c05520] disabled:opacity-50 transition-colors"
         onClick={lagre}
         disabled={lagrar}
       >
-        {lagrar ? 'Lagrar...' : 'Lagre MQTT-konfig'}
+        {lagrar ? t('Saving...') : t('Save MQTT config')}
       </button>
     </div>
   )

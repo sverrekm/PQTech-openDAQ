@@ -1,8 +1,10 @@
 import { useCallback, useRef, useEffect } from 'react'
 import { fetchLogg } from '../api/logg'
 import { usePolling } from '../hooks/usePolling'
+import { useI18n } from '../i18n'
 
 export default function LogViewer() {
+  const { t } = useI18n()
   const fetcher = useCallback(() => fetchLogg(200), [])
   const { data, loading } = usePolling(fetcher, 5000)
   const preRef = useRef<HTMLPreElement>(null)
@@ -17,7 +19,7 @@ export default function LogViewer() {
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Logg</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Log')}</h2>
       {loading && !data ? (
         <div className="flex justify-center items-center h-24">
           <svg className="animate-spin h-6 w-6 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -29,7 +31,7 @@ export default function LogViewer() {
         <p className="text-gray-500 text-sm">{data.feil}</p>
       ) : (
         <pre ref={preRef} className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-xs text-green-400 max-h-72 overflow-y-auto whitespace-pre-wrap font-mono">
-          {lines.length > 0 ? lines.join('\n') : '(ingen logg-data)'}
+          {lines.length > 0 ? lines.join('\n') : t('(no log data)')}
         </pre>
       )}
     </div>

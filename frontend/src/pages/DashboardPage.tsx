@@ -5,7 +5,6 @@ import ChannelLiveCard from '../components/ChannelLiveCard'
 import OpenDaqBridgeCard from '../components/OpenDaqBridgeCard'
 import ServerStatusCard from '../components/ServerStatusCard'
 import LogViewer from '../components/LogViewer'
-import UpdateCard from '../components/UpdateCard'
 
 interface Props {
   status: ServerStatus | null
@@ -15,18 +14,18 @@ interface Props {
   siriusTilkoblet: boolean
   onChannelClick: (index: number) => void
   hubKanalar?: HubKanal[]
+  isHubMode?: boolean
 }
 
-export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, hubKanalar }: Props) {
+export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, hubKanalar, isHubMode }: Props) {
   return (
     <>
-      <SiriusStatusCard />
-      <UsbIpCard ip={status?.ip || '-'} />
+      {!isHubMode && <SiriusStatusCard />}
+      {!isHubMode && <UsbIpCard ip={status?.ip || '-'} />}
       <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} hubKanalar={hubKanalar} />
-      <OpenDaqBridgeCard />
+      {!isHubMode && <OpenDaqBridgeCard />}
       <ServerStatusCard status={status} />
       <LogViewer />
-      <UpdateCard />
     </>
   )
 }

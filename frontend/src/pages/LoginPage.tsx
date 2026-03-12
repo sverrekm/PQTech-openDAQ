@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { loggInn } from '../api/auth'
+import { useI18n } from '../i18n'
 
 interface Props {
   onLogin: () => void
 }
 
 export default function LoginPage({ onLogin }: Props) {
+  const { t } = useI18n()
   const [brukarnavn, setBrukarnavn] = useState('')
   const [passord, setPassord] = useState('')
   const [feil, setFeil] = useState('')
@@ -20,10 +22,10 @@ export default function LoginPage({ onLogin }: Props) {
       if (res.suksess) {
         onLogin()
       } else {
-        setFeil(res.melding || 'Feil brukarnavn eller passord')
+        setFeil(res.melding || t('Wrong username or password'))
       }
     } catch {
-      setFeil('Kunne ikkje kontakte serveren')
+      setFeil(t('Could not contact the server'))
     } finally {
       setLoading(false)
     }
@@ -38,7 +40,7 @@ export default function LoginPage({ onLogin }: Props) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Brukarnavn</label>
+            <label className="block text-sm text-gray-400 mb-1">{t('Username')}</label>
             <input
               type="text"
               value={brukarnavn}
@@ -49,7 +51,7 @@ export default function LoginPage({ onLogin }: Props) {
           </div>
 
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Passord</label>
+            <label className="block text-sm text-gray-400 mb-1">{t('Password')}</label>
             <input
               type="password"
               value={passord}
@@ -67,7 +69,7 @@ export default function LoginPage({ onLogin }: Props) {
             disabled={loading || !brukarnavn || !passord}
             className="w-full bg-[#D76428] hover:bg-[#c05520] disabled:opacity-50 text-white font-medium py-2 rounded transition-colors"
           >
-            {loading ? 'Loggar inn...' : 'Logg inn'}
+            {loading ? t('Logging in...') : t('Log in')}
           </button>
         </form>
       </div>

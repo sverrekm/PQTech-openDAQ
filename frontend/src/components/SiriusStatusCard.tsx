@@ -2,8 +2,10 @@ import { useState, useCallback } from 'react'
 import { fetchSiriusStatus, siriusStart, siriusStopp, siriusRekoble } from '../api/sirius'
 import { usePolling } from '../hooks/usePolling'
 import InfoGrid from './InfoGrid'
+import { useI18n } from '../i18n'
 
 export default function SiriusStatusCard() {
+  const { t } = useI18n()
   const fetcher = useCallback(() => fetchSiriusStatus(), [])
   const { data: s, refresh, loading } = usePolling(fetcher, 3000)
   const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
@@ -36,21 +38,21 @@ export default function SiriusStatusCard() {
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Direkte USB-tilkobling</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Direct USB connection')}</h2>
       <InfoGrid items={[
         {
-          label: 'Tilkobling',
-          value: s.tilkoblet ? 'Tilkoblet (USB)' : 'Frakoblet',
+          label: t('Connection'),
+          value: s.tilkoblet ? t('Connected (USB)') : t('Disconnected'),
           color: s.tilkoblet ? '#10b981' : '#ef4444',
         },
-        { label: 'Serienummer', value: s.serienummer || '-' },
+        { label: t('Serial number'), value: s.serienummer || '-' },
         {
-          label: 'Datastraum',
-          value: s.streamer ? 'Aktiv' : 'Inaktiv',
+          label: t('Data stream'),
+          value: s.streamer ? t('Active') : t('Inactive'),
           color: s.streamer ? '#10b981' : '#6b6b6b',
         },
         {
-          label: 'Datarate',
+          label: t('Data rate'),
           value: s.data_rate_kbs && s.data_rate_kbs > 0
             ? `${s.data_rate_kbs.toFixed(1)} KB/s`
             : '-',
@@ -63,7 +65,7 @@ export default function SiriusStatusCard() {
               key={slot.kanal}
               className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${slot.aktiv ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}
             >
-              Slot {slot.kanal}{slot.aktiv ? '' : ' (inaktiv)'}
+              {t('Slot')} {slot.kanal}{slot.aktiv ? '' : ` ${t('(inactive)')}`}
             </span>
           ))}
         </div>
@@ -71,16 +73,16 @@ export default function SiriusStatusCard() {
       <div className="flex gap-2 mt-3">
         {!s.streamer && (
           <button className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy} onClick={() => action(siriusStart)}>
-            Start
+            {t('Start')}
           </button>
         )}
         {s.streamer && (
           <button className="bg-red-100 hover:bg-red-200 text-red-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy} onClick={() => action(siriusStopp)}>
-            Stopp
+            {t('Stop')}
           </button>
         )}
         <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy} onClick={() => action(siriusRekoble)}>
-          Rekoble
+          {t('Reconnect')}
         </button>
       </div>
       {melding && (

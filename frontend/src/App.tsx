@@ -3,9 +3,10 @@ import { fetchStatus } from './api/status'
 import { fetchKanalar, fetchKanalLive } from './api/kanalar'
 import { fetchMqttStatus } from './api/mqtt'
 import { fetchSiriusStatus } from './api/sirius'
-import { fetchHubKanalar } from './api/hub'
+import { fetchHubKanalar, fetchHubStatus } from './api/hub'
 import { sjekkAuth } from './api/auth'
 import { usePolling } from './hooks/usePolling'
+import { useI18n } from './i18n'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import type { View } from './components/Sidebar'
@@ -13,6 +14,7 @@ import DashboardPage from './pages/DashboardPage'
 import SettingsPage from './pages/SettingsPage'
 import ChannelPage from './pages/ChannelPage'
 import HubPage from './pages/HubPage'
+import AdminPage from './pages/AdminPage'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 
@@ -45,6 +47,7 @@ export default function App() {
 }
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
+  const { t } = useI18n()
   const [view, setView] = useState<View>({ page: 'dashboard' })
 
   const statusFetcher = useCallback(() => fetchStatus(), [])
@@ -66,6 +69,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const { data: hubKanalData } = usePolling(hubKanalFetcher, 3000)
   const hubKanalar = hubKanalData?.kanalar ?? []
 
+  // Hub-mode detection
+  const hubStatusFetcher = useCallback(() => fetchHubStatus(), [])
+  const { data: hubStatusData } = usePolling(hubStatusFetcher, 5000)
+  const isHubMode = hubStatusData?.aktiv !== false
+
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
   }
@@ -81,16 +89,18 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          Laster data...
+          {t('Loading data...')}
         </div>
       </div>
     )
   } else if (view.page === 'hub') {
     content = <HubPage />
   } else if (view.page === 'dashboard') {
-    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} hubKanalar={hubKanalar} />
+    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} hubKanalar={hubKanalar} isHubMode={isHubMode} />
   } else if (view.page === 'settings') {
     content = <SettingsPage />
+  } else if (view.page === 'admin') {
+    content = <AdminPage />
   } else {
     content = <ChannelPage index={view.index} kanalar={kanalar ?? []} liveData={liveData} onBack={() => setView({ page: 'dashboard' })} />
   }

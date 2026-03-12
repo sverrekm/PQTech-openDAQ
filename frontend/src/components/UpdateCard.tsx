@@ -3,14 +3,18 @@ import { usePolling } from '../hooks/usePolling'
 import { fetchVersjon, sjekkOppdatering, utfoerOppdatering } from '../api/system'
 import type { OppdateringSjekk } from '../api/types'
 import InfoGrid from './InfoGrid'
+import { useI18n } from '../i18n'
 
 export default function UpdateCard() {
+  const { t, lang } = useI18n()
   const fetcher = useCallback(() => fetchVersjon(), [])
   const { data: versjon, loading } = usePolling(fetcher, 30000)
   const [sjekk, setSjekk] = useState<OppdateringSjekk | null>(null)
   const [busy, setBusy] = useState(false)
   const [restartar, setRestartar] = useState(false)
   const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
+
+  const locale = lang === 'nb' ? 'nb-NO' : 'en-US'
 
   const handleSjekk = async () => {
     setBusy(true)
@@ -22,7 +26,7 @@ export default function UpdateCard() {
       } else {
         setSjekk(res)
         if (!res.oppdatering_tilgjengeleg) {
-          setMelding({ text: 'Allereie oppdatert', ok: true })
+          setMelding({ text: t('Already up to date'), ok: true })
         }
       }
     } catch (e) {
@@ -32,16 +36,16 @@ export default function UpdateCard() {
   }
 
   const handleOppdater = async () => {
-    if (!confirm('Er du sikker på at du vil oppdatere? Konteineren vil restarte.')) return
+    if (!confirm(t('Are you sure you want to update? The container will restart.'))) return
     setBusy(true)
     setMelding(null)
     try {
       const res = await utfoerOppdatering()
       if (res.suksess) {
-        setMelding({ text: `Oppdatert til ${res.versjon} — ${res.oppdaterte_filer?.length ?? 0} filer. Restartar...`, ok: true })
+        setMelding({ text: `${res.versjon} — ${res.oppdaterte_filer?.length ?? 0} ${t('files')}. ${t('Restart')}...`, ok: true })
         setRestartar(true)
       } else {
-        setMelding({ text: res.feil || 'Oppdatering feila', ok: false })
+        setMelding({ text: res.feil || t('Update failed'), ok: false })
       }
     } catch (e) {
       setMelding({ text: String(e), ok: false })
@@ -63,13 +67,13 @@ export default function UpdateCard() {
   if (restartar) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
-        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">Oppdatering</h2>
+        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Update')}</h2>
         <div className="flex items-center gap-3 py-4">
           <svg className="animate-spin h-6 w-6 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          <span className="text-sm text-gray-700">Konteineren restartar med oppdaterte filer...</span>
+          <span className="text-sm text-gray-700">{t('The container is restarting with updated files...')}</span>
         </div>
       </div>
     )
@@ -78,32 +82,32 @@ export default function UpdateCard() {
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Oppdatering</h2>
+        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{t('Update')}</h2>
         {sjekk && (
           <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
             sjekk.oppdatering_tilgjengeleg
               ? 'bg-orange-100 text-orange-800'
               : 'bg-green-100 text-green-800'
           }`}>
-            {sjekk.oppdatering_tilgjengeleg ? 'Ny versjon tilgjengeleg' : 'Oppdatert'}
+            {sjekk.oppdatering_tilgjengeleg ? t('New version available') : t('Up to date')}
           </span>
         )}
       </div>
 
       <InfoGrid items={[
-        { label: 'Versjon', value: versjon?.sha || 'ukjend' },
-        { label: 'Siste commit', value: versjon?.melding || '-' },
-        { label: 'Dato', value: versjon?.dato ? new Date(versjon.dato).toLocaleString('nb-NO') : '-' },
+        { label: t('Version'), value: versjon?.sha || t('unknown') },
+        { label: t('Latest commit'), value: versjon?.melding || '-' },
+        { label: t('Date'), value: versjon?.dato ? new Date(versjon.dato).toLocaleString(locale) : '-' },
       ]} />
 
       {sjekk?.oppdatering_tilgjengeleg && sjekk.github && (
         <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm">
-          <div className="font-medium text-orange-800 mb-1">Ny versjon på GitHub:</div>
+          <div className="font-medium text-orange-800 mb-1">{t('New version on GitHub:')}</div>
           <div className="text-orange-700">
             <span className="font-mono">{sjekk.github.sha}</span> — {sjekk.github.melding}
           </div>
           <div className="text-orange-600 text-xs mt-1">
-            {sjekk.github.forfattar} · {new Date(sjekk.github.dato).toLocaleString('nb-NO')}
+            {sjekk.github.forfattar} · {new Date(sjekk.github.dato).toLocaleString(locale)}
           </div>
         </div>
       )}
@@ -114,7 +118,7 @@ export default function UpdateCard() {
           disabled={busy}
           onClick={handleSjekk}
         >
-          Sjekk oppdatering
+          {t('Check for update')}
         </button>
         {sjekk?.oppdatering_tilgjengeleg && (
           <button
@@ -122,7 +126,7 @@ export default function UpdateCard() {
             disabled={busy}
             onClick={handleOppdater}
           >
-            Oppdater no
+            {t('Update now')}
           </button>
         )}
       </div>

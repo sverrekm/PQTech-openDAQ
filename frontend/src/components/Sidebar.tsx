@@ -3,12 +3,14 @@ import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import { fetchHubStatus } from '../api/hub'
 import { hentSynlegeKanalar } from '../pages/HubPage'
 import { usePolling } from '../hooks/usePolling'
+import { useI18n } from '../i18n'
 
 export type View =
   | { page: 'dashboard' }
   | { page: 'settings' }
   | { page: 'channel'; index: number }
   | { page: 'hub' }
+  | { page: 'admin' }
 
 interface Props {
   view: View
@@ -20,6 +22,8 @@ interface Props {
 }
 
 export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus, hubKanalar }: Props) {
+  const { t } = useI18n()
+
   const hasData = (idx: number): boolean => {
     if (!liveData) return false
     const key = `kanal_${idx}`
@@ -45,25 +49,31 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
           className={`${baseNavItemClass} ${view.page === 'dashboard' ? activeNavItemClass : inactiveNavItemClass}`}
           onClick={() => onNavigate({ page: 'dashboard' })}
         >
-          Oversikt
+          {t('Dashboard')}
         </div>
         <div
           className={`${baseNavItemClass} ${view.page === 'hub' ? activeNavItemClass : inactiveNavItemClass}`}
           onClick={() => onNavigate({ page: 'hub' })}
         >
-          Hub
+          {t('Hub')}
         </div>
         <div
           className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}
           onClick={() => onNavigate({ page: 'settings' })}
         >
-          Innstillingar
+          {t('Settings')}
+        </div>
+        <div
+          className={`${baseNavItemClass} ${view.page === 'admin' ? activeNavItemClass : inactiveNavItemClass}`}
+          onClick={() => onNavigate({ page: 'admin' })}
+        >
+          {t('Admin')}
         </div>
       </div>
 
       {aktiveKanalar.length > 0 && (
         <>
-          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">Kanalar</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">{t('Channels')}</div>
           {aktiveKanalar.map(k => (
             <div
               key={k.indeks}
@@ -79,7 +89,7 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
 
       {mqttStatus?.aktivert && mqttStatus.topics && Object.keys(mqttStatus.topics).length > 0 && (
         <>
-          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">MQTT</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">{t('MQTT')}</div>
           {Object.entries(mqttStatus.topics).map(([topic, info]) => (
             <div
               key={topic}
@@ -97,16 +107,14 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
         </>
       )}
 
-      {/* Hub-kanalar (dei som er markerte som synlege i HubPage) */}
       <HubKanalListe kanalar={hubKanalar} />
-
-      {/* Hub-nodar i sidepanelet (viss det finst konfigurerte nodar) */}
       <HubNodeList />
     </nav>
   )
 }
 
 function HubKanalListe({ kanalar }: { kanalar?: HubKanal[] }) {
+  const { t } = useI18n()
   const synlege = hentSynlegeKanalar()
   const synlegeKanalar = (kanalar ?? []).filter(k => synlege.has(`${k.node_id}:${k.namn}`))
 
@@ -117,7 +125,7 @@ function HubKanalListe({ kanalar }: { kanalar?: HubKanal[] }) {
 
   return (
     <>
-      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">Hub-kanalar</div>
+      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">{t('Hub channels')}</div>
       {synlegeKanalar.map(k => (
         <div
           key={`${k.node_id}:${k.namn}`}
@@ -137,6 +145,7 @@ function HubKanalListe({ kanalar }: { kanalar?: HubKanal[] }) {
 }
 
 function HubNodeList() {
+  const { t } = useI18n()
   const hubFetcher = useCallback(() => fetchHubStatus(), [])
   const { data: hub } = usePolling(hubFetcher, 5000)
 
@@ -147,7 +156,7 @@ function HubNodeList() {
 
   return (
     <>
-      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">Hub-nodar</div>
+      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 pt-4 pb-1 px-4">{t('Hub nodes')}</div>
       {hub.nodar.map(node => (
         <div
           key={node.id}

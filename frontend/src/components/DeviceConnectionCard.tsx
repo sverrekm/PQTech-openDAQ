@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { apiGet, apiPost } from '../api/client'
 import type { Enhet, ActionResult } from '../api/types'
+import { useI18n } from '../i18n'
 
 export default function DeviceConnectionCard() {
+  const { t } = useI18n()
   const [input, setInput] = useState('')
   const [enheter, setEnheter] = useState<Enhet[]>([])
   const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
@@ -15,32 +17,32 @@ export default function DeviceConnectionCard() {
     try {
       const data = await apiGet<{ enheter: Enhet[] }>('/api/enheter')
       setEnheter(data.enheter || [])
-    } catch (e) {
-      setMelding({ text: 'Feil ved søk', ok: false })
+    } catch {
+      setMelding({ text: t('Error searching'), ok: false })
     }
     setSoker(false)
   }
 
   const kobleTil = async (tilkobling?: string) => {
-    const t = tilkobling || input.trim()
-    if (!t) {
-      setMelding({ text: 'Skriv inn ei tilkoplingsstreng', ok: false })
+    const conn = tilkobling || input.trim()
+    if (!conn) {
+      setMelding({ text: t('Enter a connection string'), ok: false })
       return
     }
     setKobler(true)
     setMelding(null)
     try {
-      const res = await apiPost<ActionResult>('/api/koble-til', { tilkobling: t })
+      const res = await apiPost<ActionResult>('/api/koble-til', { tilkobling: conn })
       setMelding({ text: res.melding, ok: res.suksess })
     } catch (e) {
-      setMelding({ text: 'Nettverksfeil: ' + String(e), ok: false })
+      setMelding({ text: t('Network error: ') + String(e), ok: false })
     }
     setKobler(false)
   }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Koble til enhet</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Connect to device')}</h2>
       <div className="flex gap-2 mt-3">
         <input
           type="text"
@@ -51,10 +53,10 @@ export default function DeviceConnectionCard() {
           onKeyDown={e => e.key === 'Enter' && kobleTil()}
         />
         <button className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={kobler} onClick={() => kobleTil()}>
-          {kobler ? 'Kobler...' : 'Koble til'}
+          {kobler ? t('Connecting...') : t('Connect')}
         </button>
         <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={soker} onClick={sokEnheter}>
-          {soker ? 'Søkjer...' : 'Søk'}
+          {soker ? t('Searching devices...') : t('Search')}
         </button>
       </div>
       {melding && (
@@ -74,15 +76,15 @@ export default function DeviceConnectionCard() {
                 className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out"
                 onClick={() => { setInput(e.tilkobling); kobleTil(e.tilkobling) }}
               >
-                Koble til
+                {t('Connect')}
               </button>
             </li>
           ))}
         </ul>
       )}
       <p className="text-gray-500 text-xs mt-3">
-        Skriv inn tilkoplingsstreng eller klikk Søk for å finne einingar på nettverket.
-        Eksempel: <code className="text-orange-700">daq.opcua://IP</code>,{' '}
+        {t('Enter a connection string or click Search to find devices on the network.')}
+        {' '}{t('Example:')} <code className="text-orange-700">daq.opcua://IP</code>,{' '}
         <code className="text-orange-700">daq.ns://IP</code>,{' '}
         <code className="text-orange-700">daqref://device0</code>
       </p>

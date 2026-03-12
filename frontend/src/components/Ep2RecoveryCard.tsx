@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react'
 import { fetchSiriusStatus, siriusGjenopplivEp2 } from '../api/sirius'
 import { usePolling } from '../hooks/usePolling'
+import { useI18n } from '../i18n'
 
 export default function Ep2RecoveryCard() {
+  const { t } = useI18n()
   const fetcher = useCallback(() => fetchSiriusStatus(), [])
   const { data: s, refresh, loading } = usePolling(fetcher, 5000)
   const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
@@ -19,7 +21,6 @@ export default function Ep2RecoveryCard() {
     )
   }
 
-  // Only show when connected but EP2 is not OK
   if (!s || !s.tilgjengelig || !s.tilkoblet || s.ep2_ok !== false) return null
 
   const handle = async () => {
@@ -28,20 +29,20 @@ export default function Ep2RecoveryCard() {
       const res = await siriusGjenopplivEp2()
       setMelding({ text: res.melding, ok: res.suksess })
       refresh()
-    } catch (e) {
-      setMelding({ text: 'Nettverksfeil', ok: false })
+    } catch {
+      setMelding({ text: t('Network error'), ok: false })
     }
     setBusy(false)
   }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">EP2 Gjenoppliving</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('EP2 Recovery')}</h2>
       <p className="text-red-700 text-sm mb-3">
-        EP2 (data-endepunkt) er nede. Prøv å gjenopplive med ulike strategiar.
+        {t('EP2 (data endpoint) is down. Try to recover with different strategies.')}
       </p>
       <button className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy} onClick={handle}>
-        {busy ? 'Prøver strategiar...' : 'Gjenoppliv EP2'}
+        {busy ? t('Trying strategies...') : t('Recover EP2')}
       </button>
       {melding && (
         <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${melding.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>

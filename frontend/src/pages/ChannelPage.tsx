@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { KanalKonfig, KanalLive } from '../api/types'
+import { useI18n } from '../i18n'
 
 interface Props {
   index: number
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function ChannelPage({ index, kanalar, liveData, onBack }: Props) {
+  const { t } = useI18n()
   const kanal = kanalar.find(k => k.indeks === index)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sparkBuf = useRef<number[]>([])
@@ -47,7 +49,6 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
 
   const cv = getChannelData()
 
-  // Update sparkline buffer with instantaneous values (for trend visualization)
   useEffect(() => {
     if (cv !== null) {
       const numVal = typeof cv.value === 'number' ? cv.value : parseFloat(String(cv.value))
@@ -58,7 +59,6 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
     }
   }, [cv?.value])
 
-  // Draw sparkline
   useEffect(() => {
     const canvas = canvasRef.current
     const data = sparkBuf.current
@@ -91,12 +91,11 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
   }, [cv?.value])
 
   if (!kanal) {
-    return <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">Kanal ikkje funnen.</div>
+    return <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">{t('Channel not found.')}</div>
   }
 
-  const typeLabel = kanal.type === 'voltage' ? 'Spenning' : kanal.type === 'current' ? 'Straum' : kanal.type
+  const typeLabel = kanal.type === 'voltage' ? t('Voltage') : kanal.type === 'current' ? t('Current') : kanal.type
 
-  // Use backend-computed stats (from full 20kHz ADC batches), not sparkline buffer
   const hasBackendStats = cv && 'rms' in cv && cv.rms !== undefined
   const stats = hasBackendStats
     ? { rms: cv.rms!, topp: cv.topp!, snitt: cv.snitt! }
@@ -108,7 +107,7 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
         <div className="flex items-center gap-3 mb-4">
           {onBack && (
             <button className="text-sm text-gray-500 hover:text-[#D76428] cursor-pointer bg-transparent border-none" onClick={onBack}>
-              &#8592; Tilbake
+              &#8592; {t('Back')}
             </button>
           )}
           <div className="text-lg font-semibold text-gray-900">
@@ -125,8 +124,8 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
           {stats && (
             <div className="flex gap-4 text-sm text-gray-600">
               <div>RMS: <strong>{stats.rms.toFixed(2)} {kanal.enhet}</strong></div>
-              <div>Topp: <strong>{stats.topp.toFixed(2)} {kanal.enhet}</strong></div>
-              <div>Snitt: <strong>{stats.snitt.toFixed(2)} {kanal.enhet}</strong></div>
+              <div>{t('Peak:')}<strong> {stats.topp.toFixed(2)} {kanal.enhet}</strong></div>
+              <div>{t('Average:')}<strong> {stats.snitt.toFixed(2)} {kanal.enhet}</strong></div>
             </div>
           )}
         </div>
@@ -137,31 +136,31 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-        <h2>Konfigurasjon</h2>
+        <h2>{t('Configuration')}</h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-xs text-gray-500">Range</div>
+            <div className="text-xs text-gray-500">{t('Range')}</div>
             <div className="mt-1 font-semibold text-gray-900">{kanal.range_min} / {kanal.range_max}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-xs text-gray-500">Eining</div>
+            <div className="text-xs text-gray-500">{t('Unit')}</div>
             <div className="mt-1 font-semibold text-gray-900">{kanal.enhet}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-xs text-gray-500">Type</div>
+            <div className="text-xs text-gray-500">{t('Type')}</div>
             <div className="mt-1 font-semibold text-gray-900">{typeLabel}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-xs text-gray-500">Sample rate</div>
+            <div className="text-xs text-gray-500">{t('Sample rate')}</div>
             <div className="mt-1 font-semibold text-gray-900">{kanal.sample_rate} Hz</div>
           </div>
         </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-        <h2>Innstillingar</h2>
+        <h2>{t('Settings')}</h2>
         <div className="text-sm text-gray-500">
-          Per-kanal innstillingar — bruk Innstillingar-sida for å endre kanalkonfigurasjon.
+          {t('Channel settings — use the Settings page to change channel configuration.')}
         </div>
       </div>
     </>

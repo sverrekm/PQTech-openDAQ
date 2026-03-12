@@ -1,11 +1,13 @@
 import { Fragment, useState, useEffect, useCallback } from 'react'
 import { fetchKanalar, oppdaterKanalar, resetKanalar } from '../api/kanalar'
 import type { KanalKonfig } from '../api/types'
+import { useI18n } from '../i18n'
 
 const GYLDIGE_TYPAR = ['voltage', 'current', 'acceleration', 'temperature', 'generic']
 const GYLDIGE_EINHEITAR = ['V', 'A', 'm/s\u00b2', '\u00b0C', 'mV', 'mA', '']
 
 export default function ChannelConfigCard() {
+  const { t } = useI18n()
   const [kanalar, setKanalar] = useState<KanalKonfig[]>([])
   const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
   const [opnaSensor, setOpnaSensor] = useState<Set<number>>(new Set())
@@ -15,7 +17,7 @@ export default function ChannelConfigCard() {
       const data = await fetchKanalar()
       setKanalar(data)
     } catch (e) {
-      console.error('Kanal-konfig feil:', e)
+      console.error('Channel config error:', e)
     }
   }, [])
 
@@ -37,7 +39,7 @@ export default function ChannelConfigCard() {
   }
 
   const lagre = async () => {
-    setMelding({ text: 'Lagrar...', ok: true })
+    setMelding({ text: t('Saving...'), ok: true })
     try {
       const res = await oppdaterKanalar(kanalar)
       setMelding({ text: res.melding, ok: res.suksess })
@@ -48,7 +50,7 @@ export default function ChannelConfigCard() {
   }
 
   const tilbakestill = async () => {
-    setMelding({ text: 'Tilbakestiller...', ok: true })
+    setMelding({ text: t('Resetting...'), ok: true })
     try {
       const res = await resetKanalar()
       setMelding({ text: res.melding, ok: res.suksess })
@@ -58,7 +60,6 @@ export default function ChannelConfigCard() {
     }
   }
 
-  // Berekn slope for visning
   const sensorSlope = (k: KanalKonfig) => {
     if (k.sensor_inn_2 === k.sensor_inn_1) return 0
     return (k.sensor_ut_2 - k.sensor_inn_1) / (k.sensor_inn_2 - k.sensor_inn_1)
@@ -66,20 +67,20 @@ export default function ChannelConfigCard() {
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">Kanal-konfigurasjon</h2>
+      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Channel configuration')}</h2>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8">#</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">Namn</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Type</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">Min</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">Maks</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Eining</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Sensor</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Exc.</th>
-              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">Aktiv</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">{t('Name')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">{t('Type')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">{t('Min')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">{t('Max')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">{t('Unit')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">{t('Sensor')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">{t('Exc.')}</th>
+              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">{t('Active')}</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -131,7 +132,7 @@ export default function ChannelConfigCard() {
                       className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50"
                     >
                       {GYLDIGE_EINHEITAR.map(e => (
-                        <option key={e} value={e}>{e || '(ingen)'}</option>
+                        <option key={e} value={e}>{e || '(none)'}</option>
                       ))}
                     </select>
                   </td>
@@ -139,19 +140,18 @@ export default function ChannelConfigCard() {
                     <button
                       className={`px-2 py-1 rounded-md text-xs font-medium transition-colors duration-150 ease-in-out ${k.sensor_aktiv ? 'bg-orange-100 text-orange-800 hover:bg-orange-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                       onClick={() => toggleSensorPanel(i)}
-                      title={k.sensor_aktiv ? `${k.sensor_namn || 'Sensor'} (${sensorSlope(k)} ${k.sensor_enhet}/V)` : 'Ingen sensor'}
+                      title={k.sensor_aktiv ? `${k.sensor_namn || t('Sensor')} (${sensorSlope(k)} ${k.sensor_enhet}/V)` : t('Off')}
                     >
-                      {k.sensor_aktiv ? k.sensor_enhet || 'On' : 'Av'}
+                      {k.sensor_aktiv ? k.sensor_enhet || 'On' : t('Off')}
                     </button>
                   </td>
                   <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-900">
                     <select
                       value={k.excitation_v}
                       onChange={e => oppdater(i, 'excitation_v', parseFloat(e.target.value))}
-                      title="Excitation-spenning til integrator"
                       className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50"
                     >
-                      <option value={0}>Av</option>
+                      <option value={0}>{t('Off')}</option>
                       <option value={5}>5 V</option>
                     </select>
                   </td>
@@ -181,7 +181,7 @@ export default function ChannelConfigCard() {
                             />
                             <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#D76428] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#D76428]" />
                           </label>
-                          <span className="text-sm font-semibold text-gray-600 uppercase tracking-wider">Sensor-skalering</span>
+                          <span className="text-sm font-semibold text-gray-600 uppercase tracking-wider">{t('Sensor scaling')}</span>
                           {k.sensor_aktiv && (
                             <span className="text-xs font-mono text-[#D76428] ml-auto">
                               slope = {sensorSlope(k).toFixed(2)} {k.sensor_enhet}/V
@@ -192,7 +192,7 @@ export default function ChannelConfigCard() {
                           <div className="flex flex-wrap gap-3 items-start">
                             <div className="flex flex-col gap-3">
                               <label className="block">
-                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Sensor-namn</span>
+                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">{t('Sensor name')}</span>
                                 <input
                                   type="text"
                                   value={k.sensor_namn}
@@ -202,7 +202,7 @@ export default function ChannelConfigCard() {
                                 />
                               </label>
                               <label className="block">
-                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Eining ut</span>
+                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">{t('Unit out')}</span>
                                 <input
                                   type="text"
                                   value={k.sensor_enhet}
@@ -213,54 +213,30 @@ export default function ChannelConfigCard() {
                               </label>
                             </div>
                             <div className="flex items-end gap-2">
-                              <div className="text-sm font-semibold text-gray-800 self-center w-12">Punkt 1</div>
+                              <div className="text-sm font-semibold text-gray-800 self-center w-12">{t('Point 1')}</div>
                               <label className="block">
-                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Inn (V)</span>
-                                <input
-                                  type="number"
-                                  value={k.sensor_inn_1}
-                                  onChange={e => oppdater(i, 'sensor_inn_1', parseFloat(e.target.value) || 0)}
-                                  step="any"
-                                  className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50"
-                                />
+                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">{t('In (V)')}</span>
+                                <input type="number" value={k.sensor_inn_1} onChange={e => oppdater(i, 'sensor_inn_1', parseFloat(e.target.value) || 0)} step="any" className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50" />
                               </label>
                               <label className="block">
-                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Ut ({k.sensor_enhet || '?'})</span>
-                                <input
-                                  type="number"
-                                  value={k.sensor_ut_1}
-                                  onChange={e => oppdater(i, 'sensor_ut_1', parseFloat(e.target.value) || 0)}
-                                  step="any"
-                                  className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50"
-                                />
+                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Out ({k.sensor_enhet || '?'})</span>
+                                <input type="number" value={k.sensor_ut_1} onChange={e => oppdater(i, 'sensor_ut_1', parseFloat(e.target.value) || 0)} step="any" className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50" />
                               </label>
                             </div>
                             <div className="flex items-end gap-2">
-                              <div className="text-sm font-semibold text-gray-800 self-center w-12">Punkt 2</div>
+                              <div className="text-sm font-semibold text-gray-800 self-center w-12">{t('Point 2')}</div>
                               <label className="block">
-                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Inn (V)</span>
-                                <input
-                                  type="number"
-                                  value={k.sensor_inn_2}
-                                  onChange={e => oppdater(i, 'sensor_inn_2', parseFloat(e.target.value) || 0)}
-                                  step="any"
-                                  className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50"
-                                />
+                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">{t('In (V)')}</span>
+                                <input type="number" value={k.sensor_inn_2} onChange={e => oppdater(i, 'sensor_inn_2', parseFloat(e.target.value) || 0)} step="any" className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50" />
                               </label>
                               <label className="block">
-                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Ut ({k.sensor_enhet || '?'})</span>
-                                <input
-                                  type="number"
-                                  value={k.sensor_ut_2}
-                                  onChange={e => oppdater(i, 'sensor_ut_2', parseFloat(e.target.value) || 0)}
-                                  step="any"
-                                  className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50"
-                                />
+                                <span className="text-xs text-gray-600 uppercase tracking-wider font-semibold">Out ({k.sensor_enhet || '?'})</span>
+                                <input type="number" value={k.sensor_ut_2} onChange={e => oppdater(i, 'sensor_ut_2', parseFloat(e.target.value) || 0)} step="any" className="block w-24 text-sm rounded-md border-gray-300 shadow-sm focus:border-[#D76428] focus:ring focus:ring-[#D76428] focus:ring-opacity-50" />
                               </label>
                             </div>
                             {k.sensor_inn_2 === k.sensor_inn_1 && (
                               <div className="w-full text-xs text-red-800 bg-red-100 rounded-md p-1.5 mt-1">
-                                Inn-punkt 1 og 2 kan ikkje vere like (gir divisjon med null)
+                                {t('Input points 1 and 2 cannot be equal (causes division by zero)')}
                               </div>
                             )}
                           </div>
@@ -275,8 +251,8 @@ export default function ChannelConfigCard() {
         </table>
       </div>
       <div className="flex gap-2 mt-3 items-center">
-        <button className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out" onClick={lagre}>Lagre</button>
-        <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out" onClick={tilbakestill}>Tilbakestill</button>
+        <button className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out" onClick={lagre}>{t('Save')}</button>
+        <button className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out" onClick={tilbakestill}>{t('Reset')}</button>
         {melding && (
           <span className={`text-sm ml-2 ${melding.ok ? 'text-green-700' : 'text-red-700'}`}>
             {melding.text}
