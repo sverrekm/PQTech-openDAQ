@@ -86,9 +86,13 @@ def last_ned_og_oppdater():
         if not utpakka:
             raise RuntimeError("Fann ikkje utpakka mappe i tarball")
 
+        # GitHub tarball: filene ligg anten direkte i rot-mappa
+        # eller i ei OpenDackoConteiner/-undermappe (eldre repo-struktur)
         repo_rot = os.path.join(tmpdir, utpakka[0], "OpenDackoConteiner")
         if not os.path.isdir(repo_rot):
-            raise RuntimeError(f"Fann ikkje OpenDackoConteiner/ i tarball")
+            repo_rot = os.path.join(tmpdir, utpakka[0])
+        if not os.path.isdir(repo_rot):
+            raise RuntimeError(f"Fann ikkje filer i tarball")
 
         # 4. Kopier Python-filer til /app/
         oppdaterte = []
