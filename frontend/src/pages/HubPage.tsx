@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { HubStatus } from '../api/types'
-import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus } from '../api/hub'
+import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, byttModus } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 
 export default function HubPage() {
@@ -15,6 +15,22 @@ export default function HubPage() {
   const [leggTilOpen, setLeggTilOpen] = useState(false)
   const [melding, setMelding] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [modusGjenstartar, setModusGjenstartar] = useState(false)
+
+  const handleByttModus = async (nyModus: string) => {
+    setActionLoading('modus')
+    try {
+      const res = await byttModus(nyModus)
+      setMelding(res.melding)
+      if (res.suksess) {
+        setModusGjenstartar(true)
+        setTimeout(() => window.location.reload(), 10000)
+      }
+    } catch (e) {
+      setMelding(`Feil: ${e}`)
+    }
+    setActionLoading(null)
+  }
 
   const handleLeggTil = async () => {
     if (!nyAdresse.trim()) return
@@ -94,10 +110,34 @@ export default function HubPage() {
           </div>
         </div>
 
-        {!hubAktiv && (
-          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm rounded-lg p-3 mb-3">
-            Hub-tenesta køyrer ikkje. Nodar kan konfigurerast her, men tilkoblingar vert fyrst aktive
-            når containeren startar med <code className="bg-yellow-100 px-1 rounded">OPENDAQ_MODUS=hub</code>.
+        {modusGjenstartar ? (
+          <div className="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg p-3 mb-3 flex items-center gap-2">
+            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Gjenstartar containeren — sida lastar på nytt om nokre sekund...
+          </div>
+        ) : !hubAktiv ? (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm rounded-lg p-3 mb-3 flex items-center justify-between">
+            <span>Hub-tenesta køyrer ikkje. Aktiver hub-modus for å kople til fjern-nodar.</span>
+            <button
+              onClick={() => handleByttModus('hub')}
+              disabled={actionLoading === 'modus'}
+              className="ml-3 flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-md bg-[#D76428] text-white hover:bg-[#c55a23] disabled:opacity-50 transition-colors"
+            >
+              {actionLoading === 'modus' ? 'Byter...' : 'Aktiver Hub-modus'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex justify-end mb-3">
+            <button
+              onClick={() => handleByttModus('direkte')}
+              disabled={actionLoading === 'modus'}
+              className="text-xs font-medium px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              {actionLoading === 'modus' ? 'Byter...' : 'Deaktiver Hub-modus'}
+            </button>
           </div>
         )}
 

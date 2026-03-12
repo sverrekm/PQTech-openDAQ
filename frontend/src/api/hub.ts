@@ -30,3 +30,7 @@ export async function fjernNode(nodeId: string): Promise<ActionResult> {
 export async function rekobleNode(nodeId: string): Promise<ActionResult> {
   return apiPost<ActionResult>(`/api/hub/nodar/${nodeId}/rekoble`)
 }
+
+export async function byttModus(modus: string): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/modus/bytt', { modus })
+}

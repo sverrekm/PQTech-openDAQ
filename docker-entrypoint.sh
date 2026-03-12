@@ -392,6 +392,16 @@ fi
 
 export PYTHONPATH=/app
 
+# Les modus frå persistent konfig-fil (GUI-toggle)
+# Env-variabelen OPENDAQ_MODUS frå docker-compose overstyrer (bakoverkomp.)
+if [ -z "${OPENDAQ_MODUS}" ] && [ -f /data/konfig/modus.json ]; then
+    KONFIG_MODUS=$(python3 -c "import json; print(json.load(open('/data/konfig/modus.json')).get('modus',''))" 2>/dev/null || true)
+    if [ "$KONFIG_MODUS" = "hub" ]; then
+        export OPENDAQ_MODUS="hub"
+        echo "  Modus frå konfig: hub"
+    fi
+fi
+
 # ========================================
 # Hub-modus (aggregator for fleire nodar)
 # ========================================

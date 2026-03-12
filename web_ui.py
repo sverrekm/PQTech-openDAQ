@@ -50,7 +50,7 @@ except ImportError:
 
 from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
 from mqtt_konfig import valider_mqtt_konfig
-from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP
+from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB
 
 # Hub-konfig er alltid tilgjengeleg (for GUI), men hub_server berre i hub-modus
 HUB_MODUS = os.environ.get("OPENDAQ_MODUS") == "hub"
@@ -734,9 +734,20 @@ def api_enhet_konfig_oppdater():
 @app.route("/api/modus")
 def api_modus():
     """Returnerer gjeldande driftsmodus (direkte/usbip/hub)."""
-    if HUB_MODUS:
-        return jsonify({"modus": "hub"})
-    return jsonify({"modus": les_modus()})
+    modus = "hub" if HUB_MODUS else les_modus()
+    return jsonify({"modus": modus, "hub_modus": HUB_MODUS})
+
+
+@app.route("/api/modus/bytt", methods=["POST"])
+def api_modus_bytt():
+    """Byt driftsmodus (hub/direkte). Gjenstartar containeren."""
+    data = request.get_json(silent=True) or {}
+    ny_modus = data.get("modus", "").strip()
+    if ny_modus not in (MODUS_HUB, MODUS_DIREKTE):
+        return jsonify({"suksess": False, "melding": "Ugyldig modus"}), 400
+    lagre_modus(ny_modus)
+    threading.Timer(2.0, lambda: os._exit(0)).start()
+    return jsonify({"suksess": True, "melding": f"Byter til {ny_modus}-modus — gjenstartar..."})
 
 
 # --- USB/IP API ---

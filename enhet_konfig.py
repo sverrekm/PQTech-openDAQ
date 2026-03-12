@@ -24,6 +24,7 @@ MODUS_KONFIG_STI = Path("/data/konfig/modus.json")
 # Gyldige driftsmodus
 MODUS_DIREKTE = "direkte"   # Container brukar instrumentet direkte over USB
 MODUS_USBIP = "usbip"       # Instrumentet delast via USB/IP til Windows
+MODUS_HUB = "hub"           # Hub-aggregator for fleire fjern-nodar
 
 
 @dataclass
@@ -99,7 +100,7 @@ def les_modus() -> str:
         if MODUS_KONFIG_STI.exists():
             data = json.loads(MODUS_KONFIG_STI.read_text(encoding='utf-8'))
             modus = data.get("modus", MODUS_DIREKTE)
-            if modus in (MODUS_DIREKTE, MODUS_USBIP):
+            if modus in (MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB):
                 log.info(f"Lasta modus: {modus}")
                 return modus
             log.warning(f"Ukjend modus '{modus}' i {MODUS_KONFIG_STI}, brukar 'direkte'")
@@ -110,7 +111,7 @@ def les_modus() -> str:
 
 def lagre_modus(modus: str) -> bool:
     """Lagre gjeldande driftsmodus til fil."""
-    if modus not in (MODUS_DIREKTE, MODUS_USBIP):
+    if modus not in (MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB):
         log.error(f"Ugyldig modus: {modus}")
         return False
     try:
