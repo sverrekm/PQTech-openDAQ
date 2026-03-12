@@ -663,6 +663,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
     openssh-server \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Bygg uhubctl fraa kildekode (for USB port power-cycling)

@@ -51,7 +51,19 @@ def installer():
         if er_installert():
             return True, "Tailscale er allereie installert"
 
-        out, err, rc = _kjor("curl -fsSL https://tailscale.com/install.sh | sh", timeout=120)
+        # Sikre at curl finst (python:3.11-slim har det ikkje)
+        _, _, rc_curl = _kjor("which curl")
+        if rc_curl != 0:
+            _kjor("apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates", timeout=60)
+            _, _, rc_curl = _kjor("which curl")
+            if rc_curl != 0:
+                return False, "Kunne ikkje installere curl (trengst for Tailscale-installasjon)"
+
+        # pipefail sørgjer for at curl-feil ikkje vert maskert av sh
+        out, err, rc = _kjor(
+            "bash -c 'set -o pipefail && curl -fsSL https://tailscale.com/install.sh | sh'",
+            timeout=120,
+        )
         if rc != 0:
             return False, f"Installasjon feila: {err or out}"
 
