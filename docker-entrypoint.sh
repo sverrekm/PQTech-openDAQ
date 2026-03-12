@@ -13,6 +13,22 @@ WEB_PORT="${WEB_PORT:-8080}"
 mkdir -p /dev/net /data/tailscale /var/run/tailscale
 [ ! -c /dev/net/tun ] && mknod /dev/net/tun c 10 200 2>/dev/null || true
 
+# Auto-start tailscaled viss state-fil finst frå tidlegare oppsett
+if command -v tailscaled >/dev/null 2>&1 && [ -f /data/tailscale/tailscaled.state ]; then
+    echo "  Startar tailscaled (eksisterande state)..."
+    tailscaled \
+        --state=/data/tailscale/tailscaled.state \
+        --socket=/var/run/tailscale/tailscaled.sock &
+    sleep 2
+    if pgrep tailscaled >/dev/null 2>&1; then
+        # Koble til med eksisterande auth (--reset gjer ingenting viss allereie autentisert)
+        tailscale up --accept-routes 2>/dev/null &
+        echo "  Tailscale daemon starta"
+    else
+        echo "  ÅTVARING: Kunne ikkje starte tailscaled"
+    fi
+fi
+
 echo "=============================================="
 echo "  openDAQ Server - Dewesoft SIRIUS"
 echo "  $(date)"

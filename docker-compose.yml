@@ -8,13 +8,13 @@ services:
     container_name: pqtech-opendaq
     restart: unless-stopped
 
-    # Host-nettverk: container deler vertens nettverkstack.
-    # Portane (8080, 4840, 7420) er tilgjengelege på alle vertens IP-ar
-    # inkludert LAN og Tailscale — fungerer for baade node og hub.
-    network_mode: host
-
     # USB-tilgang til Dewesoft-instrument
     privileged: true
+
+    # macvlan-nettverk: eigen IP paa LAN (DewesoftX treng SSH til containeren)
+    networks:
+      daqnet:
+        ipv4_address: ${CONTAINER_IP:-192.168.1.161}
 
     # PID host-namespace: nsenter -t 1 treng tilgang til hostens PID 1
     pid: host
@@ -69,8 +69,8 @@ services:
       - OPENDAQ_MODEL=PQTech-openDAQ
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
-      # OPC-UA annonsert IP (tom = auto-detect fraa nettverksgrensesnitt)
-      #- OPENDAQ_IP=
+      # OPC-UA annonsert IP — sett til container-IP (macvlan)
+      - OPENDAQ_IP=${CONTAINER_IP:-192.168.1.161}
 
     deploy:
       resources:
@@ -82,3 +82,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  daqnet:
+    driver: macvlan
+    driver_opts:
+      parent: ${NET_PARENT:-eth0}
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
+          ip_range: ${CONTAINER_IP:-192.168.1.161}/32
