@@ -28,6 +28,8 @@ from hub_konfig import (
     HubKonfig, FjernNode,
     les_hub_konfig, lagre_hub_konfig, valider_hub_konfig,
 )
+from buffer_konfig import les_buffer_konfig
+from hub_buffer import HubBuffer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,6 +76,7 @@ _node_devices = {}              # node_id -> openDAQ device-objekt
 _node_status = {}               # node_id -> {"tilkobla": bool, "feil": str, ...}
 _helsesjekk_aktiv = True
 _hub_startet = None             # ISO timestamp
+_hub_buffer: HubBuffer = None   # Hub-side buffer sync
 
 
 def hent_logg(antall=200):
@@ -419,6 +422,13 @@ def hent_hub_konfig_dict() -> dict:
         return _hub_konfig.til_dict()
 
 
+def hent_hub_buffer_status() -> dict:
+    """Returner hub-buffer status for web API."""
+    if _hub_buffer is not None:
+        return _hub_buffer.hent_status()
+    return {"aktivert": False, "totalt_rader": 0}
+
+
 def oppdater_hub_konfig(ny_konfig: HubKonfig) -> tuple:
     """Oppdater og synkroniser hub-konfig. Returns (suksess, melding)."""
     global _hub_konfig
@@ -557,6 +567,16 @@ def start_hub():
     helsesjekk_traad = threading.Thread(target=_helsesjekk_loop, daemon=True)
     helsesjekk_traad.start()
     log.info("Helsesjekk-tråd starta")
+
+    # Start hub-buffer sync
+    global _hub_buffer
+    try:
+        buffer_konfig = les_buffer_konfig()
+        _hub_buffer = HubBuffer(buffer_konfig)
+        _hub_buffer.start_sync(_hub_konfig.nodar)
+        log.info(f"Hub-buffer sync starta: intervall={buffer_konfig.hub_sync_intervall_sek}s")
+    except Exception as e:
+        log.warning(f"Kunne ikkje starte hub-buffer: {e}")
 
     # Start web UI
     web_port = int(os.environ.get("WEB_PORT", 8080))

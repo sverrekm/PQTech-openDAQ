@@ -309,3 +309,49 @@ export interface OppdateringsResultat {
   oppdaterte_filer?: string[]
   feil?: string
 }
+
+// --- /api/buffer/* ---
+export interface BufferStatus {
+  aktivert: boolean
+  totalt_rader: number
+  usynkroniserte?: number
+  synkroniserte?: number
+  storleik_mb?: number
+  maks_storleik_mb?: number
+  eldste_ts?: number | null
+  nyaste_ts?: number | null
+  skalering_klar?: boolean
+  skriv_per_sek?: number
+  feil?: string
+}
+
+export interface BufferKonfig {
+  aktivert: boolean
+  intervall_ms: number
+  maks_storleik_mb: number
+  bevar_usynkronisert: boolean
+  hub_sync_intervall_sek: number
+  hub_batch_storleik: number
+  hub_retensjon_dagar: number
+}
+
+// --- /api/hub/buffer/* ---
+export interface HubBufferNodeSync {
+  node_id: string
+  siste_fjern_id: number
+  siste_sync: string | null
+  antal_henta: number
+  rader_i_hub: number
+}
+
+export interface HubBufferStatus {
+  aktivert: boolean
+  totalt_rader?: number
+  storleik_mb?: number
+  eldste_ts?: number | null
+  nyaste_ts?: number | null
+  retensjon_dagar?: number
+  sync_intervall_sek?: number
+  nodar?: HubBufferNodeSync[]
+  feil?: string
+}

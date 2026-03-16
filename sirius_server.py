@@ -42,6 +42,8 @@ from mqtt_klient import MqttKlient
 from enhet_konfig import (les_enhet_konfig, lagre_enhet_konfig, valider_enhet_konfig,
                           EnhetKonfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP)
 import usbip_manager
+from buffer_konfig import les_buffer_konfig, lagre_buffer_konfig, valider_buffer_konfig
+from buffer_skrivar import BufferSkrivar
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,6 +110,7 @@ _mqtt_klient: MqttKlient = None
 _mqtt_konfig: MqttKonfig = None
 _enhet_konfig: EnhetKonfig = None
 _mqtt_straumings_stopp: threading.Event = None
+_buffer_skrivar: BufferSkrivar = None
 _args = None
 _lock = threading.Lock()
 
@@ -624,6 +627,45 @@ def hent_opendaq_verdiar():
     return {}
 
 
+# --- Buffer API-funksjonar ---
+
+def hent_buffer_status():
+    """Hent buffer-status for web API."""
+    if _buffer_skrivar is None:
+        return {"aktivert": False, "totalt_rader": 0}
+    return _buffer_skrivar.hent_status()
+
+
+def hent_buffer_data(etter_id=0, limit=10000):
+    """Hent usynkroniserte buffer-rader for hub-synkronisering."""
+    if _buffer_skrivar is None:
+        return []
+    return _buffer_skrivar.hent_usynkronisert(limit=limit, etter_id=etter_id)
+
+
+def marker_buffer_synkronisert(opp_til_id):
+    """Marker buffer-rader som synkroniserte (etter hub ACK)."""
+    if _buffer_skrivar is None:
+        return False
+    return _buffer_skrivar.marker_synkronisert(opp_til_id)
+
+
+def hent_buffer_konfig_dict():
+    """Hent buffer-konfig som dict for web API."""
+    from dataclasses import asdict
+    konfig = les_buffer_konfig()
+    return asdict(konfig)
+
+
+def oppdater_buffer(ny_konfig):
+    """Oppdater buffer-konfig og apliser endringar."""
+    global _buffer_skrivar
+    ok = lagre_buffer_konfig(ny_konfig)
+    if ok and _buffer_skrivar is not None:
+        _buffer_skrivar.oppdater_konfig(ny_konfig)
+    return ok
+
+
 def _oppdater_system_ini_location(location: str):
     """Oppdater DisplayLocation i system.ini slik at DewesoftX ser ny plassering."""
     ini_sti = Path("/opt/dewesoft/software/system/system.ini")
@@ -812,6 +854,13 @@ def _global_data_callback(kanal_data):
     Injiserer MQTT-verdiar i tillegg til SIRIUS ADC-data.
     """
     global _callback_feil_teller
+    # Meldingsdata til buffer (akkumulerer i minne, skriv kvart 100ms)
+    if _buffer_skrivar is not None:
+        try:
+            _buffer_skrivar.mottak_data(kanal_data)
+        except Exception:
+            pass  # Buffer-feil skal aldri blokkere data-straumen
+
     if _opendaq_bro and _opendaq_bro.tilgjengelig:
         try:
             _opendaq_bro.oppdater_data(kanal_data)
@@ -1256,6 +1305,19 @@ def start_server(args):
     else:
         log.info("MQTT deaktivert eller ingen kanalar konfigurert")
 
+    # Init buffer-skrivar for lokal måledata-lagring
+    global _buffer_skrivar
+    try:
+        buffer_konfig = les_buffer_konfig()
+        if buffer_konfig.aktivert:
+            _buffer_skrivar = BufferSkrivar(buffer_konfig)
+            log.info(f"Buffer-skrivar starta: intervall={buffer_konfig.intervall_ms}ms, "
+                     f"maks={buffer_konfig.maks_storleik_mb}MB")
+        else:
+            log.info("Buffer-skrivar deaktivert i konfig")
+    except Exception as e:
+        log.warning(f"Kunne ikkje starte buffer-skrivar: {e}")
+
     # Start openDAQ nettverksservere (referanse-enhet for DewesoftX-tilkobling)
     try:
         log.info("Startar openDAQ nettverksbro...")
@@ -1279,6 +1341,9 @@ def start_server(args):
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_kanalar,
                                   antal_adc=effektiv_adc)
+        # Registrer skalering-callback for buffer
+        if _buffer_skrivar is not None:
+            _opendaq_bro._skalering_callback = _buffer_skrivar.oppdater_skalering
         ok = _opendaq_bro.start()
         if ok:
             log.info("openDAQ bridge starta OK")
@@ -1365,6 +1430,8 @@ def start_server(args):
         _mqtt_klient.stopp()
     if _maaler:
         _maaler.stopp()
+    if _buffer_skrivar:
+        _buffer_skrivar.stopp()
     if _opendaq_bro:
         _opendaq_bro.stopp()
     if _driver:

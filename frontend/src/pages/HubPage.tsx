@@ -3,6 +3,7 @@ import type { HubStatus, HubKanal } from '../api/types'
 import { fetchHubStatus, fetchHubKanalar, byttModus } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
+import BufferStatusCard from '../components/BufferStatusCard'
 
 export const HUB_SYNLEGE_KEY = 'hub_synlege_kanalar'
 
@@ -117,6 +118,9 @@ export default function HubPage() {
 
       {/* Channel table */}
       {hubAktiv && <HubKanalTabell />}
+
+      {/* Buffer sync status */}
+      {hubAktiv && <BufferStatusCard />}
 
       {/* Log */}
       <HubLogViewer />

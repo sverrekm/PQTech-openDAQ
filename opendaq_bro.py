@@ -73,6 +73,7 @@ class OpenDAQBro:
         self._nullpunkt_count = {}  # Antal samples for kalibrering
         self._nullpunkt_n = 0       # Antal datablokker brukt
         self._NULLPUNKT_BLOKKER = 40  # ~2s ved 20 pkt/sek
+        self._skalering_callback = None  # Callback(skala, offset, nullpunkt) etter kalibrering
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
@@ -731,6 +732,15 @@ class OpenDAQBro:
                     )
                     log.info(f"  ADC nullpunkt {key}: "
                              f"{self._adc_nullpunkt[key]:.1f} raw counts")
+                # Del skalering med buffer etter nullpunkt-kalibrering
+                if self._skalering_callback is not None:
+                    try:
+                        self._skalering_callback(
+                            self._kanal_skala, self._kanal_offset,
+                            self._adc_nullpunkt
+                        )
+                    except Exception as e:
+                        log.warning(f"Skalering-callback feil: {e}")
 
         # Berekn statistikk berre kvar 20. pakke (~1 Hz ved 20 pkt/sek)
         berekn_stats = (self._data_teller % 20 == 0)

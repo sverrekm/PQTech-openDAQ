@@ -43,6 +43,11 @@ try:
         oppdater_mqtt as _mqtt_oppdater,
         hent_enhet_konfig_dict as _enhet_hent_konfig,
         oppdater_enhet as _enhet_oppdater,
+        hent_buffer_status as _buffer_hent_status,
+        hent_buffer_data as _buffer_hent_data,
+        marker_buffer_synkronisert as _buffer_marker_synk,
+        hent_buffer_konfig_dict as _buffer_hent_konfig,
+        oppdater_buffer as _buffer_oppdater,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -51,6 +56,7 @@ except ImportError:
 from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
 from mqtt_konfig import valider_mqtt_konfig
 from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB
+from buffer_konfig import valider_buffer_konfig, les_buffer_konfig
 
 # Hub-konfig er alltid tilgjengeleg (for GUI), men hub_server berre i hub-modus
 HUB_MODUS = os.environ.get("OPENDAQ_MODUS") == "hub"
@@ -62,7 +68,7 @@ if HUB_MODUS:
         hent_hub_status, hent_hub_konfig_dict,
         oppdater_hub_konfig, legg_til_node_api,
         fjern_node_api, rekoble_node, hent_logg as _hub_hent_logg,
-        hent_hub_kanalar,
+        hent_hub_kanalar, hent_hub_buffer_status,
     )
 
 app = Flask(__name__)
@@ -1047,6 +1053,71 @@ def api_system_oppdater():
         return jsonify(resultat)
     except Exception as e:
         return jsonify({"suksess": False, "feil": str(e)}), 500
+
+
+# --- Buffer API ---
+
+@app.route("/api/buffer/status")
+def api_buffer_status():
+    if SIRIUS_DIREKTE:
+        return jsonify(_buffer_hent_status())
+    return jsonify({"aktivert": False, "totalt_rader": 0})
+
+
+@app.route("/api/buffer/data")
+def api_buffer_data():
+    if not SIRIUS_DIREKTE:
+        return jsonify({"rader": []})
+    etter_id = request.args.get("etter_id", 0, type=int)
+    limit = request.args.get("limit", 10000, type=int)
+    limit = min(limit, 50000)  # Maksgrense
+    rader = _buffer_hent_data(etter_id=etter_id, limit=limit)
+    return jsonify({"rader": rader})
+
+
+@app.route("/api/buffer/ack", methods=["POST"])
+def api_buffer_ack():
+    data = request.get_json(silent=True) or {}
+    opp_til_id = data.get("opp_til_id", 0)
+    if not opp_til_id:
+        return jsonify({"suksess": False, "melding": "Mangler opp_til_id"}), 400
+    if SIRIUS_DIREKTE:
+        ok = _buffer_marker_synk(opp_til_id)
+        if ok:
+            return jsonify({"suksess": True, "melding": "Synkronisert"})
+        return jsonify({"suksess": False, "melding": "Markering feila"}), 500
+    return jsonify({"suksess": False, "melding": "Buffer ikkje tilgjengeleg"}), 503
+
+
+@app.route("/api/buffer/konfig")
+def api_buffer_konfig_hent():
+    if SIRIUS_DIREKTE:
+        return jsonify(_buffer_hent_konfig())
+    from dataclasses import asdict
+    return jsonify(asdict(les_buffer_konfig()))
+
+
+@app.route("/api/buffer/konfig", methods=["PUT"])
+def api_buffer_konfig_oppdater():
+    data = request.get_json(silent=True) or {}
+    konfig, feil = valider_buffer_konfig(data)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    if SIRIUS_DIREKTE:
+        ok = _buffer_oppdater(konfig)
+    else:
+        from buffer_konfig import lagre_buffer_konfig
+        ok = lagre_buffer_konfig(konfig)
+    if ok:
+        return jsonify({"suksess": True, "melding": "Buffer-konfig lagra"})
+    return jsonify({"suksess": False, "melding": "Lagring feila"}), 500
+
+
+@app.route("/api/hub/buffer/status")
+def api_hub_buffer_status():
+    if not HUB_MODUS:
+        return jsonify({"aktivert": False})
+    return jsonify(hent_hub_buffer_status())
 
 
 # --- React Frontend ---
