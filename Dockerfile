@@ -708,6 +708,9 @@ COPY mqtt_klient.py .
 COPY enhet_konfig.py .
 COPY hub_konfig.py .
 COPY hub_server.py .
+COPY buffer_konfig.py .
+COPY buffer_skrivar.py .
+COPY hub_buffer.py .
 COPY oppdatering.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
