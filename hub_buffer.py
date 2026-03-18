@@ -11,14 +11,16 @@ Bruk:
     from hub_buffer import HubBuffer
 """
 
+import json
 import time
 import sqlite3
 import logging
 import threading
 from pathlib import Path
 from datetime import datetime, timedelta
-
-import requests
+from urllib.request import urlopen, Request
+from urllib.error import URLError
+from urllib.parse import urlencode
 
 from buffer_konfig import BufferKonfig, les_buffer_konfig
 
@@ -131,17 +133,13 @@ class HubBuffer:
         siste_id = row[0] if row else 0
 
         # Hent data frå remote node
-        url = f"http://{node.adresse}:8080/api/buffer/data"
-        params = {
-            "etter_id": siste_id,
-            "limit": self._konfig.hub_batch_storleik,
-        }
+        qs = urlencode({"etter_id": siste_id, "limit": self._konfig.hub_batch_storleik})
+        url = f"http://{node.adresse}:8080/api/buffer/data?{qs}"
 
         try:
-            resp = requests.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
+            with urlopen(url, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except (URLError, OSError) as e:
             log.debug(f"Kunne ikkje hente buffer frå {node.namn}: {e}")
             return
 
@@ -188,13 +186,13 @@ class HubBuffer:
         # Send ACK til remote node
         ack_url = f"http://{node.adresse}:8080/api/buffer/ack"
         try:
-            ack_resp = requests.post(
-                ack_url,
-                json={"opp_til_id": max_fjern_id},
-                timeout=10,
-            )
-            ack_resp.raise_for_status()
-        except requests.RequestException as e:
+            ack_data = json.dumps({"opp_til_id": max_fjern_id}).encode('utf-8')
+            ack_req = Request(ack_url, data=ack_data,
+                              headers={"Content-Type": "application/json"},
+                              method="POST")
+            with urlopen(ack_req, timeout=10):
+                pass
+        except (URLError, OSError) as e:
             log.warning(f"ACK feil for {node.namn}: {e}")
 
         log.info(f"Synkronisert {len(rader)} rader frå '{node.namn}' "
