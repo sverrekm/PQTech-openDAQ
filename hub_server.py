@@ -114,13 +114,52 @@ def _opprett_instance():
     _instance = builder.build()
     log.info("openDAQ Instance oppretta (hub-modus, med root device)")
 
-    # Sett NumberOfChannels til 0 — vi vil ikkje ha dummy-kanalar frå
-    # ref-devicen. Dei ekte kanalane kjem frå fjern-nodar.
+    # Sett NumberOfChannels til 1 (minimum krav for ref device).
+    # 0 kanalar kan gjere at DewesoftX avviser eininga som ugyldig.
+    # Dummy-kanalen frå ref-devicen er akseptabel overhead.
     try:
-        _instance.set_property_value("NumberOfChannels", 0)
-        log.info("  Root device: NumberOfChannels sett til 0")
+        _instance.set_property_value("NumberOfChannels", 1)
+        log.info("  Root device: NumberOfChannels sett til 1")
     except Exception as e:
-        log.warning(f"  Kunne ikkje sette NumberOfChannels=0: {e}")
+        log.warning(f"  Kunne ikkje sette NumberOfChannels=1: {e}")
+
+    # GlobalSampleRate — DewesoftX forventar denne eigenskapen
+    sample_rate = float(os.environ.get("SAMPLE_RATE", "20000"))
+    try:
+        _instance.set_property_value("GlobalSampleRate", sample_rate)
+        log.info(f"  Root device: GlobalSampleRate sett til {sample_rate} Hz")
+    except Exception as e:
+        log.warning(f"  Kunne ikkje sette GlobalSampleRate: {e}")
+
+    # GetPossibleSampleRate — DewesoftX TDSOpenDaqAI.CalcADCSampleRate treng denne
+    try:
+        try:
+            _instance.get_property("GetPossibleSampleRate")
+        except Exception:
+            prop = daq.FloatPropertyBuilder("GetPossibleSampleRate", 200000.0)
+            _instance.add_property(prop.build())
+            log.info("  Root device: GetPossibleSampleRate = 200000 Hz")
+    except Exception as e:
+        log.warning(f"  GetPossibleSampleRate feilet: {e}")
+
+    # DeviceLogLevel + DeviceLogPath — DewesoftX settings panel krasjar utan desse
+    for namn, typ, default in [
+        ("DeviceLogLevel", "int", 2),
+        ("DeviceLogPath", "string", ""),
+    ]:
+        try:
+            try:
+                _instance.get_property(namn)
+            except Exception:
+                if typ == "int":
+                    prop = daq.IntPropertyBuilder(namn, int(default))
+                    _instance.add_property(prop.build())
+                elif typ == "string":
+                    prop = daq.StringPropertyBuilder(namn, str(default))
+                    _instance.add_property(prop.build())
+                log.info(f"  DewesoftX-prop {namn} = {default!r}")
+        except Exception as e:
+            log.warning(f"  DewesoftX-prop {namn} feilet: {e}")
 
     # Logg DeviceInfo for verifisering
     try:
