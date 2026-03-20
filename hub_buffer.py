@@ -5,6 +5,8 @@ Hub Buffer — Synkroniser måledata frå fjern-nodar
 Pollar kvar fjern-node periodisk via GET /api/buffer/data, batch-insert til
 lokal hub_buffer.db, og sender ACK tilbake.
 
+Synkroniserer også hendingar (rå waveforms) og MQTT-logg frå kvar node.
+
 Retensjon: slett data eldre enn hub_retensjon_dagar.
 
 Bruk:
@@ -13,6 +15,7 @@ Bruk:
 
 import json
 import time
+import base64
 import sqlite3
 import logging
 import threading
@@ -76,6 +79,59 @@ class HubBuffer:
                     antal_henta INTEGER DEFAULT 0
                 )
             """)
+
+            # Hendingar frå fjern-nodar
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS hendingar (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_id TEXT NOT NULL,
+                    fjern_id INTEGER NOT NULL,
+                    tidsstempel_ms INTEGER NOT NULL,
+                    type TEXT NOT NULL,
+                    skildring TEXT,
+                    varigheit_ms INTEGER,
+                    kanalar INTEGER,
+                    sample_rate INTEGER,
+                    raa_data BLOB
+                )
+            """)
+            self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_hendingar_node_ts
+                ON hendingar(node_id, tidsstempel_ms)
+            """)
+
+            # Sync-framgang for hendingar (per node)
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS sync_framgang_hendingar (
+                    node_id TEXT PRIMARY KEY,
+                    siste_fjern_id INTEGER DEFAULT 0
+                )
+            """)
+
+            # MQTT-logg frå fjern-nodar
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS mqtt_logg (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_id TEXT NOT NULL,
+                    fjern_id INTEGER NOT NULL,
+                    tidsstempel_ms INTEGER NOT NULL,
+                    topic TEXT NOT NULL,
+                    verdi REAL NOT NULL
+                )
+            """)
+            self._db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_mqtt_node_ts
+                ON mqtt_logg(node_id, tidsstempel_ms)
+            """)
+
+            # Sync-framgang for MQTT-logg (per node)
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS sync_framgang_mqtt (
+                    node_id TEXT PRIMARY KEY,
+                    siste_fjern_id INTEGER DEFAULT 0
+                )
+            """)
+
             self._db.commit()
             log.info(f"Hub-buffer database oppretta: {HUB_BUFFER_DB_STI}")
         except Exception as e:
@@ -110,6 +166,17 @@ class HubBuffer:
                     self._sync_node(node)
                 except Exception as e:
                     log.warning(f"Sync feil for node '{node.namn}' ({node.adresse}): {e}")
+
+                # Sync hendingar og MQTT-logg
+                try:
+                    self._sync_node_hendingar(node)
+                except Exception as e:
+                    log.debug(f"Hendingar sync feil for '{node.namn}': {e}")
+
+                try:
+                    self._sync_node_mqtt(node)
+                except Exception as e:
+                    log.debug(f"MQTT sync feil for '{node.namn}': {e}")
 
             # Retensjon etter kvar sync-runde
             try:
@@ -198,6 +265,124 @@ class HubBuffer:
         log.info(f"Synkronisert {len(rader)} rader frå '{node.namn}' "
                  f"(id {siste_id}→{max_fjern_id})")
 
+    def _sync_node_hendingar(self, node):
+        """Synkroniser hendingar frå éin node."""
+        if self._db is None:
+            return
+
+        # Hent siste sync-framgang for hendingar
+        cur = self._db.execute(
+            "SELECT siste_fjern_id FROM sync_framgang_hendingar WHERE node_id = ?",
+            (node.id,)
+        )
+        row = cur.fetchone()
+        siste_id = row[0] if row else 0
+
+        qs = urlencode({"etter_id": siste_id, "limit": 100})
+        url = f"http://{node.adresse}:8080/api/buffer/hendingar?{qs}"
+
+        try:
+            with urlopen(url, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except (URLError, OSError):
+            return
+
+        hendingar = data.get("hendingar", [])
+        if not hendingar:
+            return
+
+        with self._lock:
+            max_fjern_id = siste_id
+            for h in hendingar:
+                fjern_id = h["id"]
+                # Dekod rå-data frå base64 viss tilgjengeleg
+                raa_data = None
+                if "raa_data_b64" in h:
+                    try:
+                        raa_data = base64.b64decode(h["raa_data_b64"])
+                    except Exception:
+                        pass
+
+                self._db.execute(
+                    """INSERT INTO hendingar
+                       (node_id, fjern_id, tidsstempel_ms, type, skildring,
+                        varigheit_ms, kanalar, sample_rate, raa_data)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (node.id, fjern_id, h.get("ts", h.get("tidsstempel_ms", 0)),
+                     h["type"], h.get("skildring", ""),
+                     h.get("varigheit_ms"), h.get("kanalar"),
+                     h.get("sample_rate"), raa_data)
+                )
+                if fjern_id > max_fjern_id:
+                    max_fjern_id = fjern_id
+
+            self._db.execute(
+                """INSERT INTO sync_framgang_hendingar (node_id, siste_fjern_id)
+                   VALUES (?, ?)
+                   ON CONFLICT(node_id) DO UPDATE SET
+                     siste_fjern_id = excluded.siste_fjern_id""",
+                (node.id, max_fjern_id)
+            )
+            self._db.commit()
+
+        log.info(f"Synkronisert {len(hendingar)} hendingar frå '{node.namn}'")
+
+    def _sync_node_mqtt(self, node):
+        """Synkroniser MQTT-logg frå éin node."""
+        if self._db is None:
+            return
+
+        cur = self._db.execute(
+            "SELECT siste_fjern_id FROM sync_framgang_mqtt WHERE node_id = ?",
+            (node.id,)
+        )
+        row = cur.fetchone()
+        siste_id = row[0] if row else 0
+
+        qs = urlencode({"etter_tid": 0, "limit": self._konfig.hub_batch_storleik})
+        url = f"http://{node.adresse}:8080/api/buffer/mqtt-logg?{qs}"
+
+        try:
+            with urlopen(url, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except (URLError, OSError):
+            return
+
+        rader = data.get("rader", [])
+        if not rader:
+            return
+
+        # Filter: berre rader med id > siste_id
+        nye_rader = [r for r in rader if r.get("id", 0) > siste_id]
+        if not nye_rader:
+            return
+
+        with self._lock:
+            max_fjern_id = siste_id
+            for r in nye_rader:
+                fjern_id = r["id"]
+                self._db.execute(
+                    """INSERT INTO mqtt_logg
+                       (node_id, fjern_id, tidsstempel_ms, topic, verdi)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (node.id, fjern_id,
+                     r.get("tidsstempel_ms", r.get("ts", 0)),
+                     r["topic"], r["verdi"])
+                )
+                if fjern_id > max_fjern_id:
+                    max_fjern_id = fjern_id
+
+            self._db.execute(
+                """INSERT INTO sync_framgang_mqtt (node_id, siste_fjern_id)
+                   VALUES (?, ?)
+                   ON CONFLICT(node_id) DO UPDATE SET
+                     siste_fjern_id = excluded.siste_fjern_id""",
+                (node.id, max_fjern_id)
+            )
+            self._db.commit()
+
+        log.info(f"Synkronisert {len(nye_rader)} MQTT-logg rader frå '{node.namn}'")
+
     def _retensjon(self):
         """Slett data eldre enn hub_retensjon_dagar."""
         if self._db is None:
@@ -215,8 +400,26 @@ class HubBuffer:
             )
             if result.rowcount > 0:
                 self._db.commit()
-                log.info(f"Hub-retensjon: sletta {result.rowcount} rader "
+                log.info(f"Hub-retensjon: sletta {result.rowcount} maaledata-rader "
                          f"eldre enn {self._konfig.hub_retensjon_dagar} dagar")
+
+            # Retensjon for hendingar
+            result2 = self._db.execute(
+                "DELETE FROM hendingar WHERE tidsstempel_ms < ?",
+                (grense_ms,)
+            )
+            if result2.rowcount > 0:
+                self._db.commit()
+                log.info(f"Hub-retensjon: sletta {result2.rowcount} hendingar")
+
+            # Retensjon for MQTT-logg
+            result3 = self._db.execute(
+                "DELETE FROM mqtt_logg WHERE tidsstempel_ms < ?",
+                (grense_ms,)
+            )
+            if result3.rowcount > 0:
+                self._db.commit()
+                log.info(f"Hub-retensjon: sletta {result3.rowcount} mqtt_logg-rader")
 
     def hent_status(self) -> dict:
         """Hent hub-buffer status for web API."""
@@ -258,6 +461,19 @@ class HubBuffer:
                 "SELECT MAX(tidsstempel_ms) FROM maaledata"
             ).fetchone()[0]
 
+            # Hendingar og MQTT-logg tal
+            hendingar_totalt = 0
+            mqtt_logg_rader = 0
+            try:
+                hendingar_totalt = self._db.execute(
+                    "SELECT COUNT(*) FROM hendingar"
+                ).fetchone()[0]
+                mqtt_logg_rader = self._db.execute(
+                    "SELECT COUNT(*) FROM mqtt_logg"
+                ).fetchone()[0]
+            except Exception:
+                pass
+
             return {
                 "aktivert": True,
                 "totalt_rader": totalt,
@@ -267,6 +483,8 @@ class HubBuffer:
                 "retensjon_dagar": self._konfig.hub_retensjon_dagar,
                 "sync_intervall_sek": self._konfig.hub_sync_intervall_sek,
                 "nodar": node_stats,
+                "hendingar_totalt": hendingar_totalt,
+                "mqtt_logg_rader": mqtt_logg_rader,
             }
         except Exception as e:
             log.error(f"Feil ved henting av hub-buffer status: {e}")

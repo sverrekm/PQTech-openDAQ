@@ -48,6 +48,9 @@ try:
         marker_buffer_synkronisert as _buffer_marker_synk,
         hent_buffer_konfig_dict as _buffer_hent_konfig,
         oppdater_buffer as _buffer_oppdater,
+        hent_buffer_hendingar as _buffer_hent_hendingar,
+        hent_buffer_mqtt_logg as _buffer_hent_mqtt_logg,
+        hent_buffer_lagringsinfo as _buffer_hent_lagring,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -1111,6 +1114,35 @@ def api_buffer_konfig_oppdater():
     if ok:
         return jsonify({"suksess": True, "melding": "Buffer-konfig lagra"})
     return jsonify({"suksess": False, "melding": "Lagring feila"}), 500
+
+
+@app.route("/api/buffer/hendingar")
+def api_buffer_hendingar():
+    if not SIRIUS_DIREKTE:
+        return jsonify({"hendingar": []})
+    etter_id = request.args.get("etter_id", 0, type=int)
+    limit = request.args.get("limit", 50, type=int)
+    limit = min(limit, 500)
+    hendingar = _buffer_hent_hendingar(limit=limit, etter_id=etter_id)
+    return jsonify({"hendingar": hendingar})
+
+
+@app.route("/api/buffer/mqtt-logg")
+def api_buffer_mqtt_logg():
+    if not SIRIUS_DIREKTE:
+        return jsonify({"rader": []})
+    etter_tid = request.args.get("etter_tid", 0, type=int)
+    limit = request.args.get("limit", 100, type=int)
+    limit = min(limit, 5000)
+    rader = _buffer_hent_mqtt_logg(limit=limit, etter_tid=etter_tid)
+    return jsonify({"rader": rader})
+
+
+@app.route("/api/buffer/lagring")
+def api_buffer_lagring():
+    if not SIRIUS_DIREKTE:
+        return jsonify({"sti": "", "ssd_aktiv": False, "ledig_mb": 0, "brukt_mb": 0})
+    return jsonify(_buffer_hent_lagring())
 
 
 @app.route("/api/hub/buffer/status")

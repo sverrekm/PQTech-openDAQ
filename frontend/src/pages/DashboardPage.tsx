@@ -5,6 +5,9 @@ import ChannelLiveCard from '../components/ChannelLiveCard'
 import OpenDaqBridgeCard from '../components/OpenDaqBridgeCard'
 import ServerStatusCard from '../components/ServerStatusCard'
 import LogViewer from '../components/LogViewer'
+import { RemoteBufferStatusCard } from '../components/BufferStatusCard'
+import EventListCard from '../components/EventListCard'
+import MqttLogCard from '../components/MqttLogCard'
 
 interface Props {
   status: ServerStatus | null
@@ -24,6 +27,9 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
       {!isHubMode && <UsbIpCard ip={status?.ip || '-'} />}
       <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} hubKanalar={hubKanalar} />
       {!isHubMode && <OpenDaqBridgeCard />}
+      {!isHubMode && <RemoteBufferStatusCard />}
+      {!isHubMode && <EventListCard />}
+      {!isHubMode && <MqttLogCard />}
       <ServerStatusCard status={status} />
       <LogViewer />
     </>

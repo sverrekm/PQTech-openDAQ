@@ -30,6 +30,24 @@ class BufferKonfig:
     hub_batch_storleik: int = 10000     # Rader per sync-batch
     hub_retensjon_dagar: int = 30       # Hub lagrar N dagar
 
+    # Konfigurerbar sample rate (opp til 200 kHz)
+    sample_rate: int = 20000
+    # SSD-lagringssti (tom = auto-detect /data/ssd)
+    ssd_sti: str = ""
+    # RAM ringbuffer — antal sekund rå data i minne
+    ram_buffer_sekund: int = 30
+
+    # Hendingsdeteksjon
+    hendingar_aktivert: bool = True
+    rms_terskel_prosent: float = 150.0   # Trigger ved 150% av glidande snitt
+    dvdt_terskel: float = 0.1            # dV/dt terskel (V/ms)
+    mqtt_endring_terskel: float = 5.0    # MQTT verdi-endring som triggar
+    pre_trigger_ms: int = 1000           # Rå data FØR hending
+    post_trigger_ms: int = 2000          # Rå data ETTER hending
+
+    # MQTT-logging
+    mqtt_logg_aktivert: bool = True
+
 
 def les_buffer_konfig() -> BufferKonfig:
     """Les buffer-konfig frå JSON-fil. Returnerer standard viss fila ikkje finst."""
@@ -44,10 +62,21 @@ def les_buffer_konfig() -> BufferKonfig:
                 hub_sync_intervall_sek=int(data.get("hub_sync_intervall_sek", 60)),
                 hub_batch_storleik=int(data.get("hub_batch_storleik", 10000)),
                 hub_retensjon_dagar=int(data.get("hub_retensjon_dagar", 30)),
+                sample_rate=int(data.get("sample_rate", 20000)),
+                ssd_sti=str(data.get("ssd_sti", "")),
+                ram_buffer_sekund=int(data.get("ram_buffer_sekund", 30)),
+                hendingar_aktivert=bool(data.get("hendingar_aktivert", True)),
+                rms_terskel_prosent=float(data.get("rms_terskel_prosent", 150.0)),
+                dvdt_terskel=float(data.get("dvdt_terskel", 0.1)),
+                mqtt_endring_terskel=float(data.get("mqtt_endring_terskel", 5.0)),
+                pre_trigger_ms=int(data.get("pre_trigger_ms", 1000)),
+                post_trigger_ms=int(data.get("post_trigger_ms", 2000)),
+                mqtt_logg_aktivert=bool(data.get("mqtt_logg_aktivert", True)),
             )
             log.info(f"Lasta buffer-konfig: aktivert={konfig.aktivert}, "
                      f"intervall={konfig.intervall_ms}ms, "
-                     f"maks={konfig.maks_storleik_mb}MB")
+                     f"maks={konfig.maks_storleik_mb}MB, "
+                     f"sample_rate={konfig.sample_rate}")
             return konfig
     except Exception as e:
         log.warning(f"Kunne ikkje lese buffer-konfig: {e}")
@@ -114,6 +143,53 @@ def valider_buffer_konfig(data: dict) -> tuple:
     if retensjon < 1 or retensjon > 365:
         return None, f"hub_retensjon_dagar {retensjon} utanfor gyldig omraade (1-365)"
 
+    try:
+        sample_rate = int(data.get("sample_rate", 20000))
+    except (TypeError, ValueError):
+        return None, "sample_rate maa vere eit heiltal"
+    if sample_rate < 1000 or sample_rate > 200000:
+        return None, f"sample_rate {sample_rate} utanfor gyldig omraade (1000-200000)"
+
+    try:
+        ram_buffer_sekund = int(data.get("ram_buffer_sekund", 30))
+    except (TypeError, ValueError):
+        return None, "ram_buffer_sekund maa vere eit heiltal"
+    if ram_buffer_sekund < 5 or ram_buffer_sekund > 120:
+        return None, f"ram_buffer_sekund {ram_buffer_sekund} utanfor gyldig omraade (5-120)"
+
+    try:
+        rms_terskel = float(data.get("rms_terskel_prosent", 150.0))
+    except (TypeError, ValueError):
+        return None, "rms_terskel_prosent maa vere eit tal"
+    if rms_terskel < 101.0 or rms_terskel > 1000.0:
+        return None, f"rms_terskel_prosent {rms_terskel} utanfor gyldig omraade (101-1000)"
+
+    try:
+        dvdt_terskel = float(data.get("dvdt_terskel", 0.1))
+    except (TypeError, ValueError):
+        return None, "dvdt_terskel maa vere eit tal"
+    if dvdt_terskel < 0.001 or dvdt_terskel > 100.0:
+        return None, f"dvdt_terskel {dvdt_terskel} utanfor gyldig omraade (0.001-100)"
+
+    try:
+        mqtt_endring = float(data.get("mqtt_endring_terskel", 5.0))
+    except (TypeError, ValueError):
+        return None, "mqtt_endring_terskel maa vere eit tal"
+
+    try:
+        pre_trigger = int(data.get("pre_trigger_ms", 1000))
+    except (TypeError, ValueError):
+        return None, "pre_trigger_ms maa vere eit heiltal"
+    if pre_trigger < 100 or pre_trigger > 30000:
+        return None, f"pre_trigger_ms {pre_trigger} utanfor gyldig omraade (100-30000)"
+
+    try:
+        post_trigger = int(data.get("post_trigger_ms", 2000))
+    except (TypeError, ValueError):
+        return None, "post_trigger_ms maa vere eit heiltal"
+    if post_trigger < 100 or post_trigger > 30000:
+        return None, f"post_trigger_ms {post_trigger} utanfor gyldig omraade (100-30000)"
+
     return BufferKonfig(
         aktivert=bool(data.get("aktivert", True)),
         intervall_ms=intervall_ms,
@@ -122,4 +198,14 @@ def valider_buffer_konfig(data: dict) -> tuple:
         hub_sync_intervall_sek=sync_intervall,
         hub_batch_storleik=batch,
         hub_retensjon_dagar=retensjon,
+        sample_rate=sample_rate,
+        ssd_sti=str(data.get("ssd_sti", "")),
+        ram_buffer_sekund=ram_buffer_sekund,
+        hendingar_aktivert=bool(data.get("hendingar_aktivert", True)),
+        rms_terskel_prosent=rms_terskel,
+        dvdt_terskel=dvdt_terskel,
+        mqtt_endring_terskel=mqtt_endring,
+        pre_trigger_ms=pre_trigger,
+        post_trigger_ms=post_trigger,
+        mqtt_logg_aktivert=bool(data.get("mqtt_logg_aktivert", True)),
     ), None

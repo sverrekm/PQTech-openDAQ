@@ -48,9 +48,20 @@ export function RemoteBufferStatusCard() {
         <InfoCell label={t('Unsynced')} value={String(status.usynkroniserte ?? 0)} />
         <InfoCell label={t('Synced')} value={String(status.synkroniserte ?? 0)} />
         <InfoCell label={t('Write rate')} value={`${status.skriv_per_sek ?? 0}/s`} />
+        <InfoCell label={t('Sample rate')} value={`${((status.sample_rate ?? 20000) / 1000).toFixed(0)} kHz`} />
+        <InfoCell label={t('RAM buffer')} value={`${status.ram_buffer_storleik_mb ?? 0} MB`} />
+        <InfoCell label={t('Events')} value={String(status.hendingar_totalt ?? 0)} />
+        <InfoCell label={t('MQTT log')} value={String(status.mqtt_logg_rader ?? 0)} />
+        <InfoCell label={t('Storage')} value={status.ssd_aktiv ? 'SSD' : 'SD'} />
         <InfoCell label={t('Oldest')} value={formatTs(status.eldste_ts)} />
         <InfoCell label={t('Newest')} value={formatTs(status.nyaste_ts)} />
       </div>
+
+      {status.lagringssti && (
+        <div className="mt-2 text-xs text-gray-400 truncate" title={status.lagringssti}>
+          {status.lagringssti}
+        </div>
+      )}
 
       {!status.skalering_klar && (
         <div className="mt-2 text-xs text-yellow-600">

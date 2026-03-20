@@ -322,6 +322,12 @@ export interface BufferStatus {
   nyaste_ts?: number | null
   skalering_klar?: boolean
   skriv_per_sek?: number
+  lagringssti?: string
+  ssd_aktiv?: boolean
+  ram_buffer_storleik_mb?: number
+  hendingar_totalt?: number
+  mqtt_logg_rader?: number
+  sample_rate?: number
   feil?: string
 }
 
@@ -333,6 +339,39 @@ export interface BufferKonfig {
   hub_sync_intervall_sek: number
   hub_batch_storleik: number
   hub_retensjon_dagar: number
+  sample_rate: number
+  ssd_sti: string
+  ram_buffer_sekund: number
+  hendingar_aktivert: boolean
+  rms_terskel_prosent: number
+  dvdt_terskel: number
+  mqtt_endring_terskel: number
+  pre_trigger_ms: number
+  post_trigger_ms: number
+  mqtt_logg_aktivert: boolean
+}
+
+export interface BufferHending {
+  id: number
+  tidsstempel_ms: number
+  type: string
+  skildring: string
+  varigheit_ms: number
+  sample_rate: number
+}
+
+export interface MqttLoggRad {
+  id: number
+  tidsstempel_ms: number
+  topic: string
+  verdi: number
+}
+
+export interface LagringsInfo {
+  sti: string
+  ssd_aktiv: boolean
+  ledig_mb: number
+  brukt_mb: number
 }
 
 // --- /api/hub/buffer/* ---
@@ -353,5 +392,7 @@ export interface HubBufferStatus {
   retensjon_dagar?: number
   sync_intervall_sek?: number
   nodar?: HubBufferNodeSync[]
+  hendingar_totalt?: number
+  mqtt_logg_rader?: number
   feil?: string
 }

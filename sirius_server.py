@@ -490,6 +490,10 @@ def oppdater_mqtt(ny_konfig: MqttKonfig):
         _mqtt_klient.start()
         log.info("MQTT-klient starta")
 
+    # Re-koble MQTT → buffer-logging callback
+    if _mqtt_klient is not None and _buffer_skrivar is not None:
+        _mqtt_klient._on_verdi_callback = _buffer_skrivar.mottak_mqtt
+
     # Start/restart MQTT-strøymingstråd
     _start_mqtt_straumings_traad()
 
@@ -664,6 +668,55 @@ def oppdater_buffer(ny_konfig):
     if ok and _buffer_skrivar is not None:
         _buffer_skrivar.oppdater_konfig(ny_konfig)
     return ok
+
+
+def hent_buffer_hendingar(limit=50, etter_id=0):
+    """Hent hendingar frå buffer for web API."""
+    if _buffer_skrivar is None:
+        return []
+    return _buffer_skrivar.hent_hendingar(limit=limit, etter_id=etter_id)
+
+
+def hent_buffer_mqtt_logg(limit=100, etter_tid=0):
+    """Hent MQTT-logg frå buffer for web API."""
+    if _buffer_skrivar is None:
+        return []
+    return _buffer_skrivar.hent_mqtt_logg(limit=limit, etter_tid=etter_tid)
+
+
+def hent_buffer_lagringsinfo():
+    """Hent lagringsinfo (SSD/SD, ledig plass) for web API."""
+    if _buffer_skrivar is None:
+        return {"sti": "", "ssd_aktiv": False, "ledig_mb": 0, "brukt_mb": 0}
+    return _buffer_skrivar.hent_lagringsinfo()
+
+
+def hent_buffer_hendingar_for_sync(limit=100, etter_id=0):
+    """Hent usynkroniserte hendingar med rå-data for hub-sync."""
+    if _buffer_skrivar is None:
+        return []
+    return _buffer_skrivar.hent_hendingar_for_sync(limit=limit, etter_id=etter_id)
+
+
+def marker_buffer_hendingar_synk(opp_til_id):
+    """Marker hendingar som synkroniserte."""
+    if _buffer_skrivar is None:
+        return False
+    return _buffer_skrivar.marker_hendingar_synkronisert(opp_til_id)
+
+
+def hent_buffer_mqtt_for_sync(limit=10000, etter_id=0):
+    """Hent usynkroniserte MQTT-logg rader for hub-sync."""
+    if _buffer_skrivar is None:
+        return []
+    return _buffer_skrivar.hent_mqtt_logg_for_sync(limit=limit, etter_id=etter_id)
+
+
+def marker_buffer_mqtt_synk(opp_til_id):
+    """Marker MQTT-logg rader som synkroniserte."""
+    if _buffer_skrivar is None:
+        return False
+    return _buffer_skrivar.marker_mqtt_logg_synkronisert(opp_til_id)
 
 
 def _oppdater_system_ini_location(location: str):
@@ -1312,7 +1365,13 @@ def start_server(args):
         if buffer_konfig.aktivert:
             _buffer_skrivar = BufferSkrivar(buffer_konfig)
             log.info(f"Buffer-skrivar starta: intervall={buffer_konfig.intervall_ms}ms, "
-                     f"maks={buffer_konfig.maks_storleik_mb}MB")
+                     f"maks={buffer_konfig.maks_storleik_mb}MB, "
+                     f"sample_rate={buffer_konfig.sample_rate}, "
+                     f"ram={buffer_konfig.ram_buffer_sekund}s")
+            # Koble MQTT-callback til buffer for MQTT-logging
+            if _mqtt_klient is not None:
+                _mqtt_klient._on_verdi_callback = _buffer_skrivar.mottak_mqtt
+                log.info("MQTT → buffer-logging kopla")
         else:
             log.info("Buffer-skrivar deaktivert i konfig")
     except Exception as e:

@@ -87,6 +87,9 @@ class MqttKlient:
         self._feil: Optional[str] = None
         self._meldingar_motteke = 0
 
+        # Callback for buffer-logging (set eksternt etter init)
+        self._on_verdi_callback = None
+
         # Bygg topic→json_sti-mapping for rask oppslag i on_message
         self._topic_sti: Dict[str, str] = {}
         for k in konfig.kanalar:
@@ -238,6 +241,12 @@ class MqttKlient:
                     self._verdiar[msg.topic] = verdi
                     self._tidsstempel[msg.topic] = now
                     self._meldingar_motteke += 1
+                # Buffer-logging callback
+                if self._on_verdi_callback is not None:
+                    try:
+                        self._on_verdi_callback(msg.topic, verdi)
+                    except Exception:
+                        pass  # Callback-feil skal ikkje blokkere MQTT
             else:
                 # Logg berre fyrste gong per topic
                 if msg.topic not in self._verdiar:
