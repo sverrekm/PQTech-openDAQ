@@ -306,6 +306,7 @@ def _start_serverar():
 
     ip = os.environ.get("OPENDAQ_IP", "")
     servere = []
+    servers_added = []
 
     for srv_type in ['OpenDAQNativeStreaming', 'OpenDAQOPCUA']:
         try:
@@ -317,14 +318,70 @@ def _start_serverar():
             except Exception:
                 config = None
 
-            _instance.add_server(srv_type, config)
+            server = _instance.add_server(srv_type, config)
+            servers_added.append((srv_type, server))
             servere.append(srv_type)
             log.info(f"  Server starta: {srv_type}")
         except Exception as e:
             log.warning(f"  Server {srv_type} feilet: {e}")
 
+    # Fiks PrimaryConnectionString for multi-IP Pi (WiFi + LAN)
+    if ip:
+        _fiks_primary_connection_strings(ip)
+
+    # Aktiver mDNS discovery — BERRE NativeStreaming.
+    # OPC-UA discovery skaper duplikat-einingar i DewesoftX.
+    for srv_type, server in servers_added:
+        if srv_type == 'OpenDAQOPCUA':
+            log.info(f"  {srv_type}: discovery IKKJE aktivert (unngår duplikat)")
+            continue
+        try:
+            server.enable_discovery()
+            log.info(f"  {srv_type}: discovery aktivert")
+        except Exception as e_disc:
+            log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
+
     log.info(f"Hub-serverar aktive: {servere}")
     return servere
+
+
+def _fiks_primary_connection_strings(ip):
+    """Sett PrimaryConnectionString på alle ServerCapabilities til riktig IP.
+
+    Pi med to nettverksinterface kan føre til at NativeStreaming-serveren
+    vel ein annan IP enn OPC-UA. DewesoftX finn eininga via mDNS (éin IP),
+    men NativeStreaming-cap kan peike til feil IP.
+    """
+    global _instance
+    try:
+        caps = _instance.info.server_capabilities
+        for cap in caps:
+            proto_id = cap.protocol_id
+            prefix = cap.prefix
+            port = cap.port
+
+            # Hopp over NativeConfiguration — kan feile mellom versjonar
+            if proto_id == "OpenDAQNativeConfiguration":
+                log.info(f"  Cap {proto_id}: HOPPA OVER (daq.nd:// deaktivert)")
+                continue
+
+            ny_conn = f"{prefix}://{ip}:{port}/"
+            try:
+                noverande = cap.get_property_value("PrimaryConnectionString")
+            except Exception:
+                noverande = ""
+
+            if ip in str(noverande):
+                log.info(f"  Cap {proto_id}: PrimaryConnectionString OK ({noverande})")
+                continue
+
+            try:
+                cap.set_property_value("PrimaryConnectionString", ny_conn)
+                log.info(f"  Cap {proto_id}: PrimaryConnectionString → {ny_conn}")
+            except Exception as e:
+                log.warning(f"  Cap {proto_id}: Kunne ikkje sette PrimaryConnectionString: {e}")
+    except Exception as e:
+        log.warning(f"  _fiks_primary_connection_strings feilet: {e}")
 
 
 # --- Helsesjekk-løkke ---
