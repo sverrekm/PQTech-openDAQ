@@ -105,6 +105,19 @@ def _opprett_instance():
     if not os.environ.get("OPENDAQ_SERIAL"):
         os.environ["OPENDAQ_SERIAL"] = "DB00000001"
 
+    # Auto-detect MAC om ikkje allereie sett (backup for entrypoint)
+    if not os.environ.get("OPENDAQ_MAC"):
+        import glob as _glob
+        for addr_file in _glob.glob("/sys/class/net/*/address"):
+            try:
+                mac = open(addr_file).read().strip()
+                if mac and mac != "00:00:00:00:00:00":
+                    os.environ["OPENDAQ_MAC"] = mac
+                    log.info(f"  MAC auto-detect: {mac} ({addr_file})")
+                    break
+            except Exception:
+                pass
+
     import opendaq as daq
     builder = daq.InstanceBuilder()
     builder.add_module_path(module_path)

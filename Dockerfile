@@ -251,7 +251,10 @@ if serial_line in content:
         if (envSerial && envSerial[0])
             devInfo.setSerialNumber(envSerial);
     }
-    devInfo.setPlatform("RPi5-Docker");
+    {
+        const char* envPlatform = std::getenv("OPENDAQ_PLATFORM");
+        devInfo.setPlatform(envPlatform && envPlatform[0] ? envPlatform : "Raspberry Pi 5");
+    }
     devInfo.setSoftwareRevision("1.0.0-opendaq3.20");
     devInfo.setHardwareRevision("");
     devInfo.setDeviceManual("");
