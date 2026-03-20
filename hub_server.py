@@ -70,7 +70,8 @@ logging.getLogger().addHandler(_logg_buffer)
 # --- Globale variablar (trådtrygt med lock) ---
 
 _hub_lock = threading.Lock()
-_instance = None                # openDAQ Instance
+_server_instance = None         # openDAQ Instance (DewesoftX-eksponert, med root device)
+_client_instance = None         # openDAQ Instance (koplar til fjern-nodar, ikkje eksponert)
 _hub_konfig: HubKonfig = HubKonfig()
 _node_devices = {}              # node_id -> openDAQ device-objekt
 _node_status = {}               # node_id -> {"tilkobla": bool, "feil": str, ...}
@@ -87,15 +88,22 @@ def hent_logg(antall=200):
 # --- openDAQ Instance og tilkoblingar ---
 
 def _opprett_instance():
-    """Opprett openDAQ Instance med root device for DeviceInfo.
+    """Opprett TO openDAQ Instances: server + klient.
 
-    set_root_device("daqref://device0") gjer at C++ patchen i Dockerfile
-    set DeviceInfo (serial, model, manufacturer, MAC, DeviceType).
-    Utan dette ser DewesoftX ein eining utan serienummer → "disconnected".
-    NumberOfChannels=0 hindrar dummy-kanalar frå ref-devicen — dei ekte
-    kanalane kjem frå fjern-nodar via add_device().
+    Server-instansen (eksponert til DewesoftX via NativeStreaming/OPC-UA):
+      - Root device (daqref://device0) med DeviceInfo (serial, model, MAC)
+      - Kanalar og serverar — DewesoftX ser ÉI eining
+
+    Klient-instansen (intern, IKKJE eksponert):
+      - Koplar til fjern-nodar via add_device()
+      - Les data frå fjern-nodar (StreamReader)
+      - Ikkje synleg for DewesoftX — unngår sub-device-problem
+
+    Utan denne delinga vil add_device() legge fjern-nodar som sub-devices
+    i server-treet. DewesoftX ser dei som separate enheter med uoppnåeleg
+    VPN-IP → "disconnected".
     """
-    global _instance
+    global _server_instance, _client_instance
 
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
     module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
@@ -119,19 +127,18 @@ def _opprett_instance():
                 pass
 
     import opendaq as daq
+
+    # --- SERVER-instans (eksponert til DewesoftX) ---
     builder = daq.InstanceBuilder()
     builder.add_module_path(module_path)
     builder.add_discovery_server("mdns")
     builder.set_root_device("daqref://device0")
-
-    _instance = builder.build()
-    log.info("openDAQ Instance oppretta (hub-modus, med root device)")
+    _server_instance = builder.build()
+    log.info("Server-instans oppretta (root device, DewesoftX-eksponert)")
 
     # Sett NumberOfChannels til 1 (minimum krav for ref device).
-    # 0 kanalar kan gjere at DewesoftX avviser eininga som ugyldig.
-    # Dummy-kanalen frå ref-devicen er akseptabel overhead.
     try:
-        _instance.set_property_value("NumberOfChannels", 1)
+        _server_instance.set_property_value("NumberOfChannels", 1)
         log.info("  Root device: NumberOfChannels sett til 1")
     except Exception as e:
         log.warning(f"  Kunne ikkje sette NumberOfChannels=1: {e}")
@@ -139,7 +146,7 @@ def _opprett_instance():
     # GlobalSampleRate — DewesoftX forventar denne eigenskapen
     sample_rate = float(os.environ.get("SAMPLE_RATE", "20000"))
     try:
-        _instance.set_property_value("GlobalSampleRate", sample_rate)
+        _server_instance.set_property_value("GlobalSampleRate", sample_rate)
         log.info(f"  Root device: GlobalSampleRate sett til {sample_rate} Hz")
     except Exception as e:
         log.warning(f"  Kunne ikkje sette GlobalSampleRate: {e}")
@@ -147,10 +154,10 @@ def _opprett_instance():
     # GetPossibleSampleRate — DewesoftX TDSOpenDaqAI.CalcADCSampleRate treng denne
     try:
         try:
-            _instance.get_property("GetPossibleSampleRate")
+            _server_instance.get_property("GetPossibleSampleRate")
         except Exception:
             prop = daq.FloatPropertyBuilder("GetPossibleSampleRate", 200000.0)
-            _instance.add_property(prop.build())
+            _server_instance.add_property(prop.build())
             log.info("  Root device: GetPossibleSampleRate = 200000 Hz")
     except Exception as e:
         log.warning(f"  GetPossibleSampleRate feilet: {e}")
@@ -162,24 +169,30 @@ def _opprett_instance():
     ]:
         try:
             try:
-                _instance.get_property(namn)
+                _server_instance.get_property(namn)
             except Exception:
                 if typ == "int":
                     prop = daq.IntPropertyBuilder(namn, int(default))
-                    _instance.add_property(prop.build())
+                    _server_instance.add_property(prop.build())
                 elif typ == "string":
                     prop = daq.StringPropertyBuilder(namn, str(default))
-                    _instance.add_property(prop.build())
+                    _server_instance.add_property(prop.build())
                 log.info(f"  DewesoftX-prop {namn} = {default!r}")
         except Exception as e:
             log.warning(f"  DewesoftX-prop {namn} feilet: {e}")
 
     # Logg DeviceInfo for verifisering
     try:
-        info = _instance.info
+        info = _server_instance.info
         log.info(f"  DeviceInfo: serial={info.serial_number}, model={info.model}, manufacturer={info.manufacturer}")
     except Exception as e:
         log.debug(f"  Kunne ikkje lese DeviceInfo: {e}")
+
+    # --- KLIENT-instans (intern, for fjern-node-tilkoblingar) ---
+    client_builder = daq.InstanceBuilder()
+    client_builder.add_module_path(module_path)
+    _client_instance = client_builder.build()
+    log.info("Klient-instans oppretta (intern, for fjern-nodar)")
 
 
 def _koble_til_node(node: FjernNode) -> bool:
@@ -190,7 +203,7 @@ def _koble_til_node(node: FjernNode) -> bool:
     prøver å rekoble til serveren si annonserte IP. Vi brukar device-config
     for å overstyre dette.
     """
-    global _instance, _node_devices, _node_status
+    global _client_instance, _node_devices, _node_status
 
     import opendaq as daq
 
@@ -201,7 +214,7 @@ def _koble_til_node(node: FjernNode) -> bool:
         # Prøv å hente device-config for å overstyre endpoint-URL
         config = None
         try:
-            dev_types = _instance.available_device_types
+            dev_types = _client_instance.available_device_types
             # Prøv OPC-UA config-type
             for type_id in dev_types:
                 if 'opcua' in type_id.lower() or 'daq.opcua' in type_id.lower():
@@ -217,7 +230,7 @@ def _koble_til_node(node: FjernNode) -> bool:
         except Exception as e:
             log.info(f"  Ingen device-config tilgjengeleg: {e}")
 
-        device = _instance.add_device(tilkobling, config)
+        device = _client_instance.add_device(tilkobling, config)
         with _hub_lock:
             _node_devices[node.id] = device
             _node_status[node.id] = {
@@ -246,15 +259,15 @@ def _koble_til_node(node: FjernNode) -> bool:
 
 def _fråkoble_node(node_id: str):
     """Fråkoble og fjern ein node frå instansen."""
-    global _instance, _node_devices, _node_status
+    global _client_instance, _node_devices, _node_status
 
     with _hub_lock:
         device = _node_devices.pop(node_id, None)
         _node_status.pop(node_id, None)
 
-    if device and _instance:
+    if device and _client_instance:
         try:
-            _instance.remove_device(device)
+            _client_instance.remove_device(device)
             log.info(f"  Fjerna device for node {node_id}")
         except Exception as e:
             log.warning(f"  Feil ved remove_device for {node_id}: {e}")
@@ -394,7 +407,7 @@ def _start_serverar():
     daq.nd://IP:7420/. No har hub root device (daqref://device0) som
     node-modus, so begge serverar deler same device → ingen duplikat.
     """
-    global _instance
+    global _server_instance
 
     ip = os.environ.get("OPENDAQ_IP", "")
     servere = []
@@ -405,13 +418,13 @@ def _start_serverar():
         try:
             config = None
             try:
-                srv_type_obj = _instance.available_server_types.get(srv_type)
+                srv_type_obj = _server_instance.available_server_types.get(srv_type)
                 if srv_type_obj:
                     config = srv_type_obj.create_default_config()
             except Exception:
                 config = None
 
-            server = _instance.add_server(srv_type, config)
+            server = _server_instance.add_server(srv_type, config)
             servers_added.append((srv_type, server))
             servere.append(srv_type)
             log.info(f"  Server starta: {srv_type}")
@@ -454,9 +467,9 @@ def _fiks_primary_connection_strings(ip):
     vel ein annan IP enn OPC-UA. DewesoftX finn eininga via mDNS (éin IP),
     men NativeStreaming-cap kan peike til feil IP.
     """
-    global _instance
+    global _server_instance
     try:
-        caps = _instance.info.server_capabilities
+        caps = _server_instance.info.server_capabilities
         for cap in caps:
             proto_id = cap.protocol_id
             prefix = cap.prefix
@@ -493,7 +506,7 @@ def _fiks_nil_strings():
     når ein string-eigenskap har nil-verdi (nullptr) i staden for "".
     Same som opendaq_bro._fiks_alle_nil_strings().
     """
-    global _instance
+    global _server_instance
     import opendaq as daq
     ct = getattr(daq, 'CoreType', None)
     if ct is None:
@@ -520,11 +533,11 @@ def _fiks_nil_strings():
             log.warning(f"  _fiks_nil_strings({label}): {e}")
 
     # Device-eigenskapar
-    _fiks_obj(_instance, "Dev.")
+    _fiks_obj(_server_instance, "Dev.")
 
     # DeviceInfo-eigenskapar
     try:
-        info = _instance.info
+        info = _server_instance.info
         if info:
             _fiks_obj(info, "Info.")
     except Exception:
@@ -532,7 +545,7 @@ def _fiks_nil_strings():
 
     # Kanal-eigenskapar
     try:
-        for i, ch in enumerate(_instance.channels):
+        for i, ch in enumerate(_server_instance.channels):
             _fiks_obj(ch, f"Ch{i}.")
     except Exception:
         pass
@@ -647,7 +660,7 @@ def _helsesjekk_loop():
                         _node_status[node.id]["feil"] = str(e)
                     # Prøv remove_device
                     try:
-                        _instance.remove_device(device)
+                        _client_instance.remove_device(device)
                     except Exception:
                         pass
                     with _hub_lock:
