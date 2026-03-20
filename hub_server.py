@@ -409,6 +409,14 @@ def _start_serverar():
     if ip:
         _fiks_primary_connection_strings(ip)
 
+    # Fiks nil string-eigenskapar (DewesoftX krasjar med 'Interface object is nil')
+    _fiks_nil_strings()
+
+    # Fiks stale OPC-UA verdiar (C++ writeValue-callback feiler,
+    # so OPC-UA-noden beheld default verdiar sjølv etter Python set_property_value)
+    if 'OpenDAQOPCUA' in servere:
+        _fiks_opcua_verdiar()
+
     # Aktiver mDNS discovery BERRE på NativeStreaming.
     # OPC-UA skal IKKJE annonserast — DewesoftX finn den via port-scanning
     # og ville lagt til ei ekstra eining (duplikat).
@@ -463,6 +471,129 @@ def _fiks_primary_connection_strings(ip):
                 log.warning(f"  Cap {proto_id}: Kunne ikkje sette PrimaryConnectionString: {e}")
     except Exception as e:
         log.warning(f"  _fiks_primary_connection_strings feilet: {e}")
+
+
+def _fiks_nil_strings():
+    """Sett nil string-eigenskapar til tom streng.
+
+    DewesoftX krasjar med 'Interface object is nil' i InitStringProperty
+    når ein string-eigenskap har nil-verdi (nullptr) i staden for "".
+    Same som opendaq_bro._fiks_alle_nil_strings().
+    """
+    global _instance
+    import opendaq as daq
+    ct = getattr(daq, 'CoreType', None)
+    if ct is None:
+        return
+
+    def _fiks_obj(obj, label):
+        try:
+            for prop in obj.visible_properties:
+                try:
+                    if prop.value_type == ct.ctString:
+                        try:
+                            val = obj.get_property_value(prop.name)
+                        except Exception:
+                            val = None
+                        if val is None:
+                            try:
+                                obj.set_property_value(prop.name, "")
+                                log.info(f"  {label}{prop.name}: nil → ''")
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        except Exception as e:
+            log.warning(f"  _fiks_nil_strings({label}): {e}")
+
+    # Device-eigenskapar
+    _fiks_obj(_instance, "Dev.")
+
+    # DeviceInfo-eigenskapar
+    try:
+        info = _instance.info
+        if info:
+            _fiks_obj(info, "Info.")
+    except Exception:
+        pass
+
+    # Kanal-eigenskapar
+    try:
+        for i, ch in enumerate(_instance.channels):
+            _fiks_obj(ch, f"Ch{i}.")
+    except Exception:
+        pass
+
+    log.info("  Nil string-eigenskapar fiksa")
+
+
+def _fiks_opcua_verdiar():
+    """Skriv stale OPC-UA eigenskapar direkte via asyncua.
+
+    C++ writeValue()-callbacken feiler med 'DataType incompatible'.
+    Python SDK set_property_value() endrar intern state, men OPC-UA-noden
+    beheld gammal verdi. DewesoftX les OPC-UA via NativeConfiguration
+    og får feil verdiar → feil connection string, disconnected.
+
+    Same logikk som opendaq_bro._fiks_opcua_verdiar().
+    """
+    try:
+        import asyncio
+        from asyncua import Client as OpcClient, ua as opcua
+    except ImportError:
+        log.warning("  asyncua ikkje installert — kan ikkje fikse OPC-UA verdiar")
+        return
+
+    n_kanalar = 1  # Hub root device har 1 dummy-kanal
+    sr = float(os.environ.get("SAMPLE_RATE", "20000"))
+
+    async def _skriv():
+        c = OpcClient("opc.tcp://127.0.0.1:4840", timeout=5)
+        await c.connect()
+        fiksa = 0
+        try:
+            # NumberOfChannels
+            node = c.get_node(opcua.NodeId("/RefDev0/NumberOfChannels", 4))
+            old = await node.read_value()
+            written = False
+            for vtype in (opcua.VariantType.Int64, opcua.VariantType.Int32):
+                try:
+                    dv = opcua.DataValue(opcua.Variant(n_kanalar, vtype))
+                    await node.write_value(dv)
+                    written = True
+                    if old != n_kanalar:
+                        log.info(f"  OPC-UA fiks: NumberOfChannels {old} → {n_kanalar} ({vtype})")
+                        fiksa += 1
+                    else:
+                        log.info(f"  OPC-UA fiks: NumberOfChannels stadfesta {n_kanalar} ({vtype})")
+                    break
+                except Exception as e_type:
+                    log.info(f"  OPC-UA NumberOfChannels {vtype} avvist: {e_type}")
+            if not written:
+                log.warning(f"  OPC-UA fiks: kunne ikkje skrive NumberOfChannels={n_kanalar}")
+
+            # GlobalSampleRate
+            sr_node = c.get_node(opcua.NodeId("/RefDev0/GlobalSampleRate", 4))
+            old_sr = await sr_node.read_value()
+            if abs(old_sr - sr) > 0.1:
+                dv = opcua.DataValue(opcua.Variant(sr, opcua.VariantType.Double))
+                await sr_node.write_value(dv)
+                log.info(f"  OPC-UA fiks: GlobalSampleRate {old_sr} → {sr}")
+                fiksa += 1
+        except Exception as e:
+            log.warning(f"  OPC-UA fiks feilet: {e}")
+        finally:
+            await c.disconnect()
+        return fiksa
+
+    try:
+        loop = asyncio.new_event_loop()
+        n = loop.run_until_complete(_skriv())
+        loop.close()
+        if n:
+            log.info(f"  OPC-UA: {n} stale verdiar fiksa")
+    except Exception as e:
+        log.warning(f"  OPC-UA fixup feilet: {e}")
 
 
 # --- Helsesjekk-løkke ---
