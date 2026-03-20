@@ -87,7 +87,14 @@ def hent_logg(antall=200):
 # --- openDAQ Instance og tilkoblingar ---
 
 def _opprett_instance():
-    """Opprett openDAQ Instance med klient+server-modular aktive."""
+    """Opprett openDAQ Instance med root device for DeviceInfo.
+
+    set_root_device("daqref://device0") gjer at C++ patchen i Dockerfile
+    set DeviceInfo (serial, model, manufacturer, MAC, DeviceType).
+    Utan dette ser DewesoftX ein eining utan serienummer → "disconnected".
+    NumberOfChannels=0 hindrar dummy-kanalar frå ref-devicen — dei ekte
+    kanalane kjem frå fjern-nodar via add_device().
+    """
     global _instance
 
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
@@ -97,9 +104,25 @@ def _opprett_instance():
     builder = daq.InstanceBuilder()
     builder.add_module_path(module_path)
     builder.add_discovery_server("mdns")
+    builder.set_root_device("daqref://device0")
 
     _instance = builder.build()
-    log.info("openDAQ Instance oppretta (hub-modus)")
+    log.info("openDAQ Instance oppretta (hub-modus, med root device)")
+
+    # Sett NumberOfChannels til 0 — vi vil ikkje ha dummy-kanalar frå
+    # ref-devicen. Dei ekte kanalane kjem frå fjern-nodar.
+    try:
+        _instance.set_property_value("NumberOfChannels", 0)
+        log.info("  Root device: NumberOfChannels sett til 0")
+    except Exception as e:
+        log.warning(f"  Kunne ikkje sette NumberOfChannels=0: {e}")
+
+    # Logg DeviceInfo for verifisering
+    try:
+        info = _instance.info
+        log.info(f"  DeviceInfo: serial={info.serial_number}, model={info.model}, manufacturer={info.manufacturer}")
+    except Exception as e:
+        log.debug(f"  Kunne ikkje lese DeviceInfo: {e}")
 
 
 def _koble_til_node(node: FjernNode) -> bool:
