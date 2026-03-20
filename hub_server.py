@@ -368,51 +368,59 @@ def hent_hub_kanalar() -> list:
 
 
 def _start_serverar():
-    """Start NativeStreaming server på hub-instansen.
+    """Start NativeStreaming + OPC-UA serverar på hub-instansen.
 
-    BERRE NativeStreaming — IKKJE OPC-UA.
-    I node-modus (opendaq_bro.py) deler begge serverar same root device
-    (daqref://device0), so DewesoftX ser éi eining. Hub-modus har ikkje
-    root device — instansen aggregerer fjern-nodar. Med OPC-UA på port 4840
-    finn DewesoftX den via port-scanning og legg til ei EKSTRA eining:
-      1) daq.nd:// (NativeStreaming, via mDNS) — fungerer
-      2) daq.opcua:// (OPC-UA, via port-scan) — duplikat, error 0x80000006
-    NativeStreaming (daq.nd://) har eigen NativeConfiguration-protokoll
-    som handterer metadata/konfig utan separat OPC-UA-server.
+    Same oppsett som node-modus (opendaq_bro.py):
+      - NativeStreaming FYRST (port 7420, data + NativeConfiguration)
+      - OPC-UA SIST (port 4840, metadata — krevd internt av NativeStreaming)
+      - Discovery BERRE på NativeStreaming (ikkje OPC-UA, unngår duplikat)
+
+    Tidlegare var OPC-UA utelatt, men NativeStreaming sin NativeConfiguration
+    treng OPC-UA internt for metadata-transport. Utan OPC-UA vert
+    PrimaryConnectionString feil: daq://Dewesoft_DB00000001 i staden for
+    daq.nd://IP:7420/. No har hub root device (daqref://device0) som
+    node-modus, so begge serverar deler same device → ingen duplikat.
     """
     global _instance
 
     ip = os.environ.get("OPENDAQ_IP", "")
     servere = []
-    ns_server = None
+    servers_added = []  # (srv_type, server_obj)
 
-    # Start BERRE NativeStreaming
-    try:
-        config = None
+    # Start NativeStreaming FYRST, deretter OPC-UA (openDAQ-dokumentasjon)
+    for srv_type in ['OpenDAQNativeStreaming', 'OpenDAQOPCUA']:
         try:
-            srv_type_obj = _instance.available_server_types.get('OpenDAQNativeStreaming')
-            if srv_type_obj:
-                config = srv_type_obj.create_default_config()
-        except Exception:
             config = None
+            try:
+                srv_type_obj = _instance.available_server_types.get(srv_type)
+                if srv_type_obj:
+                    config = srv_type_obj.create_default_config()
+            except Exception:
+                config = None
 
-        ns_server = _instance.add_server('OpenDAQNativeStreaming', config)
-        servere.append('OpenDAQNativeStreaming')
-        log.info(f"  Server starta: OpenDAQNativeStreaming")
-    except Exception as e:
-        log.warning(f"  OpenDAQNativeStreaming feilet: {e}")
+            server = _instance.add_server(srv_type, config)
+            servers_added.append((srv_type, server))
+            servere.append(srv_type)
+            log.info(f"  Server starta: {srv_type}")
+        except Exception as e:
+            log.warning(f"  {srv_type} feilet: {e}")
 
     # Fiks PrimaryConnectionString for multi-IP Pi (WiFi + LAN)
     if ip:
         _fiks_primary_connection_strings(ip)
 
-    # Aktiver mDNS discovery so DewesoftX finn hub-en
-    if ns_server:
+    # Aktiver mDNS discovery BERRE på NativeStreaming.
+    # OPC-UA skal IKKJE annonserast — DewesoftX finn den via port-scanning
+    # og ville lagt til ei ekstra eining (duplikat).
+    for srv_type, server in servers_added:
+        if srv_type == 'OpenDAQOPCUA':
+            log.info(f"  {srv_type}: discovery IKKJE aktivert (unngår duplikat)")
+            continue
         try:
-            ns_server.enable_discovery()
-            log.info(f"  OpenDAQNativeStreaming: discovery aktivert")
+            server.enable_discovery()
+            log.info(f"  {srv_type}: discovery aktivert")
         except Exception as e_disc:
-            log.warning(f"  OpenDAQNativeStreaming: enable_discovery feilet: {e_disc}")
+            log.warning(f"  {srv_type}: enable_discovery feilet: {e_disc}")
 
     log.info(f"Hub-serverar aktive: {servere}")
     return servere
