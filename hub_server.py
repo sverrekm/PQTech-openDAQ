@@ -100,6 +100,11 @@ def _opprett_instance():
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
     module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
 
+    # Sett OPENDAQ_SERIAL om ikkje allereie sett — C++ patchen les denne
+    # for DeviceInfo.serialNumber. Utan den vert det default "DevSer0".
+    if not os.environ.get("OPENDAQ_SERIAL"):
+        os.environ["OPENDAQ_SERIAL"] = "DB00000001"
+
     import opendaq as daq
     builder = daq.InstanceBuilder()
     builder.add_module_path(module_path)
