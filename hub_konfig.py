@@ -29,9 +29,9 @@ class FjernNode:
     id: str                     # Unikt ID (auto UUID[:8])
     namn: str                   # "Sundet - Tavle 3"
     adresse: str                # Tunnel-IP, t.d. "10.0.0.5"
-    port: int = 7420
+    port: int = 4840
     aktivert: bool = True
-    protokoll: str = "daq.nd"  # NativeStreaming (data + konfig), alt: "daq.opcua"
+    protokoll: str = "daq.opcua"  # OPC-UA (konfig + auto NativeStreaming), alt: "daq.nd"
     lokasjon: str = ""
 
     def til_dict(self) -> dict:
@@ -88,16 +88,18 @@ def les_hub_konfig() -> HubKonfig:
             log.info(f"Lasta hub-konfig fraa {HUB_KONFIG_STI}: "
                      f"{len(konfig.nodar)} nodar")
 
-            # Migrer frå daq.opcua (metadata-only) til daq.nd (data + konfig).
-            # Tidlegare versjonar brukte daq.opcua som standard, men DewesoftX
-            # treng NativeStreaming for datastrøyming gjennom hubben.
+            # Migrer frå daq.nd tilbake til daq.opcua.
+            # daq.nd:// (NativeConfiguration) er deaktivert på remote-nodar
+            # (opendaq_bro.py linje 1592) pga. kompatibilitetsproblem.
+            # Hub brukar daq.opcua:// for konfig — openDAQ-klienten
+            # oppdagar og koplar til NativeStreaming automatisk for data.
             migrert = False
             for node in konfig.nodar:
-                if node.protokoll == "daq.opcua" and node.port == 4840:
-                    node.protokoll = "daq.nd"
-                    node.port = 7420
+                if node.protokoll == "daq.nd":
+                    node.protokoll = "daq.opcua"
+                    node.port = 4840
                     log.info(f"  Migrert node '{node.namn}': "
-                             f"daq.opcua:4840 → daq.nd:7420")
+                             f"daq.nd → daq.opcua:4840")
                     migrert = True
             if migrert:
                 lagre_hub_konfig(konfig)
@@ -150,7 +152,7 @@ def valider_hub_konfig(data: dict) -> tuple:
             return None, f"Node {i}: 'adresse' kan ikkje vere tom"
         namn = str(n.get("namn", "")).strip() or adresse
 
-        port = n.get("port", 7420)
+        port = n.get("port", 4840)
         try:
             port = int(port)
         except (TypeError, ValueError):

@@ -194,10 +194,9 @@ def _opprett_instance():
 def _koble_til_node(node: FjernNode) -> bool:
     """Prøv å koble til ein fjern-node via add_device().
 
-    OPC-UA-serverar annonserer endpoint-URL med si eiga IP (t.d. macvlan).
-    Når hub-en koplar via Tailscale-IP, feilar OPC-UA-klienten fordi den
-    prøver å rekoble til serveren si annonserte IP. Vi brukar device-config
-    for å overstyre dette.
+    OPC-UA for konfig + openDAQ oppdagar NativeStreaming automatisk.
+    daq.nd:// (NativeConfiguration) er deaktivert på remote-nodar
+    (opendaq_bro.py linje 1592) — bruk daq.opcua:// som standard.
     """
     global _instance, _node_devices, _node_status
 
@@ -206,27 +205,21 @@ def _koble_til_node(node: FjernNode) -> bool:
     tilkobling = node.tilkobling_streng
     log.info(f"Koplar til node '{node.namn}' ({tilkobling})...")
 
-    # IKKJE TCP-probe NativeStreaming port 7420!
-    # TCP connect/disconnect til NativeStreaming opprettar ein stale
-    # "exclusive control"-sesjon som blokkerer påfølgjande add_device().
-    # opendaq_bro.py har same åtvaring (linje 424-427).
-
+    # Diagnostikk: list tilgjengelege device-typar (berre fyrste gong)
     try:
-        # Prøv å hente device-config for å overstyre endpoint-URL
+        dev_types = _instance.available_device_types
+        log.info(f"  Tilgjengelege device-typar: {list(dev_types.keys())}")
+    except Exception:
+        pass
+
+    def _prøv_tilkobling(conn_str):
+        """Prøv add_device med gjeven tilkoblingsstreng."""
         config = None
         try:
             dev_types = _instance.available_device_types
-            # Finn config-type som matchar noden sin protokoll
-            # daq.nd → native/nativestreaming, daq.opcua → opcua
-            proto = node.protokoll.lower()
             for type_id in dev_types:
                 tid = type_id.lower()
-                match = False
-                if proto == "daq.nd" and ('native' in tid or 'daq.nd' in tid):
-                    match = True
-                elif proto == "daq.opcua" and ('opcua' in tid or 'daq.opcua' in tid):
-                    match = True
-                if match:
+                if 'opcua' in conn_str and ('opcua' in tid):
                     config = dev_types[type_id].create_default_config()
                     for p in config.visible_properties:
                         try:
@@ -235,34 +228,66 @@ def _koble_til_node(node: FjernNode) -> bool:
                         except Exception:
                             pass
                     break
-        except Exception as e:
-            log.info(f"  Ingen device-config tilgjengeleg: {e}")
+        except Exception:
+            pass
+        return _instance.add_device(conn_str, config)
 
-        device = _instance.add_device(tilkobling, config)
+    try:
+        device = _prøv_tilkobling(tilkobling)
+    except Exception as e1:
+        log.warning(f"  {tilkobling} feila: {e1}")
+        device = None
+
+        # Fallback: prøv alternativ protokoll
+        if node.protokoll == "daq.opcua":
+            alt = f"daq.nd://{node.adresse}:7420/"
+        else:
+            alt = f"daq.opcua://{node.adresse}:4840/"
+        log.info(f"  Prøver fallback: {alt}")
+        try:
+            device = _prøv_tilkobling(alt)
+        except Exception as e2:
+            log.warning(f"  Fallback {alt} feila òg: {e2}")
+
+    if device:
         with _hub_lock:
             _node_devices[node.id] = device
+            n_ch = _tel_kanalar(device)
             _node_status[node.id] = {
                 "tilkobla": True,
                 "feil": None,
                 "sist_sett": datetime.now().isoformat(),
                 "tilkobla_sidan": datetime.now().isoformat(),
-                "antal_kanalar": _tel_kanalar(device),
+                "antal_kanalar": n_ch,
             }
-        log.info(f"  Tilkobla: '{node.namn}' — "
-                 f"{_node_status[node.id]['antal_kanalar']} kanalar")
+        log.info(f"  Tilkobla: '{node.namn}' — {n_ch} kanalar")
+
+        # Diagnostikk: list sub-device info og streaming-kjelder
+        try:
+            info = device.info
+            log.info(f"  Sub-device: namn={info.name}, serial={info.serial_number}")
+            caps = info.server_capabilities
+            for cap in caps:
+                try:
+                    pcs = cap.get_property_value("PrimaryConnectionString")
+                    log.info(f"  Sub-device cap: {cap.protocol_id} → {pcs}")
+                except Exception:
+                    log.info(f"  Sub-device cap: {cap.protocol_id} port={cap.port}")
+        except Exception as e:
+            log.info(f"  Sub-device info utilgjengeleg: {e}")
+
         return True
-    except Exception as e:
-        with _hub_lock:
-            _node_devices.pop(node.id, None)
-            _node_status[node.id] = {
-                "tilkobla": False,
-                "feil": str(e),
-                "sist_sett": None,
-                "tilkobla_sidan": None,
-                "antal_kanalar": 0,
-            }
-        log.warning(f"  Feil ved tilkobling til '{node.namn}': {e}")
-        return False
+
+    with _hub_lock:
+        _node_devices.pop(node.id, None)
+        _node_status[node.id] = {
+            "tilkobla": False,
+            "feil": str(e1),
+            "sist_sett": None,
+            "tilkobla_sidan": None,
+            "antal_kanalar": 0,
+        }
+    return False
 
 
 def _fråkoble_node(node_id: str):
@@ -767,8 +792,8 @@ def legg_til_node_api(data: dict) -> tuple:
         return False, "Mangler 'adresse'", None
 
     namn = str(data.get("namn", "")).strip() or adresse
-    port = int(data.get("port", 7420))
-    protokoll = str(data.get("protokoll", "daq.nd"))
+    port = int(data.get("port", 4840))
+    protokoll = str(data.get("protokoll", "daq.opcua"))
     lokasjon = str(data.get("lokasjon", ""))
 
     node = FjernNode(

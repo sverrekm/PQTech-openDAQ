@@ -12,8 +12,8 @@ export default function HubNodeConfigCard() {
   const [nyAdresse, setNyAdresse] = useState('')
   const [nyNamn, setNyNamn] = useState('')
   const [nyLokasjon, setNyLokasjon] = useState('')
-  const [nyPort, setNyPort] = useState('7420')
-  const [nyProtokoll, setNyProtokoll] = useState('daq.nd')
+  const [nyPort, setNyPort] = useState('4840')
+  const [nyProtokoll, setNyProtokoll] = useState('daq.opcua')
   const [leggTilOpen, setLeggTilOpen] = useState(false)
   const [melding, setMelding] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -123,8 +123,8 @@ export default function HubNodeConfigCard() {
                   value={nyProtokoll} onChange={e => setNyProtokoll(e.target.value)}
                   className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
                 >
-                  <option value="daq.nd">NativeStreaming</option>
                   <option value="daq.opcua">OPC-UA</option>
+                  <option value="daq.nd">NativeStreaming</option>
                 </select>
               </div>
             </div>
