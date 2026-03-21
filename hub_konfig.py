@@ -29,9 +29,9 @@ class FjernNode:
     id: str                     # Unikt ID (auto UUID[:8])
     namn: str                   # "Sundet - Tavle 3"
     adresse: str                # Tunnel-IP, t.d. "10.0.0.5"
-    port: int = 4840
+    port: int = 7420
     aktivert: bool = True
-    protokoll: str = "daq.opcua"  # eller "daq.nd"
+    protokoll: str = "daq.nd"  # NativeStreaming (data + konfig), alt: "daq.opcua"
     lokasjon: str = ""
 
     def til_dict(self) -> dict:
@@ -43,9 +43,9 @@ class FjernNode:
             id=str(d.get("id", uuid.uuid4().hex[:8])),
             namn=str(d.get("namn", "")),
             adresse=str(d.get("adresse", "")),
-            port=int(d.get("port", 4840)),
+            port=int(d.get("port", 7420)),
             aktivert=bool(d.get("aktivert", True)),
-            protokoll=str(d.get("protokoll", "daq.opcua")),
+            protokoll=str(d.get("protokoll", "daq.nd")),
             lokasjon=str(d.get("lokasjon", "")),
         )
 
@@ -143,7 +143,7 @@ def valider_hub_konfig(data: dict) -> tuple:
         if port < 1 or port > 65535:
             return None, f"Node {i}: port {port} utanfor gyldig område (1-65535)"
 
-        protokoll = str(n.get("protokoll", "daq.opcua")).strip()
+        protokoll = str(n.get("protokoll", "daq.nd")).strip()
         if protokoll not in ("daq.opcua", "daq.nd"):
             return None, f"Node {i}: ugyldig protokoll '{protokoll}' (daq.opcua eller daq.nd)"
 

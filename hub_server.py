@@ -767,8 +767,8 @@ def legg_til_node_api(data: dict) -> tuple:
         return False, "Mangler 'adresse'", None
 
     namn = str(data.get("namn", "")).strip() or adresse
-    port = int(data.get("port", 4840))
-    protokoll = str(data.get("protokoll", "daq.opcua"))
+    port = int(data.get("port", 7420))
+    protokoll = str(data.get("protokoll", "daq.nd"))
     lokasjon = str(data.get("lokasjon", ""))
 
     node = FjernNode(
