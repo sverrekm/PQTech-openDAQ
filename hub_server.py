@@ -232,10 +232,12 @@ def _koble_til_node(node: FjernNode) -> bool:
             pass
         return _instance.add_device(conn_str, config)
 
+    feil_melding = ""
     try:
         device = _prøv_tilkobling(tilkobling)
     except Exception as e1:
-        log.warning(f"  {tilkobling} feila: {e1}")
+        feil_melding = str(e1)
+        log.warning(f"  {tilkobling} feila: {feil_melding}")
         device = None
 
         # Fallback: prøv alternativ protokoll
@@ -247,7 +249,8 @@ def _koble_til_node(node: FjernNode) -> bool:
         try:
             device = _prøv_tilkobling(alt)
         except Exception as e2:
-            log.warning(f"  Fallback {alt} feila òg: {e2}")
+            feil_melding = str(e2)
+            log.warning(f"  Fallback {alt} feila òg: {feil_melding}")
 
     if device:
         with _hub_lock:
@@ -282,7 +285,7 @@ def _koble_til_node(node: FjernNode) -> bool:
         _node_devices.pop(node.id, None)
         _node_status[node.id] = {
             "tilkobla": False,
-            "feil": str(e1),
+            "feil": feil_melding,
             "sist_sett": None,
             "tilkobla_sidan": None,
             "antal_kanalar": 0,
@@ -584,27 +587,12 @@ def _fiks_nil_strings():
     except Exception:
         pass
 
-    # Sub-device eigenskapar (fjern-nodar) — DewesoftX kan krasje
-    # om sub-device har nil string-eigenskapar i device-treet.
-    try:
-        devices = _instance.devices
-        for i, dev in enumerate(devices):
-            _fiks_obj(dev, f"SubDev{i}.")
-            try:
-                dev_info = dev.info
-                if dev_info:
-                    _fiks_obj(dev_info, f"SubDev{i}.Info.")
-            except Exception:
-                pass
-            try:
-                for j, ch in enumerate(dev.channels):
-                    _fiks_obj(ch, f"SubDev{i}.Ch{j}.")
-            except Exception:
-                pass
-    except Exception as e:
-        log.warning(f"  Sub-device nil string-fiks feilet: {e}")
+    # MERK: Sub-device (fjern-nodar) eigenskapar vert IKKJE fiksa her.
+    # Sub-device properties går gjennom OPC-UA klient til remote node,
+    # og kan trigge "terminate called" (SIGABRT) om tilkoblinga har tidsavbrot.
+    # Nil strings på fjern-nodar må fiksast på REMOTE-noden (opendaq_bro.py).
 
-    log.info("  Nil string-eigenskapar fiksa")
+    log.info("  Nil string-eigenskapar fiksa (berre root device)")
 
 
 def _fiks_opcua_verdiar():
