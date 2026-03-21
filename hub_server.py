@@ -70,9 +70,10 @@ logging.getLogger().addHandler(_logg_buffer)
 # --- Globale variablar (trådtrygt med lock) ---
 
 _hub_lock = threading.Lock()
-_instance = None                # openDAQ Instance (server + klient i same instans)
+_instance = None                # openDAQ Instance — BERRE server (DewesoftX koplar hit)
+_klient_instance = None         # openDAQ Instance — BERRE klient (les fjern-nodar)
 _hub_konfig: HubKonfig = HubKonfig()
-_node_devices = {}              # node_id -> openDAQ device-objekt
+_node_devices = {}              # node_id -> openDAQ device-objekt (på _klient_instance)
 _node_status = {}               # node_id -> {"tilkobla": bool, "feil": str, ...}
 _helsesjekk_aktiv = True
 _hub_startet = None             # ISO timestamp
@@ -87,15 +88,17 @@ def hent_logg(antall=200):
 # --- openDAQ Instance og tilkoblingar ---
 
 def _opprett_instance():
-    """Opprett openDAQ Instance med root device + klient-modular.
+    """Opprett TO openDAQ Instance-ar:
 
-    Éin instans for alt:
-      - Root device (daqref://device0) med DeviceInfo (serial, model, MAC)
-      - Fjern-nodar vert lagt til via add_device() (sub-devices)
-      - NativeStreaming + OPC-UA serverar eksponerer HEILE device-treet
-      - DewesoftX les data frå sub-devices gjennom hub sin NativeStreaming
+    1. _instance (server): Root device (daqref://device0) med DeviceInfo.
+       NativeStreaming + OPC-UA serverar køyrer her. DewesoftX koplar hit.
+       INGEN sub-devices — unngår 'DataType incompatible' OPC-UA feil
+       som gjer at DewesoftX viser 'Disconnected'.
+
+    2. _klient_instance (klient): Koplar til fjern-nodar via add_device().
+       Ingen serverar — berre for å lese kanal-data til web UI og hub-buffer.
     """
-    global _instance
+    global _instance, _klient_instance
 
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
     module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
@@ -188,6 +191,12 @@ def _opprett_instance():
     except Exception as e:
         log.debug(f"  Kunne ikkje lese DeviceInfo: {e}")
 
+    # --- Klient-instans (koplar til fjern-nodar, ingen serverar) ---
+    klient_builder = daq.InstanceBuilder()
+    klient_builder.add_module_path(module_path)
+    _klient_instance = klient_builder.build()
+    log.info("Klient-instans oppretta (for fjern-node-tilkoblingar)")
+
 
 def _oppdater_root_kanalar():
     """Oppdater root device NumberOfChannels til totalt antal fjern-kanalar.
@@ -223,7 +232,7 @@ def _koble_til_node(node: FjernNode) -> bool:
     daq.nd:// (NativeConfiguration) er deaktivert på remote-nodar
     (opendaq_bro.py linje 1592) — bruk daq.opcua:// som standard.
     """
-    global _instance, _node_devices, _node_status
+    global _klient_instance, _node_devices, _node_status
 
     import opendaq as daq
 
@@ -232,16 +241,16 @@ def _koble_til_node(node: FjernNode) -> bool:
 
     # Diagnostikk: list tilgjengelege device-typar (berre fyrste gong)
     try:
-        dev_types = _instance.available_device_types
+        dev_types = _klient_instance.available_device_types
         log.info(f"  Tilgjengelege device-typar: {list(dev_types.keys())}")
     except Exception:
         pass
 
     def _prøv_tilkobling(conn_str):
-        """Prøv add_device med gjeven tilkoblingsstreng."""
+        """Prøv add_device på klient-instansen."""
         config = None
         try:
-            dev_types = _instance.available_device_types
+            dev_types = _klient_instance.available_device_types
             for type_id in dev_types:
                 tid = type_id.lower()
                 if 'opcua' in conn_str and ('opcua' in tid):
@@ -255,7 +264,7 @@ def _koble_til_node(node: FjernNode) -> bool:
                     break
         except Exception:
             pass
-        return _instance.add_device(conn_str, config)
+        return _klient_instance.add_device(conn_str, config)
 
     feil_melding = ""
     try:
@@ -319,16 +328,16 @@ def _koble_til_node(node: FjernNode) -> bool:
 
 
 def _fråkoble_node(node_id: str):
-    """Fråkoble og fjern ein node frå instansen."""
-    global _instance, _node_devices, _node_status
+    """Fråkoble og fjern ein node frå klient-instansen."""
+    global _klient_instance, _node_devices, _node_status
 
     with _hub_lock:
         device = _node_devices.pop(node_id, None)
         _node_status.pop(node_id, None)
 
-    if device and _instance:
+    if device and _klient_instance:
         try:
-            _instance.remove_device(device)
+            _klient_instance.remove_device(device)
             log.info(f"  Fjerna device for node {node_id}")
         except Exception as e:
             log.warning(f"  Feil ved remove_device for {node_id}: {e}")
@@ -537,11 +546,6 @@ def _fiks_primary_connection_strings(ip):
             prefix = cap.prefix
             port = cap.port
 
-            # Hopp over NativeConfiguration — kan feile mellom versjonar
-            if proto_id == "OpenDAQNativeConfiguration":
-                log.info(f"  Cap {proto_id}: HOPPA OVER (daq.nd:// deaktivert)")
-                continue
-
             ny_conn = f"{prefix}://{ip}:{port}/"
             try:
                 noverande = cap.get_property_value("PrimaryConnectionString")
@@ -698,10 +702,9 @@ def _fiks_opcua_verdiar():
 
 
 def _logg_opcua_tre():
-    """Browse OPC-UA treet og logg sub-device nodar for diagnostikk.
+    """Browse OPC-UA treet og logg kva DewesoftX ser (diagnostikk).
 
-    Hjelper med å forstå kva DewesoftX ser når den koplar til hubben.
-    Loggar berre dei fyrste 3 nivåa under /RefDev0/Dev/ for å avgrense output.
+    Berre server-instansen (_instance) — ingen sub-devices.
     """
     try:
         import asyncio
@@ -713,7 +716,6 @@ def _logg_opcua_tre():
         c = OpcClient("opc.tcp://127.0.0.1:4840", timeout=5)
         await c.connect()
         try:
-            # Browse RefDev0 for å finne sub-devices
             root = c.get_node(opcua.NodeId("/RefDev0", 4))
             children = await root.get_children()
             log.info(f"  OPC-UA tre /RefDev0/: {len(children)} barn")
@@ -721,25 +723,17 @@ def _logg_opcua_tre():
             for child in children:
                 browse_name = await child.read_browse_name()
                 namn = browse_name.Name
-                log.info(f"  OPC-UA tre /RefDev0/{namn}")
-
-                # Gå eitt nivå djupare for Dev/ (sub-devices)
-                if namn == "Dev":
-                    sub_children = await child.get_children()
-                    for sub in sub_children:
-                        sub_name = (await sub.read_browse_name()).Name
-                        log.info(f"  OPC-UA tre /RefDev0/Dev/{sub_name}")
-
-                        # List eigenskapar på sub-device
-                        sub_props = await sub.get_children()
-                        for prop in sub_props[:20]:  # Avgrens til 20
-                            prop_name = (await prop.read_browse_name()).Name
-                            try:
-                                val = await prop.read_value()
-                                val_str = repr(val)[:80]
-                                log.info(f"    {prop_name} = {val_str}")
-                            except Exception as e:
-                                log.info(f"    {prop_name} = <feil: {e}>")
+                # Logg berre nokre viktige nodar, ikkje heile treet
+                if namn in ("NumberOfChannels", "GlobalSampleRate", "IO",
+                            "Dev", "Sig", "FB", "IP"):
+                    try:
+                        val = await child.read_value()
+                        log.info(f"  OPC-UA /RefDev0/{namn} = {repr(val)[:80]}")
+                    except Exception:
+                        sub_count = len(await child.get_children())
+                        log.info(f"  OPC-UA /RefDev0/{namn} ({sub_count} barn)")
+                else:
+                    log.info(f"  OPC-UA /RefDev0/{namn}")
         except Exception as e:
             log.info(f"  OPC-UA tre-browse feilet: {e}")
         finally:
@@ -789,9 +783,9 @@ def _helsesjekk_loop():
                     with _hub_lock:
                         _node_status[node.id]["tilkobla"] = False
                         _node_status[node.id]["feil"] = str(e)
-                    # Prøv remove_device
+                    # Prøv remove_device frå klient-instansen
                     try:
-                        _instance.remove_device(device)
+                        _klient_instance.remove_device(device)
                     except Exception:
                         pass
                     with _hub_lock:
