@@ -100,9 +100,11 @@ def _opprett_instance():
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
     module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
 
-    # Deaktiver RefDevice si interne datagenerering — hubben brukar berre
-    # sub-devices (fjern-nodar), ikkje root device sine syntetiske kanalar.
-    os.environ.setdefault("OPENDAQ_DISABLE_ACQ", "1")
+    # IKKJE deaktiver RefDevice — DewesoftX krev at root device har kanalar.
+    # Sub-device-kanalar har DataType incompatible-problem i OPC-UA, so
+    # DewesoftX kan berre lese root device kanalar. Root device genererer
+    # syntetiske signal som DewesoftX kan synkronisere mot.
+    # os.environ.setdefault("OPENDAQ_DISABLE_ACQ", "1")  # DEAKTIVERT
 
     # Sett OPENDAQ_SERIAL om ikkje allereie sett — C++ patchen les denne
     # for DeviceInfo.serialNumber. Utan den vert det default "DevSer0".
@@ -131,18 +133,15 @@ def _opprett_instance():
     _instance = builder.build()
     log.info("openDAQ Instance oppretta (hub-modus, root device + klient)")
 
-    # Sett NumberOfChannels til 0 — hubben eksponerer berre sub-device kanalar
-    # frå fjern-nodar, ikkje dummy-kanalar frå root RefDevice.
+    # Start med 1 kanal — vert oppdatert til totalt antal fjern-kanalar
+    # etter at nodar er tilkobla (_oppdater_root_kanalar).
+    # DewesoftX krev at root device har kanalar — sub-device kanalar
+    # har DataType incompatible-problem og kan ikkje lesast.
     try:
-        _instance.set_property_value("NumberOfChannels", 0)
-        log.info("  Root device: NumberOfChannels sett til 0 (berre sub-devices)")
+        _instance.set_property_value("NumberOfChannels", 1)
+        log.info("  Root device: NumberOfChannels sett til 1 (oppdaterast etter node-tilkobling)")
     except Exception as e:
-        # RefDevice krev minimum 1 kanal — fallback
-        try:
-            _instance.set_property_value("NumberOfChannels", 1)
-            log.info("  Root device: NumberOfChannels fallback til 1")
-        except Exception as e2:
-            log.warning(f"  Kunne ikkje sette NumberOfChannels: {e2}")
+        log.warning(f"  Kunne ikkje sette NumberOfChannels: {e}")
 
     # GlobalSampleRate — DewesoftX forventar denne eigenskapen
     sample_rate = float(os.environ.get("SAMPLE_RATE", "20000"))
@@ -189,6 +188,32 @@ def _opprett_instance():
     except Exception as e:
         log.debug(f"  Kunne ikkje lese DeviceInfo: {e}")
 
+
+def _oppdater_root_kanalar():
+    """Oppdater root device NumberOfChannels til totalt antal fjern-kanalar.
+
+    Må kallast ETTER node-tilkobling og FØR server-start.
+    set_property_value() endrar den interne C++ device-tilstanden
+    slik at RefDevice faktisk oppretter det rette antalet kanalar.
+    """
+    global _instance
+
+    n_kanalar = 0
+    with _hub_lock:
+        for nid, dev in _node_devices.items():
+            n_kanalar += _tel_kanalar(dev)
+
+    if n_kanalar < 1:
+        n_kanalar = 1
+        log.info("  Ingen fjern-kanalar — beheld 1 root-kanal")
+    else:
+        log.info(f"  Totalt {n_kanalar} fjern-kanalar — oppdaterer root device")
+
+    try:
+        _instance.set_property_value("NumberOfChannels", n_kanalar)
+        log.info(f"  Root device: NumberOfChannels → {n_kanalar}")
+    except Exception as e:
+        log.warning(f"  Kunne ikkje oppdatere NumberOfChannels til {n_kanalar}: {e}")
 
 
 def _koble_til_node(node: FjernNode) -> bool:
@@ -612,7 +637,15 @@ def _fiks_opcua_verdiar():
         log.warning("  asyncua ikkje installert — kan ikkje fikse OPC-UA verdiar")
         return
 
-    n_kanalar = 0  # Hub root device har 0 eigne kanalar (berre sub-devices)
+    # Tel totalt antal kanalar frå alle tilkobla fjern-nodar
+    n_kanalar = 0
+    with _hub_lock:
+        for nid, dev in _node_devices.items():
+            n_kanalar += _tel_kanalar(dev)
+    # Minimum 1 kanal for at DewesoftX skal akseptere eininga
+    if n_kanalar < 1:
+        n_kanalar = 1
+    log.info(f"  OPC-UA fiks: brukar n_kanalar={n_kanalar} (frå fjern-nodar)")
     sr = float(os.environ.get("SAMPLE_RATE", "20000"))
 
     async def _skriv():
@@ -950,6 +983,11 @@ def start_hub():
             _koble_til_node(node)
         else:
             log.info(f"  Node '{node.namn}' deaktivert — hoppar over")
+
+    # Oppdater root device kanalar til å matche fjern-nodar.
+    # Må skje FØR server-start slik at OPC-UA/NativeStreaming
+    # eksponerer rett antal kanalar frå starten.
+    _oppdater_root_kanalar()
 
     # Start serverar
     _start_serverar()
