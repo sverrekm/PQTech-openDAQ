@@ -475,6 +475,7 @@ def _start_serverar():
     # so OPC-UA-noden beheld default verdiar sjølv etter Python set_property_value)
     if 'OpenDAQOPCUA' in servere:
         _fiks_opcua_verdiar()
+        _logg_opcua_tre()
 
     # Aktiver mDNS discovery BERRE på NativeStreaming.
     # OPC-UA skal IKKJE annonserast — DewesoftX finn den via port-scanning
@@ -583,6 +584,26 @@ def _fiks_nil_strings():
     except Exception:
         pass
 
+    # Sub-device eigenskapar (fjern-nodar) — DewesoftX kan krasje
+    # om sub-device har nil string-eigenskapar i device-treet.
+    try:
+        devices = _instance.devices
+        for i, dev in enumerate(devices):
+            _fiks_obj(dev, f"SubDev{i}.")
+            try:
+                dev_info = dev.info
+                if dev_info:
+                    _fiks_obj(dev_info, f"SubDev{i}.Info.")
+            except Exception:
+                pass
+            try:
+                for j, ch in enumerate(dev.channels):
+                    _fiks_obj(ch, f"SubDev{i}.Ch{j}.")
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning(f"  Sub-device nil string-fiks feilet: {e}")
+
     log.info("  Nil string-eigenskapar fiksa")
 
 
@@ -653,6 +674,62 @@ def _fiks_opcua_verdiar():
             log.info(f"  OPC-UA: {n} stale verdiar fiksa")
     except Exception as e:
         log.warning(f"  OPC-UA fixup feilet: {e}")
+
+
+def _logg_opcua_tre():
+    """Browse OPC-UA treet og logg sub-device nodar for diagnostikk.
+
+    Hjelper med å forstå kva DewesoftX ser når den koplar til hubben.
+    Loggar berre dei fyrste 3 nivåa under /RefDev0/Dev/ for å avgrense output.
+    """
+    try:
+        import asyncio
+        from asyncua import Client as OpcClient, ua as opcua
+    except ImportError:
+        return
+
+    async def _browse():
+        c = OpcClient("opc.tcp://127.0.0.1:4840", timeout=5)
+        await c.connect()
+        try:
+            # Browse RefDev0 for å finne sub-devices
+            root = c.get_node(opcua.NodeId("/RefDev0", 4))
+            children = await root.get_children()
+            log.info(f"  OPC-UA tre /RefDev0/: {len(children)} barn")
+
+            for child in children:
+                browse_name = await child.read_browse_name()
+                namn = browse_name.Name
+                log.info(f"  OPC-UA tre /RefDev0/{namn}")
+
+                # Gå eitt nivå djupare for Dev/ (sub-devices)
+                if namn == "Dev":
+                    sub_children = await child.get_children()
+                    for sub in sub_children:
+                        sub_name = (await sub.read_browse_name()).Name
+                        log.info(f"  OPC-UA tre /RefDev0/Dev/{sub_name}")
+
+                        # List eigenskapar på sub-device
+                        sub_props = await sub.get_children()
+                        for prop in sub_props[:20]:  # Avgrens til 20
+                            prop_name = (await prop.read_browse_name()).Name
+                            try:
+                                val = await prop.read_value()
+                                val_str = repr(val)[:80]
+                                log.info(f"    {prop_name} = {val_str}")
+                            except Exception as e:
+                                log.info(f"    {prop_name} = <feil: {e}>")
+        except Exception as e:
+            log.info(f"  OPC-UA tre-browse feilet: {e}")
+        finally:
+            await c.disconnect()
+
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_browse())
+        loop.close()
+    except Exception as e:
+        log.info(f"  OPC-UA tre-diagnostikk feilet: {e}")
 
 
 # --- Helsesjekk-løkke ---
