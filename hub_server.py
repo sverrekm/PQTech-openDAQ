@@ -100,6 +100,10 @@ def _opprett_instance():
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
     module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
 
+    # Deaktiver RefDevice si interne datagenerering — hubben brukar berre
+    # sub-devices (fjern-nodar), ikkje root device sine syntetiske kanalar.
+    os.environ.setdefault("OPENDAQ_DISABLE_ACQ", "1")
+
     # Sett OPENDAQ_SERIAL om ikkje allereie sett — C++ patchen les denne
     # for DeviceInfo.serialNumber. Utan den vert det default "DevSer0".
     if not os.environ.get("OPENDAQ_SERIAL"):
@@ -127,12 +131,18 @@ def _opprett_instance():
     _instance = builder.build()
     log.info("openDAQ Instance oppretta (hub-modus, root device + klient)")
 
-    # Sett NumberOfChannels til 1 (minimum krav for ref device).
+    # Sett NumberOfChannels til 0 — hubben eksponerer berre sub-device kanalar
+    # frå fjern-nodar, ikkje dummy-kanalar frå root RefDevice.
     try:
-        _instance.set_property_value("NumberOfChannels", 1)
-        log.info("  Root device: NumberOfChannels sett til 1")
+        _instance.set_property_value("NumberOfChannels", 0)
+        log.info("  Root device: NumberOfChannels sett til 0 (berre sub-devices)")
     except Exception as e:
-        log.warning(f"  Kunne ikkje sette NumberOfChannels=1: {e}")
+        # RefDevice krev minimum 1 kanal — fallback
+        try:
+            _instance.set_property_value("NumberOfChannels", 1)
+            log.info("  Root device: NumberOfChannels fallback til 1")
+        except Exception as e2:
+            log.warning(f"  Kunne ikkje sette NumberOfChannels: {e2}")
 
     # GlobalSampleRate — DewesoftX forventar denne eigenskapen
     sample_rate = float(os.environ.get("SAMPLE_RATE", "20000"))
@@ -206,11 +216,18 @@ def _koble_til_node(node: FjernNode) -> bool:
         config = None
         try:
             dev_types = _instance.available_device_types
-            # Prøv OPC-UA config-type
+            # Finn config-type som matchar noden sin protokoll
+            # daq.nd → native/nativestreaming, daq.opcua → opcua
+            proto = node.protokoll.lower()
             for type_id in dev_types:
-                if 'opcua' in type_id.lower() or 'daq.opcua' in type_id.lower():
+                tid = type_id.lower()
+                match = False
+                if proto == "daq.nd" and ('native' in tid or 'daq.nd' in tid):
+                    match = True
+                elif proto == "daq.opcua" and ('opcua' in tid or 'daq.opcua' in tid):
+                    match = True
+                if match:
                     config = dev_types[type_id].create_default_config()
-                    # Logg tilgjengelege eigenskapar
                     for p in config.visible_properties:
                         try:
                             v = config.get_property_value(p.name)
@@ -561,7 +578,7 @@ def _fiks_opcua_verdiar():
         log.warning("  asyncua ikkje installert — kan ikkje fikse OPC-UA verdiar")
         return
 
-    n_kanalar = 1  # Hub root device har 1 dummy-kanal
+    n_kanalar = 0  # Hub root device har 0 eigne kanalar (berre sub-devices)
     sr = float(os.environ.get("SAMPLE_RATE", "20000"))
 
     async def _skriv():

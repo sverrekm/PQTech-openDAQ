@@ -390,8 +390,8 @@ fi
 # (t.d. 0x80000014 ved GetAvailableFunctionBlockTypes).
 # Hub-modus treng klient-modular (opcua_client, native_stream_cl) for add_device().
 if [ "${OPENDAQ_MODUS}" = "hub" ]; then
-    # Hub: berre deaktiver simulator, behald klient-modular
-    for MODUL in libsimulator_device_module; do
+    # Hub: deaktiver simulator + function block, behald klient-modular
+    for MODUL in libsimulator_device_module libref_fb_module; do
         MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
         if [ -n "$MODULFIL" ]; then
             mv "$MODULFIL" "${MODULFIL}.disabled"

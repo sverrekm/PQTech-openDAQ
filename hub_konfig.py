@@ -87,6 +87,21 @@ def les_hub_konfig() -> HubKonfig:
             konfig = HubKonfig.fraa_dict(raa)
             log.info(f"Lasta hub-konfig fraa {HUB_KONFIG_STI}: "
                      f"{len(konfig.nodar)} nodar")
+
+            # Migrer frå daq.opcua (metadata-only) til daq.nd (data + konfig).
+            # Tidlegare versjonar brukte daq.opcua som standard, men DewesoftX
+            # treng NativeStreaming for datastrøyming gjennom hubben.
+            migrert = False
+            for node in konfig.nodar:
+                if node.protokoll == "daq.opcua" and node.port == 4840:
+                    node.protokoll = "daq.nd"
+                    node.port = 7420
+                    log.info(f"  Migrert node '{node.namn}': "
+                             f"daq.opcua:4840 → daq.nd:7420")
+                    migrert = True
+            if migrert:
+                lagre_hub_konfig(konfig)
+
             return konfig
     except Exception as e:
         log.warning(f"Kunne ikkje lese hub-konfig: {e}")
@@ -135,7 +150,7 @@ def valider_hub_konfig(data: dict) -> tuple:
             return None, f"Node {i}: 'adresse' kan ikkje vere tom"
         namn = str(n.get("namn", "")).strip() or adresse
 
-        port = n.get("port", 4840)
+        port = n.get("port", 7420)
         try:
             port = int(port)
         except (TypeError, ValueError):
