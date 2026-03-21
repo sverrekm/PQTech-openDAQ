@@ -196,27 +196,10 @@ def _koble_til_node(node: FjernNode) -> bool:
     tilkobling = node.tilkobling_streng
     log.info(f"Koplar til node '{node.namn}' ({tilkobling})...")
 
-    # Sjekk nettverkstilgang før openDAQ-tilkobling (raskare feilmelding)
-    import socket as _sock
-    try:
-        s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
-        s.settimeout(5.0)
-        s.connect((node.adresse, node.port))
-        s.close()
-        log.info(f"  TCP-tilkobling OK: {node.adresse}:{node.port}")
-    except Exception as e:
-        log.warning(f"  TCP-tilkobling FEILA: {node.adresse}:{node.port} — {e}")
-        log.warning(f"  Sjekk at fjern-noden er oppe og at VPN/nettverk fungerer")
-        with _hub_lock:
-            _node_devices.pop(node.id, None)
-            _node_status[node.id] = {
-                "tilkobla": False,
-                "feil": f"Kan ikkje nå {node.adresse}:{node.port}: {e}",
-                "sist_sett": None,
-                "tilkobla_sidan": None,
-                "antal_kanalar": 0,
-            }
-        return False
+    # IKKJE TCP-probe NativeStreaming port 7420!
+    # TCP connect/disconnect til NativeStreaming opprettar ein stale
+    # "exclusive control"-sesjon som blokkerer påfølgjande add_device().
+    # opendaq_bro.py har same åtvaring (linje 424-427).
 
     try:
         # Prøv å hente device-config for å overstyre endpoint-URL
