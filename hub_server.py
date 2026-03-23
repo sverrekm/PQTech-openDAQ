@@ -549,29 +549,68 @@ def _init_data_injeksjon():
     log.info(f"  Brukar DC relay (acqLoop genererer data, DC styrer verdiar)")
 
 
+def _bygg_post_scaling(scale_factor, offset_val):
+    """Bygg LinearScaling (PostScaling) for intern→fysisk konvertering.
+
+    physical = internal * scale_factor + offset_val
+
+    Prøver fleire openDAQ API-variantar sidan Python-bindings varierer.
+    Returnerer (scaling_obj, metode_namn) eller (None, feilmeldingar).
+    """
+    import opendaq as daq
+
+    forsøk = []
+
+    # 1. LinearScaling med ScaledSampleType
+    if hasattr(daq, 'ScaledSampleType'):
+        try:
+            ps = daq.LinearScaling(scale_factor, offset_val,
+                                   daq.SampleType.Float64,
+                                   daq.ScaledSampleType.Float64)
+            return ps, "LinearScaling(s,o,ST,SST)"
+        except Exception as e:
+            forsøk.append(f"LinearScaling(s,o,ST,SST): {e}")
+
+    # 2. LinearScaling med SampleType for begge
+    try:
+        ps = daq.LinearScaling(scale_factor, offset_val,
+                               daq.SampleType.Float64,
+                               daq.SampleType.Float64)
+        return ps, "LinearScaling(s,o,ST,ST)"
+    except Exception as e:
+        forsøk.append(f"LinearScaling(s,o,ST,ST): {e}")
+
+    # 3. LinearScaling berre med scale og offset
+    try:
+        ps = daq.LinearScaling(scale_factor, offset_val)
+        return ps, "LinearScaling(s,o)"
+    except Exception as e:
+        forsøk.append(f"LinearScaling(s,o): {e}")
+
+    return None, forsøk
+
+
 def _sett_hub_descriptors():
-    """Sett signal descriptors med einingar og range for alle hub-kanalar.
+    """Sett signal descriptors med einingar, range og PostScaling.
 
-    Prøver fleire metodar for å sette descriptor:
-    1. sig.set_descriptor(desc)
-    2. sig.descriptor = desc
-    3. Logg tilgjengelege metodar for vidare debugging
+    PostScaling (LinearScaling) mappar interne verdiar [-10,10] til
+    fysiske verdiar basert på CustomRange. Utan PostScaling viser
+    DewesoftX rå interne DC-verdiar.
 
-    Oppdaterer _val_descs med nye descriptors for DataPacket-oppretting.
+    Strategi:
+    1. Prøv å kopiere PostScaling frå eksisterande descriptor
+    2. Viss ikkje: bygg LinearScaling manuelt
+    3. Viss begge feiler: IKKJE overskriv descriptor (behald RefDevice sin med PostScaling)
+
     Returnerer antal vellukka descriptor-settingar.
     """
     import opendaq as daq
 
     sett = 0
-    # Logg ISignalConfig metodar (berre fyrste kanal, for debugging)
-    if _kanal_signals:
-        _, sig0 = _kanal_signals[0]
-        if sig0 is not None:
-            desc_methods = [m for m in dir(sig0) if 'desc' in m.lower()]
-            all_methods = [m for m in dir(sig0) if not m.startswith('_')]
-            log.info(f"  ISignalConfig type: {type(sig0).__name__}")
-            log.info(f"  ISignalConfig descriptor-methods: {desc_methods}")
-            log.info(f"  ISignalConfig all methods: {all_methods[:30]}...")
+
+    # Diagnostikk: logg tilgjengelege scaling-API
+    scaling_attrs = [a for a in dir(daq) if 'scal' in a.lower() or 'linear' in a.lower()]
+    log.info(f"  openDAQ scaling API: {scaling_attrs}")
 
     for idx in range(len(_kanal_signals)):
         if idx >= len(_fjern_kanal_info):
@@ -603,30 +642,68 @@ def _sett_hub_descriptors():
                 unit_builder.quantity = ""
             unit_obj = unit_builder.build()
 
-            # Bygg descriptor — kopier PostScaling frå eksisterande descriptor
-            # slik at CustomRange+Amplitude-skalering vert bevart.
-            # Utan PostScaling ser DewesoftX rå interne verdiar [-10,10].
+            # PostScaling: physical = internal * scale + offset
+            # CustomRange+Amplitude=10 → intern [-10,10] → fysisk [range_low, range_high]
+            r_low = fk["range_low"]
+            r_high = fk["range_high"]
+            ps_scale = (r_high - r_low) / 20.0   # 20 = intern span [-10,+10]
+            ps_offset = (r_high + r_low) / 2.0
+
             existing_desc = _val_descs[idx] if idx < len(_val_descs) else None
 
+            # --- Hent PostScaling ---
+            post_scaling = None
+            ps_metode = "ingen"
+
+            # Prøv 1: Kopier frå eksisterande descriptor
+            if existing_desc is not None:
+                try:
+                    ps = existing_desc.post_scaling
+                    if ps is not None:
+                        post_scaling = ps
+                        ps_metode = "kopiert"
+                except Exception:
+                    pass
+
+            # Prøv 2: Bygg manuelt med LinearScaling
+            if post_scaling is None:
+                ps, info = _bygg_post_scaling(ps_scale, ps_offset)
+                if ps is not None:
+                    post_scaling = ps
+                    ps_metode = f"manuell ({info})"
+                elif idx == 0:
+                    log.warning(f"  LinearScaling-forsøk feilet: {info}")
+
+            # Viss vi ikkje har PostScaling: IKKJE overskriv descriptor.
+            # RefDevice sin originale descriptor har PostScaling frå CustomRange.
+            # Betre med rett skalering og feil eining enn feil skalering.
+            if post_scaling is None:
+                if idx == 0:
+                    log.warning(f"  Kan ikkje lage PostScaling — beheld original descriptor "
+                                f"(DewesoftX får rett skalering men feil eining)")
+                continue
+
+            # Bygg ny descriptor med unit + PostScaling
             desc_builder = daq.DataDescriptorBuilder()
             desc_builder.name = fk["namn"]
             desc_builder.sample_type = daq.SampleType.Float64
             desc_builder.unit = unit_obj
             try:
-                desc_builder.value_range = daq.Range(fk["range_low"], fk["range_high"])
+                desc_builder.value_range = daq.Range(r_low, r_high)
             except Exception:
                 pass
 
-            # Kopier PostScaling frå eksisterande descriptor
-            post_scaling_kopiert = False
-            if existing_desc is not None:
-                try:
-                    ps = existing_desc.post_scaling
-                    if ps is not None:
-                        desc_builder.post_scaling = ps
-                        post_scaling_kopiert = True
-                except Exception as e_ps:
-                    log.debug(f"  PostScaling kopiering for '{fk['namn']}': {e_ps}")
+            # Set PostScaling
+            try:
+                desc_builder.post_scaling = post_scaling
+            except Exception as e_ps:
+                # Prøv alternativ metode
+                setter = getattr(desc_builder, 'set_post_scaling', None)
+                if setter:
+                    setter(post_scaling)
+                else:
+                    log.warning(f"  desc_builder.post_scaling feilet: {e_ps}")
+                    continue
 
             # Kopier rule frå eksisterande descriptor (sample rate info)
             if existing_desc is not None:
@@ -639,32 +716,30 @@ def _sett_hub_descriptors():
 
             new_desc = desc_builder.build()
 
-            # Prøv fleire metodar for å sette descriptor
+            # Sett descriptor på signalet
             descriptor_sett = False
-            for method_name in ('set_descriptor', 'setDescriptor'):
-                fn = getattr(sig, method_name, None)
-                if fn:
-                    try:
-                        fn(new_desc)
-                        descriptor_sett = True
-                        break
-                    except Exception as e_m:
-                        log.warning(f"  '{fk['namn']}' {method_name}(): {e_m}")
-            if not descriptor_sett:
-                try:
-                    sig.descriptor = new_desc
-                    descriptor_sett = True
-                except Exception as e_prop:
-                    log.warning(f"  '{fk['namn']}' descriptor property: {e_prop}")
+            try:
+                sig.descriptor = new_desc
+                descriptor_sett = True
+            except Exception:
+                for method_name in ('set_descriptor', 'setDescriptor'):
+                    fn = getattr(sig, method_name, None)
+                    if fn:
+                        try:
+                            fn(new_desc)
+                            descriptor_sett = True
+                            break
+                        except Exception:
+                            pass
 
             if descriptor_sett:
-                # Oppdater lagra descriptor for DataPacket-oppretting
                 if idx < len(_val_descs):
                     _val_descs[idx] = new_desc
                 sett += 1
                 log.info(f"  Descriptor: '{fk['namn']}' unit={eining} "
-                         f"range=[{fk['range_low']}, {fk['range_high']}] "
-                         f"postScaling={'JA' if post_scaling_kopiert else 'NEI'}")
+                         f"range=[{r_low}, {r_high}] "
+                         f"postScaling={ps_metode} "
+                         f"(scale={ps_scale:.2f}, offset={ps_offset:.1f})")
 
         except Exception as e:
             log.warning(f"  Descriptor '{fk.get('namn', idx)}' feilet: {e}")
