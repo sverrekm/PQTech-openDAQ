@@ -522,12 +522,27 @@ def _init_data_injeksjon():
 def _sett_hub_descriptors():
     """Sett signal descriptors med einingar og range for alle hub-kanalar.
 
-    Brukar ISignalConfig.set_descriptor() — same som opendaq_bro._sett_signal_descriptors().
+    Prøver fleire metodar for å sette descriptor:
+    1. sig.set_descriptor(desc)
+    2. sig.descriptor = desc
+    3. Logg tilgjengelege metodar for vidare debugging
+
     Oppdaterer _val_descs med nye descriptors for DataPacket-oppretting.
+    Returnerer antal vellukka descriptor-settingar.
     """
     import opendaq as daq
 
     sett = 0
+    # Logg ISignalConfig metodar (berre fyrste kanal, for debugging)
+    if _kanal_signals:
+        _, sig0 = _kanal_signals[0]
+        if sig0 is not None:
+            desc_methods = [m for m in dir(sig0) if 'desc' in m.lower()]
+            all_methods = [m for m in dir(sig0) if not m.startswith('_')]
+            log.info(f"  ISignalConfig type: {type(sig0).__name__}")
+            log.info(f"  ISignalConfig descriptor-methods: {desc_methods}")
+            log.info(f"  ISignalConfig all methods: {all_methods[:30]}...")
+
     for idx in range(len(_kanal_signals)):
         if idx >= len(_fjern_kanal_info):
             break
@@ -569,21 +584,37 @@ def _sett_hub_descriptors():
                 pass
             new_desc = desc_builder.build()
 
-            # Sett descriptor via ISignalConfig
-            sig.set_descriptor(new_desc)
+            # Prøv fleire metodar for å sette descriptor
+            descriptor_sett = False
+            for method_name in ('set_descriptor', 'setDescriptor'):
+                fn = getattr(sig, method_name, None)
+                if fn:
+                    try:
+                        fn(new_desc)
+                        descriptor_sett = True
+                        break
+                    except Exception as e_m:
+                        log.warning(f"  '{fk['namn']}' {method_name}(): {e_m}")
+            if not descriptor_sett:
+                try:
+                    sig.descriptor = new_desc
+                    descriptor_sett = True
+                except Exception as e_prop:
+                    log.warning(f"  '{fk['namn']}' descriptor property: {e_prop}")
 
-            # Oppdater lagra descriptor for DataPacket-oppretting
-            if idx < len(_val_descs):
-                _val_descs[idx] = new_desc
-
-            sett += 1
-            log.info(f"  Descriptor: '{fk['namn']}' unit={eining} "
-                     f"range=[{fk['range_low']}, {fk['range_high']}]")
+            if descriptor_sett:
+                # Oppdater lagra descriptor for DataPacket-oppretting
+                if idx < len(_val_descs):
+                    _val_descs[idx] = new_desc
+                sett += 1
+                log.info(f"  Descriptor: '{fk['namn']}' unit={eining} "
+                         f"range=[{fk['range_low']}, {fk['range_high']}]")
 
         except Exception as e:
             log.warning(f"  Descriptor '{fk.get('namn', idx)}' feilet: {e}")
 
     log.info(f"  Signal descriptors sett: {sett}/{len(_kanal_signals)}")
+    return sett
 
 
 def _send_descriptor_events():
@@ -675,13 +706,18 @@ def _les_fjern_verdiar():
 def _data_relay_loop():
     """Bakgrunnstråd: send data frå fjern-nodar til hub-kanalar.
 
-    Primær: DataPacket-injeksjon (fysiske verdiar direkte, korrekt skalering).
-    Fallback: DC-relay (set DC-eigenskapen, krev PostScaling frå CustomRange).
+    Primær: DataPacket-injeksjon (interne verdiar, PostScaling handterer konvertering).
+    Fallback: DC-relay (set DC-eigenskapen direkte).
+
+    Sender INTERNE verdiar (ikkje fysiske) sidan RefDevice-descriptors
+    har PostScaling frå CustomRange+Amplitude=10 som mappar [-10,10] → fysisk range.
+    Konvertering: internal = (physical - offset) / scale
     """
-    global _relay_aktiv
+    global _relay_aktiv, _pakett_klar
 
     import opendaq as daq
     import ctypes
+    import traceback
 
     log.info("Data-relay tråd starta")
     time.sleep(3)  # Vent til serverar + DataPacket-init er ferdig
@@ -691,55 +727,83 @@ def _data_relay_loop():
     intervall = BLOKK / sample_rate  # ~51.2ms ved 20kHz
     relay_teller = 0
 
-    while _relay_aktiv:
-        if not _pakett_klar:
-            # --- FALLBACK: DC relay (set DC-eigenskapen) ---
-            _dc_relay_steg()
-            time.sleep(0.5)
-            continue
-
-        time.sleep(intervall)
-
-        # Les siste verdiar frå fjern-nodar
-        verdiar = _les_fjern_verdiar()
-
-        # Send DataPackets med fysiske verdiar
-        for i, verdi in enumerate(verdiar):
-            if i >= len(_kanal_signals) or i >= len(_dom_signals):
-                break
-            _, sig = _kanal_signals[i]
-            dom_sig = _dom_signals[i]
-            val_desc = _val_descs[i]
-            dom_desc = _dom_descs[i]
-
-            if sig is None or dom_sig is None or val_desc is None:
+    try:
+        while _relay_aktiv:
+            if not _pakett_klar:
+                # --- FALLBACK: DC relay (set DC-eigenskapen) ---
+                _dc_relay_steg()
+                time.sleep(0.5)
                 continue
 
-            tick_offset = _total_samples[i] * _tick_delta
+            time.sleep(intervall)
 
             try:
-                time_pkt = daq.DataPacket(dom_desc, BLOKK, tick_offset)
-                val_pkt = daq.DataPacketWithDomain(
-                    time_pkt, val_desc, BLOKK, 0)
-
-                # Fyll med fysisk verdi (same verdi for alle samples i blokka)
-                v = verdi if verdi is not None else 0.0
-                arr = (ctypes.c_double * BLOKK).from_address(
-                    int(val_pkt.raw_data))
-                for j in range(BLOKK):
-                    arr[j] = v
-
-                dom_sig.send_packet(time_pkt)
-                sig.send_packet(val_pkt)
-                _total_samples[i] += BLOKK
+                # Les siste fysiske verdiar frå fjern-nodar
+                verdiar = _les_fjern_verdiar()
             except Exception as e:
                 if relay_teller % 200 == 0:
-                    log.warning(f"  DataPacket relay Ch{i}: {e}")
+                    log.warning(f"  Relay: _les_fjern_verdiar feilet: {e}")
+                relay_teller += 1
+                continue
 
-        relay_teller += 1
-        if relay_teller == 1 or relay_teller % 1000 == 0:
-            v_str = [f"{v:.1f}" if v is not None else "?" for v in verdiar[:3]]
-            log.info(f"  Relay pkt #{relay_teller}: verdiar={v_str}...")
+            # Send DataPackets
+            for i, verdi in enumerate(verdiar):
+                if i >= len(_kanal_signals) or i >= len(_dom_signals):
+                    break
+                _, sig = _kanal_signals[i]
+                dom_sig = _dom_signals[i]
+                val_desc = _val_descs[i]
+                dom_desc = _dom_descs[i]
+
+                if sig is None or dom_sig is None or val_desc is None:
+                    continue
+
+                tick_offset = _total_samples[i] * _tick_delta
+
+                try:
+                    time_pkt = daq.DataPacket(dom_desc, BLOKK, tick_offset)
+                    val_pkt = daq.DataPacketWithDomain(
+                        time_pkt, val_desc, BLOKK, 0)
+
+                    # Konverter fysisk → intern verdi for PostScaling
+                    # PostScaling frå CustomRange+Amplitude=10 mappar [-10,10] → fysisk
+                    v = 0.0
+                    if verdi is not None and i < len(_kanal_mapping):
+                        _, _, scale, offset = _kanal_mapping[i]
+                        if scale != 0:
+                            v = (verdi - offset) / scale
+                        else:
+                            v = verdi
+                        # Klamp til intern range [-10, 10]
+                        v = max(-10.0, min(10.0, v))
+
+                    arr = (ctypes.c_double * BLOKK).from_address(
+                        int(val_pkt.raw_data))
+                    for j in range(BLOKK):
+                        arr[j] = v
+
+                    dom_sig.send_packet(time_pkt)
+                    sig.send_packet(val_pkt)
+                    _total_samples[i] += BLOKK
+                except Exception as e:
+                    if relay_teller % 200 == 0:
+                        log.warning(f"  DataPacket relay Ch{i}: {e}")
+
+            relay_teller += 1
+            if relay_teller == 1 or relay_teller % 1000 == 0:
+                v_str = [f"{v:.1f}" if v is not None else "?" for v in verdiar[:3]]
+                log.info(f"  Relay pkt #{relay_teller}: verdiar={v_str}...")
+
+    except Exception as e:
+        log.error(f"  Data-relay tråd KRASJA: {e}")
+        log.error(traceback.format_exc())
+        # Re-enable acqLoop so DewesoftX gets SOME data
+        _pakett_klar = False
+        try:
+            os.remove(_ACQLOOP_TOGGLE)
+            log.info("  acqLoop RE-AKTIVERT (fallback etter relay-krasj)")
+        except Exception:
+            pass
 
 
 def _dc_relay_steg():
