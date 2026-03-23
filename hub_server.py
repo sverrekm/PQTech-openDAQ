@@ -109,6 +109,13 @@ def _opprett_instance():
     2. _klient_instance (klient): Koplar til fjern-nodar via add_device().
        Ingen serverar — berre for å lese kanal-data til web UI og hub-buffer.
     """
+    # Fjern acqLoop toggle-fil frå evt. tidlegare køyring
+    try:
+        os.remove(_ACQLOOP_TOGGLE)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
     global _instance, _klient_instance
 
     # CWD må vere /usr/local/lib for at ModuleManager skal finne .module.so
@@ -502,21 +509,22 @@ def _init_data_injeksjon():
              f"tick_delta={_tick_delta}")
 
     # Sett signal descriptors med einingar og range frå fjern-nodar
-    _sett_hub_descriptors()
+    n_desc = _sett_hub_descriptors()
 
-    # Deaktiver acqLoop — Python tek over all datalevering via send_packet()
-    try:
-        with open(_ACQLOOP_TOGGLE, "w") as f:
-            f.write("1")
-        log.info(f"  acqLoop DEAKTIVERT ({_ACQLOOP_TOGGLE})")
-    except Exception as e:
-        log.warning(f"  acqLoop toggle feilet: {e}")
+    # IKKJE deaktiver acqLoop — la den køyre for kontinuerleg 20 kHz data.
+    # DC relay oppdaterer DC-eigenskapen, acqLoop genererer signal.
+    # Utan acqLoop får DewesoftX "Invalid or no data" fordi DataPacket-relay
+    # ikkje leverer data raskt nok (polling vs callback).
+    log.info(f"  acqLoop AKTIV (DC relay modus, descriptors sett: {n_desc})")
 
-    # Send DescriptorChanged events til NativeStreaming
-    _send_descriptor_events()
+    # Send DescriptorChanged events viss descriptors vart sett
+    if n_desc > 0:
+        _send_descriptor_events()
 
-    _pakett_klar = True
-    log.info(f"  DataPacket-injeksjon KLAR: {kanalar_klar} kanalar")
+    # IKKJE sett _pakett_klar — bruk DC relay i staden for DataPacket-injeksjon.
+    # DataPacket-injeksjon krev nøyaktig timing som polling-basert relay
+    # ikkje kan levere påliteleg.
+    log.info(f"  Brukar DC relay (acqLoop genererer data, DC styrer verdiar)")
 
 
 def _sett_hub_descriptors():
