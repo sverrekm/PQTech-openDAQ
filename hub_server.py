@@ -375,21 +375,33 @@ def _oppdater_root_kanalar():
         _safe_set(ch, "Frequency", 0.1)    # Irrelevant med Waveform=None, men set for tryggleik
         _safe_set(ch, "DC", 0.0)
 
-        # CustomRange — same som remote kanal
-        r_low = fk["range_low"]
+        # CustomRange — utvida med sikkerheitsfaktor for å unngå DC-clamping.
+        # Intern DC er avgrensa til [-10, 10]. Med remote range [-1000, 1000]
+        # og scale=100, vert 2688W → intern 26.88 → clampa til 10 → viser 1000W.
+        # Med 5x margin: [-5000, 5000], scale=500, 2688W → intern 5.376 → OK.
+        RANGE_FAKTOR = 5.0
+        r_low = fk["range_low"]     # Original range (for descriptor display)
         r_high = fk["range_high"]
+        max_abs = max(abs(r_low), abs(r_high), 1.0)
+        cr_half = max_abs * RANGE_FAKTOR
+        cr_low = -cr_half           # Utvida range (for CustomRange + PostScaling)
+        cr_high = cr_half
         try:
-            custom_range = daq.Range(r_low, r_high)
+            custom_range = daq.Range(cr_low, cr_high)
             ch.set_property_value("CustomRange", custom_range)
         except Exception as e:
-            log.warning(f"  CustomRange({r_low}, {r_high}) for '{fk['namn']}': {e}")
+            log.warning(f"  CustomRange({cr_low}, {cr_high}) for '{fk['namn']}': {e}")
+
+        # Lagre utvida range i fjern_kanal_info for PostScaling-bygging
+        fk["cr_low"] = cr_low
+        fk["cr_high"] = cr_high
 
         # Skaleringsdata for DC relay:
-        # CustomRange mappar intern [-10,10] til fysisk [r_low, r_high]
+        # CustomRange mappar intern [-10,10] til fysisk [cr_low, cr_high]
         # Intern DC = (fysisk_verdi - offset) / scale
-        span = r_high - r_low
+        span = cr_high - cr_low
         scale = span / 20.0 if span > 0 else 1.0   # 20 = intern span [-10,10]
-        offset = (r_high + r_low) / 2.0
+        offset = (cr_high + cr_low) / 2.0
         _kanal_mapping.append((fk["node_id"], fk["ch_idx"], scale, offset))
 
         # GetPossibleSampleRate — DewesoftX krev dette på KVAR kanal
@@ -412,8 +424,8 @@ def _oppdater_root_kanalar():
         except Exception:
             pass
 
-        log.info(f"  Kanal {i}: '{fk['namn']}' [{r_low}, {r_high}] {fk.get('eining', '')} "
-                 f"scale={scale:.1f} offset={offset:.1f} waveform={wf_actual}")
+        log.info(f"  Kanal {i}: '{fk['namn']}' range=[{r_low},{r_high}] CR=[{cr_low},{cr_high}] "
+                 f"{fk.get('eining', '')} scale={scale:.1f} offset={offset:.1f} wf={wf_actual}")
 
     log.info(f"  {len(_kanal_mapping)} hub-kanalar konfigurert")
 
@@ -643,11 +655,14 @@ def _sett_hub_descriptors():
             unit_obj = unit_builder.build()
 
             # PostScaling: physical = internal * scale + offset
-            # CustomRange+Amplitude=10 → intern [-10,10] → fysisk [range_low, range_high]
-            r_low = fk["range_low"]
+            # Brukar UTVIDA range (cr_low/cr_high) for PostScaling — same som CustomRange.
+            # Original range (range_low/range_high) brukast for descriptor display.
+            r_low = fk["range_low"]       # original (for display)
             r_high = fk["range_high"]
-            ps_scale = (r_high - r_low) / 20.0   # 20 = intern span [-10,+10]
-            ps_offset = (r_high + r_low) / 2.0
+            cr_low = fk.get("cr_low", r_low)   # utvida (for PostScaling)
+            cr_high = fk.get("cr_high", r_high)
+            ps_scale = (cr_high - cr_low) / 20.0   # 20 = intern span [-10,+10]
+            ps_offset = (cr_high + cr_low) / 2.0
 
             existing_desc = _val_descs[idx] if idx < len(_val_descs) else None
 
@@ -737,9 +752,9 @@ def _sett_hub_descriptors():
                     _val_descs[idx] = new_desc
                 sett += 1
                 log.info(f"  Descriptor: '{fk['namn']}' unit={eining} "
-                         f"range=[{r_low}, {r_high}] "
+                         f"display=[{r_low},{r_high}] CR=[{cr_low},{cr_high}] "
                          f"postScaling={ps_metode} "
-                         f"(scale={ps_scale:.2f}, offset={ps_offset:.1f})")
+                         f"(scale={ps_scale:.1f}, offset={ps_offset:.1f})")
 
         except Exception as e:
             log.warning(f"  Descriptor '{fk.get('namn', idx)}' feilet: {e}")
