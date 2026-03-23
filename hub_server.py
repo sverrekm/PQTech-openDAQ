@@ -256,8 +256,8 @@ def _oppdater_root_kanalar():
 
     import opendaq as daq
 
-    # --- Hent fjern-kanal info ---
-    fjern_kanalar = []  # [{namn, range_low, range_high, node_id, ch_idx}]
+    # --- Hent fjern-kanal info (namn, range, eining) ---
+    fjern_kanalar = []  # [{namn, range_low, range_high, eining, node_id, ch_idx}]
     with _hub_lock:
         # Stabil rekkefølge: same som _hub_konfig.nodar
         for node in _hub_konfig.nodar:
@@ -270,6 +270,7 @@ def _oppdater_root_kanalar():
                     ch = channels[ci]
                     namn = "ukjent"
                     range_low, range_high = -5.0, 5.0
+                    eining = ""
                     try:
                         namn = ch.name
                     except Exception:
@@ -280,22 +281,30 @@ def _oppdater_root_kanalar():
                         range_low = float(cr.low_value)
                         range_high = float(cr.high_value)
                     except Exception:
-                        # Fallback: signal descriptor
-                        try:
-                            sig = ch.signals[0]
-                            desc = sig.descriptor
-                            if desc and desc.value_range:
-                                range_low = float(desc.value_range.low_value)
-                                range_high = float(desc.value_range.high_value)
-                        except Exception:
-                            pass
+                        pass
+                    # Les eining + range frå signal descriptor
+                    try:
+                        sig = ch.signals[0]
+                        desc = sig.descriptor
+                        if desc:
+                            if desc.unit:
+                                eining = desc.unit.symbol or ""
+                            if range_low == -5.0 and range_high == 5.0:
+                                # CustomRange feilet — prøv descriptor
+                                if desc.value_range:
+                                    range_low = float(desc.value_range.low_value)
+                                    range_high = float(desc.value_range.high_value)
+                    except Exception:
+                        pass
                     fjern_kanalar.append({
                         "namn": namn,
                         "range_low": range_low,
                         "range_high": range_high,
+                        "eining": eining,
                         "node_id": node.id,
                         "ch_idx": ci,
                     })
+                    log.info(f"  Remote kanal {ci}: '{namn}' [{range_low}, {range_high}] {eining}")
             except Exception as e:
                 log.warning(f"  Kunne ikkje lese kanalar frå '{node.namn}': {e}")
 
@@ -303,7 +312,7 @@ def _oppdater_root_kanalar():
     if n_kanalar < 1:
         n_kanalar = 1
         fjern_kanalar = [{"namn": "AI 0", "range_low": -5.0, "range_high": 5.0,
-                          "node_id": "", "ch_idx": 0}]
+                          "eining": "", "node_id": "", "ch_idx": 0}]
         log.info("  Ingen fjern-kanalar — brukar 1 dummy-kanal")
     else:
         log.info(f"  {n_kanalar} fjern-kanalar funne")
@@ -369,7 +378,44 @@ def _oppdater_root_kanalar():
         except Exception:
             pass
 
-        log.info(f"  Kanal {i}: '{fk['namn']}' range=[{r_low}, {r_high}] "
+        # Signal descriptor med eining (unit) + range
+        # Same teknikk som opendaq_bro._sett_signal_descriptors()
+        eining = fk.get("eining", "")
+        try:
+            sigs = ch.signals
+            if sigs and len(sigs) > 0:
+                raw_sig = sigs[0]
+
+                # Bygg Unit
+                unit_builder = daq.UnitBuilder()
+                unit_builder.name = eining or "unknown"
+                unit_builder.symbol = eining or ""
+                unit_obj = unit_builder.build()
+
+                # Bygg DataDescriptor
+                desc_builder = daq.DataDescriptorBuilder()
+                desc_builder.name = fk["namn"]
+                desc_builder.sample_type = daq.SampleType.Float64
+                desc_builder.unit = unit_obj
+                try:
+                    desc_builder.value_range = daq.Range(r_low, r_high)
+                except Exception:
+                    pass
+                new_desc = desc_builder.build()
+
+                # Set descriptor på signal (ISignalConfig)
+                try:
+                    sig_config = daq.ISignalConfig.cast_from(raw_sig)
+                    sig_config.set_descriptor(new_desc)
+                except Exception:
+                    try:
+                        raw_sig.descriptor = new_desc
+                    except Exception:
+                        raw_sig.set_descriptor(new_desc)
+        except Exception as e:
+            log.warning(f"  Signal descriptor for '{fk['namn']}': {e}")
+
+        log.info(f"  Kanal {i}: '{fk['namn']}' [{r_low}, {r_high}] {eining} "
                  f"scale={scale:.1f} offset={offset:.1f}")
 
     log.info(f"  {len(_kanal_mapping)} hub-kanalar konfigurert")
