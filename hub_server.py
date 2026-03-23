@@ -79,6 +79,17 @@ _helsesjekk_aktiv = True
 _hub_startet = None             # ISO timestamp
 _hub_buffer: HubBuffer = None   # Hub-side buffer sync
 
+# DataPacket-injeksjon (same mønster som opendaq_bro)
+_kanal_signals = []      # [(ch, ISignalConfig)] per hub-kanal for send_packet
+_dom_signals = []        # [ISignalConfig] domain signals
+_dom_descs = []          # [DataDescriptor] domain descriptors
+_val_descs = []          # [DataDescriptor] value descriptors
+_total_samples = []      # [int] samples sendt per kanal
+_pakett_klar = False     # True når DataPacket-injeksjon er klar
+_tick_delta = 50000      # Ticks per sample (oppdaterast frå domain descriptor)
+_ACQLOOP_TOGGLE = "/tmp/opendaq_disable_acq"
+_fjern_kanal_info = []   # Info om fjern-kanalar for descriptor-bygging
+
 
 def hent_logg(antall=200):
     """Returner dei siste N logg-linjene."""
@@ -251,8 +262,9 @@ def _oppdater_root_kanalar():
     2. Konfigurer kvar kanal med namn, range, amplitude frå remote
     3. Legg til GetPossibleSampleRate på kvar kanal (DewesoftX krev dette)
     4. Bygg _kanal_mapping for data-relay-tråden
+    5. Lagre fjern-kanal info for descriptor-bygging (etter server-start)
     """
-    global _instance, _kanal_mapping
+    global _instance, _kanal_mapping, _fjern_kanal_info
 
     import opendaq as daq
 
@@ -317,6 +329,9 @@ def _oppdater_root_kanalar():
     else:
         log.info(f"  {n_kanalar} fjern-kanalar funne")
 
+    # Lagre globalt for descriptor-bygging etter server-start
+    _fjern_kanal_info = fjern_kanalar
+
     # --- Set NumberOfChannels ---
     try:
         _instance.set_property_value("NumberOfChannels", n_kanalar)
@@ -345,8 +360,9 @@ def _oppdater_root_kanalar():
         except Exception:
             pass
 
-        # Amplitude=0, Frequency=min (0.1) → flat linje ved DC-verdi
-        _safe_set(ch, "Amplitude", 0.0)
+        # Amplitude=10 aktiverer PostScaling frå CustomRange (fallback for DC relay).
+        # Primær datakjelde er DataPacket-injeksjon som deaktiverer acqLoop.
+        _safe_set(ch, "Amplitude", 10.0)
         _safe_set(ch, "Frequency", 0.1)
         _safe_set(ch, "DC", 0.0)
         _safe_set(ch, "Waveform", 0)
@@ -378,118 +394,406 @@ def _oppdater_root_kanalar():
         except Exception:
             pass
 
-        # Signal descriptor med eining (unit) + range
-        # Same teknikk som opendaq_bro._sett_signal_descriptors()
-        eining = fk.get("eining", "")
-        try:
-            sigs = ch.signals
-            if sigs and len(sigs) > 0:
-                raw_sig = sigs[0]
+        # Signal descriptors vert sett ETTER server-start via _init_data_injeksjon()
+        # (ISignalConfig.cast_from krev at signal er fullt initialisert)
 
-                # Bygg Unit
-                unit_builder = daq.UnitBuilder()
-                unit_builder.name = eining or "unknown"
-                unit_builder.symbol = eining or ""
-                unit_obj = unit_builder.build()
-
-                # Bygg DataDescriptor
-                desc_builder = daq.DataDescriptorBuilder()
-                desc_builder.name = fk["namn"]
-                desc_builder.sample_type = daq.SampleType.Float64
-                desc_builder.unit = unit_obj
-                try:
-                    desc_builder.value_range = daq.Range(r_low, r_high)
-                except Exception:
-                    pass
-                new_desc = desc_builder.build()
-
-                # Set descriptor på signal (ISignalConfig)
-                try:
-                    sig_config = daq.ISignalConfig.cast_from(raw_sig)
-                    sig_config.set_descriptor(new_desc)
-                except Exception:
-                    try:
-                        raw_sig.descriptor = new_desc
-                    except Exception:
-                        raw_sig.set_descriptor(new_desc)
-        except Exception as e:
-            log.warning(f"  Signal descriptor for '{fk['namn']}': {e}")
-
-        log.info(f"  Kanal {i}: '{fk['namn']}' [{r_low}, {r_high}] {eining} "
+        log.info(f"  Kanal {i}: '{fk['namn']}' [{r_low}, {r_high}] {fk.get('eining', '')} "
                  f"scale={scale:.1f} offset={offset:.1f}")
 
     log.info(f"  {len(_kanal_mapping)} hub-kanalar konfigurert")
 
 
-def _data_relay_loop():
-    """Bakgrunnstråd: les verdiar frå fjern-nodar og oppdater hub-kanalar.
+def _init_data_injeksjon():
+    """Initialiser DataPacket-injeksjon etter server-start.
 
-    Les siste verdi frå kvar remote kanal via StreamReader,
-    skalerer til intern DC-range, og set DC på tilsvarande hub-kanal.
-    Gir DewesoftX tilnærma sanntidsdata frå remote nodar.
+    Same mønster som opendaq_bro:
+    1. Cast signal → ISignalConfig for send_packet()
+    2. Hent domain signal + descriptor
+    3. Bygg signal descriptors med einingar frå remote
+    4. Deaktiver acqLoop (toggle-fil)
+    5. Send DescriptorChanged events
+
+    Viss dette feiler, brukar relay-tråden DC-fallback i staden.
+    """
+    global _kanal_signals, _dom_signals, _dom_descs, _val_descs
+    global _total_samples, _pakett_klar, _tick_delta
+
+    import opendaq as daq
+
+    log.info("Initialiserer DataPacket-injeksjon...")
+
+    # Sjekk API-tilgjengelegheit
+    for attr in ('DataPacket', 'DataPacketWithDomain', 'ISignalConfig',
+                 'DataDescriptorBuilder', 'UnitBuilder', 'SampleType'):
+        if not hasattr(daq, attr):
+            log.warning(f"  DataPacket init: {attr} ikkje tilgjengeleg — brukar DC fallback")
+            return
+
+    # Hent kanalar frå server-instansen
+    try:
+        channels = list(_instance.channels)
+    except Exception:
+        log.warning("  DataPacket init: kunne ikkje lese hub-kanalar")
+        return
+
+    _kanal_signals = []
+    _dom_signals = []
+    _dom_descs = []
+    _val_descs = []
+    _total_samples = []
+
+    kanalar_klar = 0
+    for idx, ch in enumerate(channels):
+        try:
+            sigs = list(ch.signals)
+            if not sigs:
+                raise ValueError("Ingen signal på kanal")
+
+            raw_sig = sigs[0]
+
+            # Cast til ISignalConfig for send_packet() — same som opendaq_bro
+            sig_config = daq.ISignalConfig.cast_from(raw_sig)
+            _kanal_signals.append((ch, sig_config))
+
+            # Hent domain signal (read-only fyrst, deretter cast)
+            dom_sig_raw = raw_sig.domain_signal
+            if dom_sig_raw is None:
+                raise ValueError("domain_signal er None")
+            dom_sig = daq.ISignalConfig.cast_from(dom_sig_raw)
+            _dom_signals.append(dom_sig)
+
+            # Hent descriptors
+            dom_desc = dom_sig_raw.descriptor
+            val_desc = raw_sig.descriptor
+            _dom_descs.append(dom_desc)
+            _val_descs.append(val_desc)
+            _total_samples.append(0)
+
+            # Les tick_delta frå domain descriptor (ticks per sample)
+            try:
+                rule = dom_desc.rule
+                params = rule.parameters
+                if hasattr(params, 'get'):
+                    delta = params.get('delta', _tick_delta)
+                elif hasattr(params, '__getitem__'):
+                    delta = params['delta']
+                else:
+                    delta = _tick_delta
+                _tick_delta = int(delta)
+            except Exception:
+                pass
+
+            kanalar_klar += 1
+
+        except Exception as e:
+            ch_name = ch.name if hasattr(ch, 'name') else f"ch{idx}"
+            log.warning(f"  DataPacket init: Kanal '{ch_name}' feilet: {e}")
+            _kanal_signals.append((ch, None))
+            _dom_signals.append(None)
+            _dom_descs.append(None)
+            _val_descs.append(None)
+            _total_samples.append(0)
+
+    if kanalar_klar == 0:
+        log.warning("  DataPacket init: Ingen kanalar klare — brukar DC relay fallback")
+        return
+
+    log.info(f"  DataPacket init: {kanalar_klar}/{len(channels)} kanalar klare, "
+             f"tick_delta={_tick_delta}")
+
+    # Sett signal descriptors med einingar og range frå fjern-nodar
+    _sett_hub_descriptors()
+
+    # Deaktiver acqLoop — Python tek over all datalevering via send_packet()
+    try:
+        with open(_ACQLOOP_TOGGLE, "w") as f:
+            f.write("1")
+        log.info(f"  acqLoop DEAKTIVERT ({_ACQLOOP_TOGGLE})")
+    except Exception as e:
+        log.warning(f"  acqLoop toggle feilet: {e}")
+
+    # Send DescriptorChanged events til NativeStreaming
+    _send_descriptor_events()
+
+    _pakett_klar = True
+    log.info(f"  DataPacket-injeksjon KLAR: {kanalar_klar} kanalar")
+
+
+def _sett_hub_descriptors():
+    """Sett signal descriptors med einingar og range for alle hub-kanalar.
+
+    Brukar ISignalConfig.set_descriptor() — same som opendaq_bro._sett_signal_descriptors().
+    Oppdaterer _val_descs med nye descriptors for DataPacket-oppretting.
+    """
+    import opendaq as daq
+
+    sett = 0
+    for idx in range(len(_kanal_signals)):
+        if idx >= len(_fjern_kanal_info):
+            break
+        _, sig = _kanal_signals[idx]
+        if sig is None:
+            continue
+
+        fk = _fjern_kanal_info[idx]
+        try:
+            # Bygg eining (Unit)
+            eining = fk.get("eining", "")
+            unit_builder = daq.UnitBuilder()
+            unit_builder.symbol = eining or ""
+            if eining == "V":
+                unit_builder.name = "volt"
+                unit_builder.quantity = "voltage"
+            elif eining == "A":
+                unit_builder.name = "ampere"
+                unit_builder.quantity = "electric_current"
+            elif eining == "W":
+                unit_builder.name = "watt"
+                unit_builder.quantity = "power"
+            elif eining in ("°C", "C"):
+                unit_builder.name = "degree Celsius"
+                unit_builder.quantity = "temperature"
+            else:
+                unit_builder.name = eining or "unknown"
+                unit_builder.quantity = ""
+            unit_obj = unit_builder.build()
+
+            # Bygg descriptor
+            desc_builder = daq.DataDescriptorBuilder()
+            desc_builder.name = fk["namn"]
+            desc_builder.sample_type = daq.SampleType.Float64
+            desc_builder.unit = unit_obj
+            try:
+                desc_builder.value_range = daq.Range(fk["range_low"], fk["range_high"])
+            except Exception:
+                pass
+            new_desc = desc_builder.build()
+
+            # Sett descriptor via ISignalConfig
+            sig.set_descriptor(new_desc)
+
+            # Oppdater lagra descriptor for DataPacket-oppretting
+            if idx < len(_val_descs):
+                _val_descs[idx] = new_desc
+
+            sett += 1
+            log.info(f"  Descriptor: '{fk['namn']}' unit={eining} "
+                     f"range=[{fk['range_low']}, {fk['range_high']}]")
+
+        except Exception as e:
+            log.warning(f"  Descriptor '{fk.get('namn', idx)}' feilet: {e}")
+
+    log.info(f"  Signal descriptors sett: {sett}/{len(_kanal_signals)}")
+
+
+def _send_descriptor_events():
+    """Send DataDescriptorChangedEventPacket til alle signalar.
+
+    NativeStreaming-serveren treng dette for å vite dataformatet
+    FØR den byrjar å vidaresende DataPackets til klientar.
+    Same som opendaq_bro.send_descriptor_events().
+    """
+    import opendaq as daq
+
+    if not hasattr(daq, 'DataDescriptorChangedEventPacket'):
+        log.warning("  DataDescriptorChangedEventPacket ikkje tilgjengeleg")
+        return
+
+    evt_sendt = 0
+    for idx in range(len(_kanal_signals)):
+        if (idx < len(_dom_signals) and idx < len(_val_descs) and
+                idx < len(_dom_descs)):
+            dom_sig = _dom_signals[idx]
+            val_desc = _val_descs[idx]
+            dom_desc = _dom_descs[idx]
+            _, sig = _kanal_signals[idx]
+
+            if sig is None or dom_sig is None or val_desc is None:
+                continue
+
+            try:
+                evt = daq.DataDescriptorChangedEventPacket(val_desc, dom_desc)
+                sig.send_packet(evt)
+                evt_sendt += 1
+            except Exception as e:
+                log.warning(f"  DescriptorChanged event Ch{idx}: {e}")
+
+    if evt_sendt > 0:
+        log.info(f"  DescriptorChanged events sendt: {evt_sendt}")
+
+
+def _les_fjern_verdiar():
+    """Les siste verdi frå alle fjern-kanalar via StreamReader.
+
+    Returnerer liste med fysiske verdiar (None viss ikkje tilgjengeleg).
+    """
+    import opendaq as daq
+
+    verdiar = [None] * len(_kanal_mapping)
+
+    with _hub_lock:
+        devices = dict(_node_devices)
+
+    for idx, (nid, remote_idx, scale, offset) in enumerate(_kanal_mapping):
+        if not nid:
+            continue
+        dev = devices.get(nid)
+        if not dev:
+            continue
+
+        try:
+            remote_ch = dev.channels[remote_idx]
+            signals = remote_ch.signals
+            if not signals or len(signals) == 0:
+                continue
+            sig = signals[0]
+
+            try:
+                sig_id = sig.global_id
+            except Exception:
+                sig_id = f"{nid}_{remote_idx}"
+
+            key = (nid, sig_id)
+            if key not in _relay_readers:
+                try:
+                    _relay_readers[key] = daq.StreamReader(sig)
+                except Exception:
+                    continue
+
+            reader = _relay_readers[key]
+            count = reader.available_count
+            if count > 0:
+                values = reader.read(count)
+                if values is not None and len(values) > 0:
+                    verdiar[idx] = float(values[-1])
+        except Exception:
+            pass
+
+    return verdiar
+
+
+def _data_relay_loop():
+    """Bakgrunnstråd: send data frå fjern-nodar til hub-kanalar.
+
+    Primær: DataPacket-injeksjon (fysiske verdiar direkte, korrekt skalering).
+    Fallback: DC-relay (set DC-eigenskapen, krev PostScaling frå CustomRange).
     """
     global _relay_aktiv
 
     import opendaq as daq
+    import ctypes
 
     log.info("Data-relay tråd starta")
-    time.sleep(2)  # Vent til serverar er starta
+    time.sleep(3)  # Vent til serverar + DataPacket-init er ferdig
+
+    BLOKK = 1024  # samples per pakke (same som opendaq_bro)
+    sample_rate = float(os.environ.get("SAMPLE_RATE", "20000"))
+    intervall = BLOKK / sample_rate  # ~51.2ms ved 20kHz
+    relay_teller = 0
 
     while _relay_aktiv:
-        time.sleep(0.5)  # Oppdater 2 gonger per sekund
-
-        try:
-            hub_channels = list(_instance.channels)
-        except Exception:
+        if not _pakett_klar:
+            # --- FALLBACK: DC relay (set DC-eigenskapen) ---
+            _dc_relay_steg()
+            time.sleep(0.5)
             continue
 
-        with _hub_lock:
-            devices = dict(_node_devices)
+        time.sleep(intervall)
 
-        for hub_idx, (nid, remote_idx, scale, offset) in enumerate(_kanal_mapping):
-            if hub_idx >= len(hub_channels):
+        # Les siste verdiar frå fjern-nodar
+        verdiar = _les_fjern_verdiar()
+
+        # Send DataPackets med fysiske verdiar
+        for i, verdi in enumerate(verdiar):
+            if i >= len(_kanal_signals) or i >= len(_dom_signals):
                 break
-            if not nid:  # Dummy-kanal
+            _, sig = _kanal_signals[i]
+            dom_sig = _dom_signals[i]
+            val_desc = _val_descs[i]
+            dom_desc = _dom_descs[i]
+
+            if sig is None or dom_sig is None or val_desc is None:
                 continue
 
-            dev = devices.get(nid)
-            if not dev:
-                continue
+            tick_offset = _total_samples[i] * _tick_delta
 
             try:
-                remote_ch = dev.channels[remote_idx]
-                signals = remote_ch.signals
-                if not signals or len(signals) == 0:
-                    continue
-                sig = signals[0]
+                time_pkt = daq.DataPacket(dom_desc, BLOKK, tick_offset)
+                val_pkt = daq.DataPacketWithDomain(
+                    time_pkt, val_desc, BLOKK, 0)
 
-                # Lag eller gjenbruk StreamReader
-                try:
-                    sig_id = sig.global_id
-                except Exception:
-                    sig_id = f"{nid}_{remote_idx}"
+                # Fyll med fysisk verdi (same verdi for alle samples i blokka)
+                v = verdi if verdi is not None else 0.0
+                arr = (ctypes.c_double * BLOKK).from_address(
+                    int(val_pkt.raw_data))
+                for j in range(BLOKK):
+                    arr[j] = v
 
-                key = (nid, sig_id)
-                if key not in _relay_readers:
-                    try:
-                        _relay_readers[key] = daq.StreamReader(sig)
-                    except Exception:
-                        continue
+                dom_sig.send_packet(time_pkt)
+                sig.send_packet(val_pkt)
+                _total_samples[i] += BLOKK
+            except Exception as e:
+                if relay_teller % 200 == 0:
+                    log.warning(f"  DataPacket relay Ch{i}: {e}")
 
-                reader = _relay_readers[key]
-                count = reader.available_count
-                if count > 0:
-                    values = reader.read(count)
-                    if values is not None and len(values) > 0:
-                        physical_val = float(values[-1])
-                        # Skaler til intern DC-range: DC = (physical - offset) / scale
-                        if scale != 0:
-                            dc_val = (physical_val - offset) / scale
-                        else:
-                            dc_val = physical_val
-                        _safe_set(hub_channels[hub_idx], "DC", dc_val)
+        relay_teller += 1
+        if relay_teller == 1 or relay_teller % 1000 == 0:
+            v_str = [f"{v:.1f}" if v is not None else "?" for v in verdiar[:3]]
+            log.info(f"  Relay pkt #{relay_teller}: verdiar={v_str}...")
+
+
+def _dc_relay_steg():
+    """Fallback: set DC-eigenskapen på hub-kanalar (krev PostScaling frå CustomRange)."""
+    import opendaq as daq
+
+    try:
+        hub_channels = list(_instance.channels)
+    except Exception:
+        return
+
+    with _hub_lock:
+        devices = dict(_node_devices)
+
+    for hub_idx, (nid, remote_idx, scale, offset) in enumerate(_kanal_mapping):
+        if hub_idx >= len(hub_channels) or not nid:
+            continue
+        dev = devices.get(nid)
+        if not dev:
+            continue
+
+        try:
+            remote_ch = dev.channels[remote_idx]
+            signals = remote_ch.signals
+            if not signals or len(signals) == 0:
+                continue
+            sig = signals[0]
+
+            try:
+                sig_id = sig.global_id
             except Exception:
-                pass
+                sig_id = f"{nid}_{remote_idx}"
+
+            key = (nid, sig_id)
+            if key not in _relay_readers:
+                try:
+                    _relay_readers[key] = daq.StreamReader(sig)
+                except Exception:
+                    continue
+
+            reader = _relay_readers[key]
+            count = reader.available_count
+            if count > 0:
+                values = reader.read(count)
+                if values is not None and len(values) > 0:
+                    physical_val = float(values[-1])
+                    # Skaler til intern DC-range: DC = (physical - offset) / scale
+                    if scale != 0:
+                        dc_val = (physical_val - offset) / scale
+                    else:
+                        dc_val = physical_val
+                    _safe_set(hub_channels[hub_idx], "DC", dc_val)
+        except Exception:
+            pass
 
 
 def _koble_til_node(node: FjernNode) -> bool:
@@ -1255,14 +1559,19 @@ def start_hub():
 
     _hub_startet = datetime.now().isoformat()
 
+    # Initialiser DataPacket-injeksjon (signal descriptors + acqLoop toggle).
+    # Må skje ETTER server-start — ISignalConfig krev fullt initialiserte signal.
+    time.sleep(1)
+    _init_data_injeksjon()
+
     # Start helsesjekk-tråd
     helsesjekk_traad = threading.Thread(target=_helsesjekk_loop, daemon=True)
     helsesjekk_traad.start()
 
-    # Start data-relay tråd (les fjern-nodar → oppdater hub RefDevice DC)
+    # Start data-relay tråd (DataPacket-injeksjon eller DC-fallback)
     relay_traad = threading.Thread(target=_data_relay_loop, daemon=True)
     relay_traad.start()
-    log.info("Helsesjekk-tråd starta")
+    log.info("Helsesjekk- og relay-trådar starta")
 
     # Start hub-buffer sync
     global _hub_buffer
