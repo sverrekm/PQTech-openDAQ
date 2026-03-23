@@ -198,31 +198,252 @@ def _opprett_instance():
     log.info("Klient-instans oppretta (for fjern-node-tilkoblingar)")
 
 
+_kanal_mapping = []     # [(node_id, ch_index, scale, offset), ...]
+_relay_readers = {}     # (node_id, signal_id) -> StreamReader
+_relay_aktiv = True
+
+
+def _safe_set(obj, namn, verdi):
+    """Set property med type-konvertering og clamping (same som opendaq_bro)."""
+    import opendaq as daq
+    try:
+        prop = obj.get_property(namn)
+        vtype = prop.value_type
+        ct = getattr(daq, 'CoreType', None)
+        if ct is not None:
+            if vtype == ct.ctFloat:
+                v = float(verdi)
+                try:
+                    v = max(v, float(prop.min_value))
+                except Exception:
+                    pass
+                try:
+                    v = min(v, float(prop.max_value))
+                except Exception:
+                    pass
+                obj.set_property_value(namn, v)
+                return True
+            if vtype == ct.ctInt:
+                v = int(round(verdi)) if isinstance(verdi, float) else int(verdi)
+                try:
+                    v = max(v, int(prop.min_value))
+                except Exception:
+                    pass
+                try:
+                    v = min(v, int(prop.max_value))
+                except Exception:
+                    pass
+                obj.set_property_value(namn, v)
+                return True
+        obj.set_property_value(namn, verdi)
+        return True
+    except Exception as e:
+        log.warning(f"  _safe_set({namn}, {verdi!r}): {e}")
+        return False
+
+
 def _oppdater_root_kanalar():
-    """Oppdater root device NumberOfChannels til totalt antal fjern-kanalar.
+    """Oppdater root device kanalar til å matche fjern-nodar.
 
     Må kallast ETTER node-tilkobling og FØR server-start.
-    set_property_value() endrar den interne C++ device-tilstanden
-    slik at RefDevice faktisk oppretter det rette antalet kanalar.
+
+    1. Set NumberOfChannels til totalt antal fjern-kanalar
+    2. Konfigurer kvar kanal med namn, range, amplitude frå remote
+    3. Legg til GetPossibleSampleRate på kvar kanal (DewesoftX krev dette)
+    4. Bygg _kanal_mapping for data-relay-tråden
     """
-    global _instance
+    global _instance, _kanal_mapping
 
-    n_kanalar = 0
+    import opendaq as daq
+
+    # --- Hent fjern-kanal info ---
+    fjern_kanalar = []  # [{namn, range_low, range_high, node_id, ch_idx}]
     with _hub_lock:
-        for nid, dev in _node_devices.items():
-            n_kanalar += _tel_kanalar(dev)
+        # Stabil rekkefølge: same som _hub_konfig.nodar
+        for node in _hub_konfig.nodar:
+            dev = _node_devices.get(node.id)
+            if not dev:
+                continue
+            try:
+                channels = dev.channels
+                for ci in range(len(channels)):
+                    ch = channels[ci]
+                    namn = "ukjent"
+                    range_low, range_high = -5.0, 5.0
+                    try:
+                        namn = ch.name
+                    except Exception:
+                        pass
+                    # Les CustomRange frå remote kanal
+                    try:
+                        cr = ch.get_property_value("CustomRange")
+                        range_low = float(cr.low_value)
+                        range_high = float(cr.high_value)
+                    except Exception:
+                        # Fallback: signal descriptor
+                        try:
+                            sig = ch.signals[0]
+                            desc = sig.descriptor
+                            if desc and desc.value_range:
+                                range_low = float(desc.value_range.low_value)
+                                range_high = float(desc.value_range.high_value)
+                        except Exception:
+                            pass
+                    fjern_kanalar.append({
+                        "namn": namn,
+                        "range_low": range_low,
+                        "range_high": range_high,
+                        "node_id": node.id,
+                        "ch_idx": ci,
+                    })
+            except Exception as e:
+                log.warning(f"  Kunne ikkje lese kanalar frå '{node.namn}': {e}")
 
+    n_kanalar = len(fjern_kanalar)
     if n_kanalar < 1:
         n_kanalar = 1
-        log.info("  Ingen fjern-kanalar — beheld 1 root-kanal")
+        fjern_kanalar = [{"namn": "AI 0", "range_low": -5.0, "range_high": 5.0,
+                          "node_id": "", "ch_idx": 0}]
+        log.info("  Ingen fjern-kanalar — brukar 1 dummy-kanal")
     else:
-        log.info(f"  Totalt {n_kanalar} fjern-kanalar — oppdaterer root device")
+        log.info(f"  {n_kanalar} fjern-kanalar funne")
 
+    # --- Set NumberOfChannels ---
     try:
         _instance.set_property_value("NumberOfChannels", n_kanalar)
         log.info(f"  Root device: NumberOfChannels → {n_kanalar}")
     except Exception as e:
-        log.warning(f"  Kunne ikkje oppdatere NumberOfChannels til {n_kanalar}: {e}")
+        log.warning(f"  Kunne ikkje sette NumberOfChannels={n_kanalar}: {e}")
+        return
+
+    # --- Konfigurer kvar kanal ---
+    try:
+        hub_channels = list(_instance.channels)
+    except Exception:
+        log.warning("  Kunne ikkje lese hub-kanalar")
+        return
+
+    _kanal_mapping = []
+
+    for i, fk in enumerate(fjern_kanalar):
+        if i >= len(hub_channels):
+            break
+        ch = hub_channels[i]
+
+        # Namn
+        try:
+            ch.name = fk["namn"]
+        except Exception:
+            pass
+
+        # Amplitude=0, Frequency=min (0.1) → flat linje ved DC-verdi
+        _safe_set(ch, "Amplitude", 0.0)
+        _safe_set(ch, "Frequency", 0.1)
+        _safe_set(ch, "DC", 0.0)
+        _safe_set(ch, "Waveform", 0)
+
+        # CustomRange — same som remote kanal
+        r_low = fk["range_low"]
+        r_high = fk["range_high"]
+        try:
+            custom_range = daq.Range(r_low, r_high)
+            ch.set_property_value("CustomRange", custom_range)
+        except Exception as e:
+            log.warning(f"  CustomRange({r_low}, {r_high}) for '{fk['namn']}': {e}")
+
+        # Skaleringsdata for DC relay:
+        # CustomRange mappar intern [-10,10] til fysisk [r_low, r_high]
+        # Intern DC = (fysisk_verdi - offset) / scale
+        span = r_high - r_low
+        scale = span / 20.0 if span > 0 else 1.0   # 20 = intern span [-10,10]
+        offset = (r_high + r_low) / 2.0
+        _kanal_mapping.append((fk["node_id"], fk["ch_idx"], scale, offset))
+
+        # GetPossibleSampleRate — DewesoftX krev dette på KVAR kanal
+        try:
+            try:
+                ch.get_property("GetPossibleSampleRate")
+            except Exception:
+                prop = daq.FloatPropertyBuilder("GetPossibleSampleRate", 200000.0)
+                ch.add_property(prop.build())
+        except Exception:
+            pass
+
+        log.info(f"  Kanal {i}: '{fk['namn']}' range=[{r_low}, {r_high}] "
+                 f"scale={scale:.1f} offset={offset:.1f}")
+
+    log.info(f"  {len(_kanal_mapping)} hub-kanalar konfigurert")
+
+
+def _data_relay_loop():
+    """Bakgrunnstråd: les verdiar frå fjern-nodar og oppdater hub-kanalar.
+
+    Les siste verdi frå kvar remote kanal via StreamReader,
+    skalerer til intern DC-range, og set DC på tilsvarande hub-kanal.
+    Gir DewesoftX tilnærma sanntidsdata frå remote nodar.
+    """
+    global _relay_aktiv
+
+    import opendaq as daq
+
+    log.info("Data-relay tråd starta")
+    time.sleep(2)  # Vent til serverar er starta
+
+    while _relay_aktiv:
+        time.sleep(0.5)  # Oppdater 2 gonger per sekund
+
+        try:
+            hub_channels = list(_instance.channels)
+        except Exception:
+            continue
+
+        with _hub_lock:
+            devices = dict(_node_devices)
+
+        for hub_idx, (nid, remote_idx, scale, offset) in enumerate(_kanal_mapping):
+            if hub_idx >= len(hub_channels):
+                break
+            if not nid:  # Dummy-kanal
+                continue
+
+            dev = devices.get(nid)
+            if not dev:
+                continue
+
+            try:
+                remote_ch = dev.channels[remote_idx]
+                signals = remote_ch.signals
+                if not signals or len(signals) == 0:
+                    continue
+                sig = signals[0]
+
+                # Lag eller gjenbruk StreamReader
+                try:
+                    sig_id = sig.global_id
+                except Exception:
+                    sig_id = f"{nid}_{remote_idx}"
+
+                key = (nid, sig_id)
+                if key not in _relay_readers:
+                    try:
+                        _relay_readers[key] = daq.StreamReader(sig)
+                    except Exception:
+                        continue
+
+                reader = _relay_readers[key]
+                count = reader.available_count
+                if count > 0:
+                    values = reader.read(count)
+                    if values is not None and len(values) > 0:
+                        physical_val = float(values[-1])
+                        # Skaler til intern DC-range: DC = (physical - offset) / scale
+                        if scale != 0:
+                            dc_val = (physical_val - offset) / scale
+                        else:
+                            dc_val = physical_val
+                        _safe_set(hub_channels[hub_idx], "DC", dc_val)
+            except Exception:
+                pass
 
 
 def _koble_til_node(node: FjernNode) -> bool:
@@ -991,6 +1212,10 @@ def start_hub():
     # Start helsesjekk-tråd
     helsesjekk_traad = threading.Thread(target=_helsesjekk_loop, daemon=True)
     helsesjekk_traad.start()
+
+    # Start data-relay tråd (les fjern-nodar → oppdater hub RefDevice DC)
+    relay_traad = threading.Thread(target=_data_relay_loop, daemon=True)
+    relay_traad.start()
     log.info("Helsesjekk-tråd starta")
 
     # Start hub-buffer sync
