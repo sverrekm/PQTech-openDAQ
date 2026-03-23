@@ -367,12 +367,13 @@ def _oppdater_root_kanalar():
         except Exception:
             pass
 
-        # Amplitude=10 aktiverer PostScaling frå CustomRange (fallback for DC relay).
-        # Primær datakjelde er DataPacket-injeksjon som deaktiverer acqLoop.
+        # Amplitude=10 aktiverer PostScaling frå CustomRange.
+        # Waveform=2 (None) → acqLoop output = 0*Amp + DC = berre DC, ingen oscillasjon.
+        # Waveform-enum: 0=Sine, 1=Rect, 2=None, 3=Counter
         _safe_set(ch, "Amplitude", 10.0)
-        _safe_set(ch, "Frequency", 0.1)
+        _safe_set(ch, "Waveform", 2)       # None — konstant null, berre DC tel
+        _safe_set(ch, "Frequency", 0.1)    # Irrelevant med Waveform=None, men set for tryggleik
         _safe_set(ch, "DC", 0.0)
-        _safe_set(ch, "Waveform", 0)
 
         # CustomRange — same som remote kanal
         r_low = fk["range_low"]
@@ -404,8 +405,15 @@ def _oppdater_root_kanalar():
         # Signal descriptors vert sett ETTER server-start via _init_data_injeksjon()
         # (ISignalConfig.cast_from krev at signal er fullt initialisert)
 
+        # Verifiser Waveform-verdi (berre fyrste kanal)
+        wf_actual = "?"
+        try:
+            wf_actual = ch.get_property_value("Waveform")
+        except Exception:
+            pass
+
         log.info(f"  Kanal {i}: '{fk['namn']}' [{r_low}, {r_high}] {fk.get('eining', '')} "
-                 f"scale={scale:.1f} offset={offset:.1f}")
+                 f"scale={scale:.1f} offset={offset:.1f} waveform={wf_actual}")
 
     log.info(f"  {len(_kanal_mapping)} hub-kanalar konfigurert")
 
@@ -475,6 +483,20 @@ def _init_data_injeksjon():
             _dom_descs.append(dom_desc)
             _val_descs.append(val_desc)
             _total_samples.append(0)
+
+            # Diagnostikk: sjekk PostScaling i eksisterande descriptor
+            try:
+                ps = val_desc.post_scaling if val_desc else None
+                has_ps = ps is not None
+                ch_name = ch.name if hasattr(ch, 'name') else f"ch{idx}"
+                log.info(f"  Kanal '{ch_name}': PostScaling={'JA' if has_ps else 'NEI'}")
+                if has_ps:
+                    # Logg PostScaling-detaljar (fyrste kanal)
+                    if idx == 0:
+                        ps_attrs = [a for a in dir(ps) if not a.startswith('_')]
+                        log.info(f"    PostScaling attrs: {ps_attrs[:15]}")
+            except Exception:
+                pass
 
             # Les tick_delta frå domain descriptor (ticks per sample)
             try:
@@ -581,7 +603,11 @@ def _sett_hub_descriptors():
                 unit_builder.quantity = ""
             unit_obj = unit_builder.build()
 
-            # Bygg descriptor
+            # Bygg descriptor — kopier PostScaling frå eksisterande descriptor
+            # slik at CustomRange+Amplitude-skalering vert bevart.
+            # Utan PostScaling ser DewesoftX rå interne verdiar [-10,10].
+            existing_desc = _val_descs[idx] if idx < len(_val_descs) else None
+
             desc_builder = daq.DataDescriptorBuilder()
             desc_builder.name = fk["namn"]
             desc_builder.sample_type = daq.SampleType.Float64
@@ -590,6 +616,27 @@ def _sett_hub_descriptors():
                 desc_builder.value_range = daq.Range(fk["range_low"], fk["range_high"])
             except Exception:
                 pass
+
+            # Kopier PostScaling frå eksisterande descriptor
+            post_scaling_kopiert = False
+            if existing_desc is not None:
+                try:
+                    ps = existing_desc.post_scaling
+                    if ps is not None:
+                        desc_builder.post_scaling = ps
+                        post_scaling_kopiert = True
+                except Exception as e_ps:
+                    log.debug(f"  PostScaling kopiering for '{fk['namn']}': {e_ps}")
+
+            # Kopier rule frå eksisterande descriptor (sample rate info)
+            if existing_desc is not None:
+                try:
+                    rule = existing_desc.rule
+                    if rule is not None:
+                        desc_builder.rule = rule
+                except Exception:
+                    pass
+
             new_desc = desc_builder.build()
 
             # Prøv fleire metodar for å sette descriptor
@@ -616,7 +663,8 @@ def _sett_hub_descriptors():
                     _val_descs[idx] = new_desc
                 sett += 1
                 log.info(f"  Descriptor: '{fk['namn']}' unit={eining} "
-                         f"range=[{fk['range_low']}, {fk['range_high']}]")
+                         f"range=[{fk['range_low']}, {fk['range_high']}] "
+                         f"postScaling={'JA' if post_scaling_kopiert else 'NEI'}")
 
         except Exception as e:
             log.warning(f"  Descriptor '{fk.get('namn', idx)}' feilet: {e}")
