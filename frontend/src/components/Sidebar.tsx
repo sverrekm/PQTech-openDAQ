@@ -57,18 +57,6 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
         >
           {t('Hub')}
         </div>
-        <div
-          className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}
-          onClick={() => onNavigate({ page: 'settings' })}
-        >
-          {t('Settings')}
-        </div>
-        <div
-          className={`${baseNavItemClass} ${view.page === 'admin' ? activeNavItemClass : inactiveNavItemClass}`}
-          onClick={() => onNavigate({ page: 'admin' })}
-        >
-          {t('Admin')}
-        </div>
       </div>
 
       {aktiveKanalar.length > 0 && (
@@ -109,6 +97,22 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
 
       <HubKanalListe kanalar={hubKanalar} />
       <HubNodeList />
+
+      {/* Settings + Admin flytta til botn */}
+      <div className="mt-auto border-t border-gray-800 py-2">
+        <div
+          className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}
+          onClick={() => onNavigate({ page: 'settings' })}
+        >
+          {t('Settings')}
+        </div>
+        <div
+          className={`${baseNavItemClass} ${view.page === 'admin' ? activeNavItemClass : inactiveNavItemClass}`}
+          onClick={() => onNavigate({ page: 'admin' })}
+        >
+          {t('Admin')}
+        </div>
+      </div>
     </nav>
   )
 }

@@ -323,4 +323,9 @@ export const nb: Record<string, string> = {
   'English': 'English',
   'Norwegian (Bokmål)': 'Norsk (Bokmål)',
   'System information': 'Systeminformasjon',
+  'System': 'System',
+  'Restart system': 'Omstart system',
+  'Restarting...': 'Omstartar...',
+  'Are you sure you want to restart the system?': 'Er du sikker på at du vil starte systemet på nytt?',
+  'System is restarting. Please wait and refresh the page.': 'Systemet startar på nytt. Vent og oppdater sida.',
 }

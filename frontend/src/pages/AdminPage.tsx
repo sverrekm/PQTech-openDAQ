@@ -1,10 +1,27 @@
 import { useState } from 'react'
 import { endrePassord } from '../api/auth'
+import { restartSystem } from '../api/system'
 import { useI18n } from '../i18n'
 import UpdateCard from '../components/UpdateCard'
 
 export default function AdminPage() {
   const { t, lang, setLang } = useI18n()
+
+  // Restart state
+  const [restartBusy, setRestartBusy] = useState(false)
+  const [restartDone, setRestartDone] = useState(false)
+
+  const handleRestart = async () => {
+    if (!confirm(t('Are you sure you want to restart the system?'))) return
+    setRestartBusy(true)
+    try {
+      await restartSystem()
+      setRestartDone(true)
+    } catch {
+      // Forventa — serveren avsluttar
+      setRestartDone(true)
+    }
+  }
 
   // Password change state
   const [gammalt, setGammalt] = useState('')
@@ -94,6 +111,24 @@ export default function AdminPage() {
           <option value="en">English</option>
           <option value="nb">Norsk (Bokmål)</option>
         </select>
+      </div>
+
+      {/* Restart */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('System')}</h2>
+        {restartDone ? (
+          <div className="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg p-3">
+            {t('System is restarting. Please wait and refresh the page.')}
+          </div>
+        ) : (
+          <button
+            onClick={handleRestart}
+            disabled={restartBusy}
+            className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+          >
+            {restartBusy ? t('Restarting...') : t('Restart system')}
+          </button>
+        )}
       </div>
 
       {/* Update (moved from Dashboard) */}

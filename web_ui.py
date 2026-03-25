@@ -1058,6 +1058,14 @@ def api_system_oppdater():
         return jsonify({"suksess": False, "feil": str(e)}), 500
 
 
+@app.route("/api/system/restart", methods=["POST"])
+def api_system_restart():
+    """Restart containeren (os._exit → Docker restart-policy startar på nytt)."""
+    log.info("Restart forespurt via API — avsluttar om 2 sek...")
+    threading.Timer(2.0, lambda: os._exit(0)).start()
+    return jsonify({"suksess": True, "melding": "Omstart om 2 sekund..."})
+
+
 # --- Buffer API ---
 
 @app.route("/api/buffer/status")
