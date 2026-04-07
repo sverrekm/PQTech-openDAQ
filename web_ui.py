@@ -72,6 +72,7 @@ if HUB_MODUS:
         oppdater_hub_konfig, legg_til_node_api,
         fjern_node_api, rekoble_node, hent_logg as _hub_hent_logg,
         hent_hub_kanalar, hent_hub_buffer_status,
+        hent_kanal_ranges_dict, oppdater_kanal_ranges,
     )
 
 app = Flask(__name__)
@@ -1011,6 +1012,32 @@ def api_hub_kanalar():
         return jsonify({"kanalar": hent_hub_kanalar()})
     except Exception as e:
         return jsonify({"kanalar": [], "feil": str(e)})
+
+
+@app.route("/api/hub/kanal-ranges")
+def api_hub_kanal_ranges_hent():
+    """Hent kanal-range overstyringer."""
+    if not HUB_MODUS:
+        return jsonify({"overstyringer": []})
+    try:
+        return jsonify({"overstyringer": hent_kanal_ranges_dict()})
+    except Exception as e:
+        return jsonify({"overstyringer": [], "feil": str(e)})
+
+
+@app.route("/api/hub/kanal-ranges", methods=["PUT"])
+def api_hub_kanal_ranges_oppdater():
+    """Lagre kanal-range overstyringer."""
+    if not HUB_MODUS:
+        return jsonify({"suksess": False, "melding": "Hub ikkje aktiv"}), 400
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"suksess": False, "melding": "Ugyldig JSON"}), 400
+    overstyringer = data.get("overstyringer", [])
+    if not isinstance(overstyringer, list):
+        return jsonify({"suksess": False, "melding": "'overstyringer' må vere ei liste"}), 400
+    ok, melding = oppdater_kanal_ranges(overstyringer)
+    return jsonify({"suksess": ok, "melding": melding}), 200 if ok else 400
 
 
 @app.route("/api/hub/logg")

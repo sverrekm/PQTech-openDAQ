@@ -286,6 +286,20 @@ export interface HubKanal {
   namn: string
   verdi: number | null
   eining: string
+  auto_range_low?: number
+  auto_range_high?: number
+  cr_low?: number
+  cr_high?: number
+  overstyrt?: boolean
+}
+
+// --- /api/hub/kanal-ranges ---
+export interface HubKanalRangeOverstyring {
+  node_id: string
+  kanal_namn: string
+  range_low: number
+  range_high: number
+  aktiv: boolean
 }
 
 // --- /api/system/* ---

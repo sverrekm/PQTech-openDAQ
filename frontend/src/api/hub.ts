@@ -1,5 +1,5 @@
 import { apiGet, apiPut, apiPost, apiDelete } from './client'
-import type { HubStatus, HubKonfig, HubNodeResult, HubKanal, ActionResult } from './types'
+import type { HubStatus, HubKonfig, HubNodeResult, HubKanal, HubKanalRangeOverstyring, ActionResult } from './types'
 
 export async function fetchHubStatus(): Promise<HubStatus> {
   return apiGet<HubStatus>('/api/hub/status')
@@ -33,6 +33,14 @@ export async function rekobleNode(nodeId: string): Promise<ActionResult> {
 
 export async function fetchHubKanalar(): Promise<{ kanalar: HubKanal[] }> {
   return apiGet<{ kanalar: HubKanal[] }>('/api/hub/kanalar')
+}
+
+export async function fetchKanalRanges(): Promise<{ overstyringer: HubKanalRangeOverstyring[] }> {
+  return apiGet<{ overstyringer: HubKanalRangeOverstyring[] }>('/api/hub/kanal-ranges')
+}
+
+export async function oppdaterKanalRanges(overstyringer: HubKanalRangeOverstyring[]): Promise<ActionResult> {
+  return apiPut<ActionResult>('/api/hub/kanal-ranges', { overstyringer })
 }
 
 export async function byttModus(modus: string): Promise<ActionResult> {

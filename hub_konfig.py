@@ -21,6 +21,7 @@ from typing import List
 log = logging.getLogger('hub_konfig')
 
 HUB_KONFIG_STI = Path("/data/konfig/hub_nodar.json")
+HUB_KANAL_RANGE_STI = Path("/data/konfig/hub_kanal_ranges.json")
 
 
 @dataclass
@@ -124,6 +125,65 @@ def lagre_hub_konfig(konfig: HubKonfig) -> bool:
     except Exception as e:
         log.error(f"Kunne ikkje lagre hub-konfig: {e}")
         return False
+
+
+@dataclass
+class KanalRangeOverstyring:
+    """Brukar-overstyrt range for ein hub-kanal."""
+    node_id: str
+    kanal_namn: str
+    range_low: float
+    range_high: float
+    aktiv: bool = True
+
+    def til_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def fraa_dict(cls, d: dict) -> 'KanalRangeOverstyring':
+        return cls(
+            node_id=str(d.get("node_id", "")),
+            kanal_namn=str(d.get("kanal_namn", "")),
+            range_low=float(d.get("range_low", -1000)),
+            range_high=float(d.get("range_high", 1000)),
+            aktiv=bool(d.get("aktiv", True)),
+        )
+
+
+def les_kanal_ranges() -> List[KanalRangeOverstyring]:
+    """Les kanal-range overstyringer frå JSON-fil."""
+    try:
+        if HUB_KANAL_RANGE_STI.exists():
+            raa = json.loads(HUB_KANAL_RANGE_STI.read_text(encoding='utf-8'))
+            overstyringer = [KanalRangeOverstyring.fraa_dict(o) for o in raa]
+            log.info(f"Lasta {len(overstyringer)} kanal-range overstyringer")
+            return overstyringer
+    except Exception as e:
+        log.warning(f"Kunne ikkje lese kanal-ranges: {e}")
+    return []
+
+
+def lagre_kanal_ranges(overstyringer: List[KanalRangeOverstyring]) -> bool:
+    """Lagre kanal-range overstyringer til JSON-fil."""
+    try:
+        HUB_KANAL_RANGE_STI.parent.mkdir(parents=True, exist_ok=True)
+        HUB_KANAL_RANGE_STI.write_text(
+            json.dumps([o.til_dict() for o in overstyringer], indent=2, ensure_ascii=False),
+            encoding='utf-8'
+        )
+        log.info(f"Lagra {len(overstyringer)} kanal-range overstyringer")
+        return True
+    except Exception as e:
+        log.error(f"Kunne ikkje lagre kanal-ranges: {e}")
+        return False
+
+
+def hent_range_map(overstyringer: List[KanalRangeOverstyring]) -> dict:
+    """Bygg oppslag: 'node_id:kanal_namn' -> (range_low, range_high) for aktive overstyringer."""
+    return {
+        f"{o.node_id}:{o.kanal_namn}": (o.range_low, o.range_high)
+        for o in overstyringer if o.aktiv
+    }
 
 
 def valider_hub_konfig(data: dict) -> tuple:

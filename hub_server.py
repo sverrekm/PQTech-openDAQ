@@ -27,6 +27,7 @@ from datetime import datetime
 from hub_konfig import (
     HubKonfig, FjernNode,
     les_hub_konfig, lagre_hub_konfig, valider_hub_konfig,
+    KanalRangeOverstyring, les_kanal_ranges, lagre_kanal_ranges, hent_range_map,
 )
 from buffer_konfig import les_buffer_konfig
 from hub_buffer import HubBuffer
@@ -89,6 +90,7 @@ _pakett_klar = False     # True når DataPacket-injeksjon er klar
 _tick_delta = 50000      # Ticks per sample (oppdaterast frå domain descriptor)
 _ACQLOOP_TOGGLE = "/tmp/opendaq_disable_acq"
 _fjern_kanal_info = []   # Info om fjern-kanalar for descriptor-bygging
+_kanal_range_overstyringer = {}  # "node_id:kanal_namn" -> (low, high)
 
 
 def hent_logg(antall=200):
@@ -375,17 +377,23 @@ def _oppdater_root_kanalar():
         _safe_set(ch, "Frequency", 0.1)    # Irrelevant med Waveform=None, men set for tryggleik
         _safe_set(ch, "DC", 0.0)
 
-        # CustomRange — utvida med sikkerheitsfaktor for å unngå DC-clamping.
-        # Intern DC er avgrensa til [-10, 10]. Med remote range [-1000, 1000]
-        # og scale=100, vert 2688W → intern 26.88 → clampa til 10 → viser 1000W.
-        # Med 5x margin: [-5000, 5000], scale=500, 2688W → intern 5.376 → OK.
-        RANGE_FAKTOR = 5.0
+        # CustomRange — bruk override viss sett, elles utvid med sikkerheitsfaktor.
         r_low = fk["range_low"]     # Original range (for descriptor display)
         r_high = fk["range_high"]
-        max_abs = max(abs(r_low), abs(r_high), 1.0)
-        cr_half = max_abs * RANGE_FAKTOR
-        cr_low = -cr_half           # Utvida range (for CustomRange + PostScaling)
-        cr_high = cr_half
+        override_key = f"{fk['node_id']}:{fk['namn']}"
+        override = _kanal_range_overstyringer.get(override_key)
+        if override:
+            cr_low, cr_high = override
+            log.info(f"  Kanal '{fk['namn']}': brukar override range [{cr_low}, {cr_high}]")
+        else:
+            # Intern DC er avgrensa til [-10, 10]. Med remote range [-1000, 1000]
+            # og scale=100, vert 2688W → intern 26.88 → clampa til 10 → viser 1000W.
+            # Med 5x margin: [-5000, 5000], scale=500, 2688W → intern 5.376 → OK.
+            RANGE_FAKTOR = 5.0
+            max_abs = max(abs(r_low), abs(r_high), 1.0)
+            cr_half = max_abs * RANGE_FAKTOR
+            cr_low = -cr_half           # Utvida range (for CustomRange + PostScaling)
+            cr_high = cr_half
         try:
             custom_range = daq.Range(cr_low, cr_high)
             ch.set_property_value("CustomRange", custom_range)
@@ -1231,17 +1239,100 @@ def hent_hub_kanalar() -> list:
             except Exception as e:
                 log.info(f"hent_hub_kanalar: Signal-feil for '{ch_namn}': {e}")
 
+            # Range-info: auto-detektert + faktisk brukt + override-status
+            auto_range_low, auto_range_high = -5.0, 5.0
+            try:
+                cr = ch.get_property_value("CustomRange")
+                auto_range_low = float(cr.low_value)
+                auto_range_high = float(cr.high_value)
+            except Exception:
+                try:
+                    sig0 = ch.signals[0]
+                    desc0 = sig0.descriptor
+                    if desc0 and desc0.value_range:
+                        auto_range_low = float(desc0.value_range.low_value)
+                        auto_range_high = float(desc0.value_range.high_value)
+                except Exception:
+                    pass
+
+            override_key = f"{node_id}:{ch_namn}"
+            override = _kanal_range_overstyringer.get(override_key)
+            if override:
+                cr_low, cr_high = override
+                overstyrt = True
+            else:
+                RANGE_FAKTOR = 5.0
+                max_abs = max(abs(auto_range_low), abs(auto_range_high), 1.0)
+                cr_half = max_abs * RANGE_FAKTOR
+                cr_low = -cr_half
+                cr_high = cr_half
+                overstyrt = False
+
             kanalar.append({
                 "node_id": node_id,
                 "node_namn": node_namn,
                 "namn": ch_namn,
                 "verdi": verdi,
                 "eining": eining,
+                "auto_range_low": auto_range_low,
+                "auto_range_high": auto_range_high,
+                "cr_low": cr_low,
+                "cr_high": cr_high,
+                "overstyrt": overstyrt,
             })
 
     log.info(f"hent_hub_kanalar: Returnerer {len(kanalar)} kanalar "
              f"({sum(1 for k in kanalar if k['verdi'] is not None)} med verdi)")
     return kanalar
+
+
+def hent_kanal_ranges_dict() -> list:
+    """Returner gjeldande kanal-range overstyringer som liste av dict."""
+    overstyringer = les_kanal_ranges()
+    return [o.til_dict() for o in overstyringer]
+
+
+def oppdater_kanal_ranges(data: list) -> tuple:
+    """Oppdater kanal-range overstyringer og last inn på nytt.
+
+    Args:
+        data: Liste av dict med node_id, kanal_namn, range_low, range_high, aktiv
+
+    Returns:
+        (ok, melding)
+    """
+    global _kanal_range_overstyringer
+
+    overstyringer = []
+    for i, o in enumerate(data):
+        if not isinstance(o, dict):
+            return False, f"Overstyring {i}: forventa objekt"
+        node_id = str(o.get("node_id", "")).strip()
+        kanal_namn = str(o.get("kanal_namn", "")).strip()
+        if not node_id or not kanal_namn:
+            return False, f"Overstyring {i}: 'node_id' og 'kanal_namn' kravd"
+        try:
+            range_low = float(o.get("range_low", 0))
+            range_high = float(o.get("range_high", 0))
+        except (TypeError, ValueError):
+            return False, f"Overstyring {i}: ugyldig range-verdi"
+        if range_low >= range_high:
+            return False, f"Overstyring {i}: range_low ({range_low}) må vere mindre enn range_high ({range_high})"
+        aktiv = bool(o.get("aktiv", True))
+        overstyringer.append(KanalRangeOverstyring(
+            node_id=node_id,
+            kanal_namn=kanal_namn,
+            range_low=range_low,
+            range_high=range_high,
+            aktiv=aktiv,
+        ))
+
+    ok = lagre_kanal_ranges(overstyringer)
+    if ok:
+        _kanal_range_overstyringer = hent_range_map(overstyringer)
+        log.info(f"Kanal-range overstyringer oppdatert: {len(_kanal_range_overstyringer)} aktive")
+        return True, f"{len(overstyringer)} overstyring(ar) lagra — rekoble for å aktivere"
+    return False, "Kunne ikkje lagre kanal-range overstyringer"
 
 
 def _start_serverar():
@@ -1737,7 +1828,7 @@ def _hent_ip() -> str:
 
 def start_hub():
     """Hovudoppstart for hub-modus."""
-    global _hub_konfig, _hub_startet
+    global _hub_konfig, _hub_startet, _kanal_range_overstyringer
 
     log.info("=" * 60)
     log.info("  openDAQ Hub — Aggregator")
@@ -1748,6 +1839,12 @@ def start_hub():
     log.info(f"  Nodar konfigurert: {len(_hub_konfig.nodar)}")
     log.info(f"  Helsesjekk-intervall: {_hub_konfig.helsesjekk_intervall}s")
     log.info(f"  Reconnect-intervall: {_hub_konfig.reconnect_intervall}s")
+
+    # Les kanal-range overstyringer
+    overstyringer = les_kanal_ranges()
+    _kanal_range_overstyringer = hent_range_map(overstyringer)
+    if _kanal_range_overstyringer:
+        log.info(f"  Kanal-range overstyringer: {len(_kanal_range_overstyringer)}")
 
     # Opprett openDAQ Instance
     _opprett_instance()

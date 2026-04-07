@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
-import type { HubStatus, HubKanal } from '../api/types'
-import { fetchHubStatus, fetchHubKanalar, byttModus } from '../api/hub'
+import type { HubStatus, HubKanal, HubKanalRangeOverstyring } from '../api/types'
+import { fetchHubStatus, fetchHubKanalar, fetchKanalRanges, oppdaterKanalRanges, byttModus } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
 import BufferStatusCard from '../components/BufferStatusCard'
@@ -148,6 +148,23 @@ function HubKanalTabell() {
 
   const [synlege, setSynlege] = useState<Set<string>>(() => hentSynlegeKanalar())
 
+  // Override state: key -> { low: string, high: string }
+  const [overrides, setOverrides] = useState<Record<string, { low: string; high: string }>>({})
+  const [lagreMelding, setLagreMelding] = useState<string | null>(null)
+  const [lagrar, setLagrar] = useState(false)
+
+  // Last eksisterande overrides ved oppstart
+  useEffect(() => {
+    fetchKanalRanges().then(res => {
+      const map: Record<string, { low: string; high: string }> = {}
+      for (const o of res.overstyringer) {
+        const key = `${o.node_id}:${o.kanal_namn}`
+        map[key] = { low: String(o.range_low), high: String(o.range_high) }
+      }
+      setOverrides(map)
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => {
     lagreSynlegeKanalar(synlege)
   }, [synlege])
@@ -176,6 +193,43 @@ function HubKanalTabell() {
     })
   }
 
+  const handleOverrideChange = (key: string, field: 'low' | 'high', value: string) => {
+    setOverrides(prev => ({
+      ...prev,
+      [key]: { ...prev[key] || { low: '', high: '' }, [field]: value },
+    }))
+  }
+
+  const handleLagre = async () => {
+    setLagrar(true)
+    setLagreMelding(null)
+    const overstyringer: HubKanalRangeOverstyring[] = []
+    for (const k of kanalar) {
+      const key = kanalKey(k)
+      const ov = overrides[key]
+      if (ov && ov.low !== '' && ov.high !== '') {
+        const low = parseFloat(ov.low)
+        const high = parseFloat(ov.high)
+        if (!isNaN(low) && !isNaN(high) && low < high) {
+          overstyringer.push({
+            node_id: k.node_id,
+            kanal_namn: k.namn,
+            range_low: low,
+            range_high: high,
+            aktiv: true,
+          })
+        }
+      }
+    }
+    try {
+      const res = await oppdaterKanalRanges(overstyringer)
+      setLagreMelding(res.melding)
+    } catch (e) {
+      setLagreMelding(`${t('Error')}: ${e}`)
+    }
+    setLagrar(false)
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">{t('Hub channels (table)')}</h3>
@@ -185,37 +239,79 @@ function HubKanalTabell() {
       {kanalar.length === 0 ? (
         <p className="text-sm text-gray-500 py-4 text-center">{t('No channels available')}</p>
       ) : (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr>
-              <th className="text-center px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 40 }}>
-                <input type="checkbox" checked={alleValgt} onChange={toggleAlle} title={t('Select all / deselect all')} className="accent-[#D76428]" />
-              </th>
-              <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">{t('Node')}</th>
-              <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">{t('Channel')}</th>
-              <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 70 }}>{t('Unit')}</th>
-              <th className="text-right px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 110 }}>{t('Value')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {kanalar.map((k, i) => {
-              const key = kanalKey(k)
-              return (
-                <tr key={`${k.node_id}-${k.namn}-${i}`} className="hover:bg-gray-50 transition-colors">
-                  <td className="text-center px-1 py-1.5 border-b border-gray-100">
-                    <input type="checkbox" checked={synlege.has(key)} onChange={() => toggleSynleg(key)} className="accent-[#D76428]" title={t('Show in dashboard and sidebar')} />
-                  </td>
-                  <td className="px-1 py-1.5 border-b border-gray-100 text-gray-700">{k.node_namn}</td>
-                  <td className="px-1 py-1.5 border-b border-gray-100 text-gray-900">{k.namn}</td>
-                  <td className="px-1 py-1.5 border-b border-gray-100 text-gray-500">{k.eining || '-'}</td>
-                  <td className="px-1 py-1.5 border-b border-gray-100 text-right font-mono text-sm text-green-700">
-                    {k.verdi !== null ? k.verdi.toFixed(2) : '-'}
-                  </td>
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="text-center px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 40 }}>
+                    <input type="checkbox" checked={alleValgt} onChange={toggleAlle} title={t('Select all / deselect all')} className="accent-[#D76428]" />
+                  </th>
+                  <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">{t('Node')}</th>
+                  <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold">{t('Channel')}</th>
+                  <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 70 }}>{t('Unit')}</th>
+                  <th className="text-right px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 100 }}>{t('Value')}</th>
+                  <th className="text-right px-1 py-2 border-b-2 border-gray-200 text-gray-400 text-xs uppercase tracking-wider font-semibold" style={{ width: 120 }}>{t('Detected range')}</th>
+                  <th className="text-center px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 100 }}>{t('Override min')}</th>
+                  <th className="text-center px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 100 }}>{t('Override max')}</th>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {kanalar.map((k, i) => {
+                  const key = kanalKey(k)
+                  const ov = overrides[key] || { low: '', high: '' }
+                  return (
+                    <tr key={`${k.node_id}-${k.namn}-${i}`} className={`hover:bg-gray-50 transition-colors ${k.overstyrt ? 'bg-orange-50/40' : ''}`}>
+                      <td className="text-center px-1 py-1.5 border-b border-gray-100">
+                        <input type="checkbox" checked={synlege.has(key)} onChange={() => toggleSynleg(key)} className="accent-[#D76428]" title={t('Show in dashboard and sidebar')} />
+                      </td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-gray-700">{k.node_namn}</td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-gray-900">{k.namn}</td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-gray-500">{k.eining || '-'}</td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-right font-mono text-sm text-green-700">
+                        {k.verdi !== null ? k.verdi.toFixed(2) : '-'}
+                      </td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-right text-xs text-gray-400 font-mono">
+                        {k.auto_range_low !== undefined ? `[${k.auto_range_low}, ${k.auto_range_high}]` : '-'}
+                      </td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-center">
+                        <input
+                          type="number"
+                          value={ov.low}
+                          onChange={e => handleOverrideChange(key, 'low', e.target.value)}
+                          placeholder={t('auto')}
+                          className="w-20 text-xs text-center border border-gray-200 rounded px-1 py-0.5 focus:border-[#D76428] focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-1 py-1.5 border-b border-gray-100 text-center">
+                        <input
+                          type="number"
+                          value={ov.high}
+                          onChange={e => handleOverrideChange(key, 'high', e.target.value)}
+                          placeholder={t('auto')}
+                          className="w-20 text-xs text-center border border-gray-200 rounded px-1 py-0.5 focus:border-[#D76428] focus:outline-none"
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              onClick={handleLagre}
+              disabled={lagrar}
+              className="text-xs font-medium px-4 py-1.5 rounded-md bg-[#D76428] text-white hover:bg-[#c55a23] disabled:opacity-50 transition-colors"
+            >
+              {lagrar ? t('Saving...') : t('Save ranges')}
+            </button>
+            <span className="text-xs text-gray-500">{t('Reconnect required after saving')}</span>
+          </div>
+          {lagreMelding && (
+            <div className="mt-2 bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg p-2">{lagreMelding}</div>
+          )}
+        </>
       )}
     </div>
   )

@@ -249,6 +249,12 @@ export const nb: Record<string, string> = {
   'Channel': 'Kanal',
   'Select all / deselect all': 'Vel alle / fjern alle',
   'Show in dashboard and sidebar': 'Vis i oversikt og sidepanel',
+  'Detected range': 'Detektert range',
+  'Override min': 'Override min',
+  'Override max': 'Override maks',
+  'auto': 'auto',
+  'Save ranges': 'Lagre range-verdiar',
+  'Reconnect required after saving': 'Rekobling nødvendig etter lagring',
 
   // HubNodeConfigCard
   'Remote nodes': 'Fjern-nodar',
