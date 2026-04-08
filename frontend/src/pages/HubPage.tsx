@@ -142,9 +142,9 @@ function InfoCell({ label, value, small }: { label: string; value: string; small
 function HubKanalTabell() {
   const { t } = useI18n()
   const kanalFetcher = useCallback(() => fetchHubKanalar(), [])
-  const { data } = usePolling(kanalFetcher, 3000)
+  const { data, error: pollError } = usePolling(kanalFetcher, 3000)
   const kanalar: HubKanal[] = data?.kanalar ?? []
-  const feil = (data as Record<string, unknown>)?.feil as string | undefined
+  const feil = (data as Record<string, unknown>)?.feil as string | undefined ?? pollError
 
   const [synlege, setSynlege] = useState<Set<string>>(() => hentSynlegeKanalar())
 

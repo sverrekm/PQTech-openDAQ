@@ -1239,34 +1239,19 @@ def hent_hub_kanalar() -> list:
             except Exception as e:
                 log.info(f"hent_hub_kanalar: Signal-feil for '{ch_namn}': {e}")
 
-            # Range-info: auto-detektert + faktisk brukt + override-status
-            auto_range_low, auto_range_high = -5.0, 5.0
-            try:
-                cr = ch.get_property_value("CustomRange")
-                auto_range_low = float(cr.low_value)
-                auto_range_high = float(cr.high_value)
-            except Exception:
-                try:
-                    sig0 = ch.signals[0]
-                    desc0 = sig0.descriptor
-                    if desc0 and desc0.value_range:
-                        auto_range_low = float(desc0.value_range.low_value)
-                        auto_range_high = float(desc0.value_range.high_value)
-                except Exception:
-                    pass
+            # Range-info frå cached _fjern_kanal_info (sett ved oppstart/rekobling)
+            fk_match = next(
+                (fk for fk in _fjern_kanal_info
+                 if fk.get("node_id") == node_id and fk.get("ch_idx") == idx),
+                None
+            )
+            auto_range_low = fk_match["range_low"] if fk_match else -5.0
+            auto_range_high = fk_match["range_high"] if fk_match else 5.0
+            cr_low = fk_match.get("cr_low", auto_range_low * 5.0) if fk_match else -25.0
+            cr_high = fk_match.get("cr_high", auto_range_high * 5.0) if fk_match else 25.0
 
             override_key = f"{node_id}:{ch_namn}"
-            override = _kanal_range_overstyringer.get(override_key)
-            if override:
-                cr_low, cr_high = override
-                overstyrt = True
-            else:
-                RANGE_FAKTOR = 5.0
-                max_abs = max(abs(auto_range_low), abs(auto_range_high), 1.0)
-                cr_half = max_abs * RANGE_FAKTOR
-                cr_low = -cr_half
-                cr_high = cr_half
-                overstyrt = False
+            overstyrt = override_key in _kanal_range_overstyringer
 
             kanalar.append({
                 "node_id": node_id,
