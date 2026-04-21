@@ -8,6 +8,7 @@ export interface ModbusPreset {
   unit_id: number
   poll_hz: number
   timeout_ms: number
+  base_adresse: number
   registers: ModbusRegister[]
   /** Synleg hjelpe-melding om korleis brukar skal fylle inn adresser. */
   hjelp: string
@@ -47,7 +48,8 @@ const PQUBE_3_PRESET: ModbusPreset = {
   unit_id: 1,
   poll_hz: 1.0,
   timeout_ms: 2000,
-  hjelp: 'Base-adresse er 0x7000 (28672). Offset frå Modbus Reference Manual-tabellen vert lagt til 28672. Døme: offset 8-9 (L1-N) vert adresse 28680.',
+  base_adresse: 7000,
+  hjelp: 'Base-adresse er sett til 7000 (PQube 3 standard). Skriv inn offset frå Modbus Reference Manual direkte i Adresse-kolonnen — systemet legg til basen automatisk. Døme: L1-N offset er 8 → skriv 8 i Adresse.',
   registers: [
     // Spenningar L-N
     reg('V_L1_N', 'V', 0, 500),

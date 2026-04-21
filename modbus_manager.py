@@ -102,6 +102,7 @@ class ModbusManager:
             port=node.port,
             unit_id=node.modbus_unit_id,
             timeout_ms=node.modbus_timeout_ms,
+            base_adresse=node.modbus_base_adresse,
         )
         ok = klient.koble_til()
         with self._lock:

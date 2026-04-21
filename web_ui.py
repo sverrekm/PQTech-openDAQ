@@ -1129,8 +1129,9 @@ def api_modbus_test():
         port = int(data.get("port", 502))
         unit_id = int(data.get("unit_id", 1))
         timeout_ms = int(data.get("timeout_ms", 2000))
+        base_adresse = int(data.get("base_adresse", 0))
     except (TypeError, ValueError):
-        return jsonify({"suksess": False, "melding": "Ugyldig port/unit_id/timeout", "verdiar": []}), 400
+        return jsonify({"suksess": False, "melding": "Ugyldig port/unit_id/timeout/base_adresse", "verdiar": []}), 400
 
     from hub_konfig import ModbusRegister
     import modbus_klient as mk
@@ -1144,7 +1145,8 @@ def api_modbus_test():
     except Exception as e:
         return jsonify({"suksess": False, "melding": f"Ugyldig register: {e}", "verdiar": []}), 400
 
-    resultat = mk.test_tilkobling(host, port, unit_id, timeout_ms, registers)
+    resultat = mk.test_tilkobling(host, port, unit_id, timeout_ms, registers,
+                                   base_adresse=base_adresse)
     status_code = 200 if resultat.get("suksess") else 502
     return jsonify(resultat), status_code
 

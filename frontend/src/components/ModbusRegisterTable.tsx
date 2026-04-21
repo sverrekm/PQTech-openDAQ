@@ -23,10 +23,12 @@ export function tomtRegister(): ModbusRegister {
 interface Props {
   registers: ModbusRegister[]
   onChange: (registers: ModbusRegister[]) => void
+  baseAdresse?: number
 }
 
-export default function ModbusRegisterTable({ registers, onChange }: Props) {
+export default function ModbusRegisterTable({ registers, onChange, baseAdresse = 0 }: Props) {
   const { t } = useI18n()
+  const brukarOffset = baseAdresse > 0
 
   const oppdater = (idx: number, patch: Partial<ModbusRegister>) => {
     onChange(registers.map((r, i) => i === idx ? { ...r, ...patch } : r))
@@ -65,7 +67,9 @@ export default function ModbusRegisterTable({ registers, onChange }: Props) {
             <thead>
               <tr className="text-left text-gray-500 border-b border-gray-300">
                 <th className="py-1 pr-2 font-medium">{t('Name')}</th>
-                <th className="py-1 pr-2 font-medium">{t('Address')}</th>
+                <th className="py-1 pr-2 font-medium">
+                  {brukarOffset ? t('Offset') : t('Address')}
+                </th>
                 <th className="py-1 pr-2 font-medium">{t('Function')}</th>
                 <th className="py-1 pr-2 font-medium">{t('Data type')}</th>
                 <th className="py-1 pr-2 font-medium">{t('Byte order')}</th>
@@ -94,6 +98,11 @@ export default function ModbusRegisterTable({ registers, onChange }: Props) {
                       onChange={e => oppdater(idx, { adresse: parseInt(e.target.value) || 0 })}
                       className="w-20 border border-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
                     />
+                    {brukarOffset && r.adresse > 0 && (
+                      <div className="text-[10px] text-gray-400 font-mono">
+                        = {baseAdresse + r.adresse}
+                      </div>
+                    )}
                   </td>
                   <td className="py-1 pr-2">
                     <select

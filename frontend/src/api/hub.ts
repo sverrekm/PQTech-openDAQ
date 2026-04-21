@@ -26,6 +26,7 @@ export async function leggTilNode(data: {
   modbus_unit_id?: number
   modbus_poll_hz?: number
   modbus_timeout_ms?: number
+  modbus_base_adresse?: number
   modbus_registers?: ModbusRegister[]
 }): Promise<HubNodeResult> {
   return apiPost<HubNodeResult>('/api/hub/nodar', data)
@@ -36,6 +37,7 @@ export async function testModbusTilkobling(data: {
   port: number
   unit_id: number
   timeout_ms: number
+  base_adresse?: number
   registers: ModbusRegister[]
 }): Promise<ModbusTestResponse> {
   return apiPost<ModbusTestResponse>('/api/modbus/test', data)

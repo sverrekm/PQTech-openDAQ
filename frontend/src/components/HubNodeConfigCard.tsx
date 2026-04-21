@@ -24,6 +24,7 @@ export default function HubNodeConfigCard() {
   const [nyUnitId, setNyUnitId] = useState('1')
   const [nyPollHz, setNyPollHz] = useState('1')
   const [nyTimeoutMs, setNyTimeoutMs] = useState('2000')
+  const [nyBaseAdresse, setNyBaseAdresse] = useState('0')
   const [nyRegisters, setNyRegisters] = useState<ModbusRegister[]>([])
 
   const [leggTilOpen, setLeggTilOpen] = useState(false)
@@ -45,6 +46,7 @@ export default function HubNodeConfigCard() {
     setNyUnitId('1')
     setNyPollHz('1')
     setNyTimeoutMs('2000')
+    setNyBaseAdresse('0')
     setNyRegisters([])
     setTestResultat(null)
   }
@@ -59,6 +61,7 @@ export default function HubNodeConfigCard() {
         port: parseInt(nyPort) || 502,
         unit_id: parseInt(nyUnitId) || 1,
         timeout_ms: parseInt(nyTimeoutMs) || 2000,
+        base_adresse: parseInt(nyBaseAdresse) || 0,
         registers: nyRegisters,
       })
       setMelding(res.melding)
@@ -86,6 +89,7 @@ export default function HubNodeConfigCard() {
         payload.modbus_unit_id = parseInt(nyUnitId) || 1
         payload.modbus_poll_hz = parseFloat(nyPollHz) || 1
         payload.modbus_timeout_ms = parseInt(nyTimeoutMs) || 2000
+        payload.modbus_base_adresse = parseInt(nyBaseAdresse) || 0
         payload.modbus_registers = nyRegisters
       }
       const res = await leggTilNode(payload)
@@ -244,6 +248,7 @@ export default function HubNodeConfigCard() {
                     setNyUnitId(String(preset.unit_id))
                     setNyPollHz(String(preset.poll_hz))
                     setNyTimeoutMs(String(preset.timeout_ms))
+                    setNyBaseAdresse(String(preset.base_adresse))
                     setNyRegisters(preset.registers.map(r => ({ ...r })))
                     if (!nyNamn.trim()) setNyNamn(preset.namn)
                     setMelding(preset.hjelp)
@@ -259,7 +264,7 @@ export default function HubNodeConfigCard() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="grid grid-cols-3 gap-3 mb-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">{t('Poll rate (Hz)')}</label>
                   <input
@@ -276,10 +281,25 @@ export default function HubNodeConfigCard() {
                     className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    {t('Base address')}
+                    <span className="text-gray-400 ml-1" title={t('Added to each register address. PQube 3: 7000')}>ⓘ</span>
+                  </label>
+                  <input
+                    type="number" min="0" max="65535" value={nyBaseAdresse}
+                    onChange={e => setNyBaseAdresse(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+                  />
+                </div>
               </div>
 
               <div className="mb-3">
-                <ModbusRegisterTable registers={nyRegisters} onChange={setNyRegisters} />
+                <ModbusRegisterTable
+                  registers={nyRegisters}
+                  onChange={setNyRegisters}
+                  baseAdresse={parseInt(nyBaseAdresse) || 0}
+                />
               </div>
 
               {/* Varsel om manglande adresser */}

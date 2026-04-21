@@ -82,6 +82,7 @@ class FjernNode:
     modbus_unit_id: int = 1
     modbus_poll_hz: float = 1.0
     modbus_timeout_ms: int = 2000
+    modbus_base_adresse: int = 0   # Vert lagt til reg.adresse ved lesing. 0 = reg.adresse er absolutt.
     modbus_registers: List[ModbusRegister] = field(default_factory=list)
 
     def til_dict(self) -> dict:
@@ -105,6 +106,7 @@ class FjernNode:
             modbus_unit_id=int(d.get("modbus_unit_id", 1)),
             modbus_poll_hz=float(d.get("modbus_poll_hz", 1.0)),
             modbus_timeout_ms=int(d.get("modbus_timeout_ms", 2000)),
+            modbus_base_adresse=int(d.get("modbus_base_adresse", 0)),
             modbus_registers=registers,
         )
 
@@ -291,6 +293,7 @@ def valider_hub_konfig(data: dict) -> tuple:
         modbus_unit_id = 1
         modbus_poll_hz = 1.0
         modbus_timeout_ms = 2000
+        modbus_base_adresse = 0
         modbus_registers: List[ModbusRegister] = []
         if node_type == NODE_TYPE_MODBUS_TCP:
             try:
@@ -313,6 +316,13 @@ def valider_hub_konfig(data: dict) -> tuple:
                 return None, f"Node {i}: ugyldig modbus_timeout_ms"
             if modbus_timeout_ms < 100 or modbus_timeout_ms > 30000:
                 return None, f"Node {i}: modbus_timeout_ms {modbus_timeout_ms} utanfor 100-30000"
+
+            try:
+                modbus_base_adresse = int(n.get("modbus_base_adresse", 0))
+            except (TypeError, ValueError):
+                return None, f"Node {i}: ugyldig modbus_base_adresse"
+            if modbus_base_adresse < 0 or modbus_base_adresse > 65535:
+                return None, f"Node {i}: modbus_base_adresse {modbus_base_adresse} utanfor 0-65535"
 
             regs_data = n.get("modbus_registers", []) or []
             if not isinstance(regs_data, list):
@@ -389,6 +399,7 @@ def valider_hub_konfig(data: dict) -> tuple:
             modbus_unit_id=modbus_unit_id,
             modbus_poll_hz=modbus_poll_hz,
             modbus_timeout_ms=modbus_timeout_ms,
+            modbus_base_adresse=modbus_base_adresse,
             modbus_registers=modbus_registers,
         ))
 

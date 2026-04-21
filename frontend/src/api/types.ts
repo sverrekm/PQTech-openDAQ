@@ -255,6 +255,7 @@ export interface HubNodeStatus {
   modbus_unit_id?: number
   modbus_poll_hz?: number
   modbus_timeout_ms?: number
+  modbus_base_adresse?: number
   modbus_registers?: ModbusRegister[]
   tilkobla: boolean
   feil: string | null

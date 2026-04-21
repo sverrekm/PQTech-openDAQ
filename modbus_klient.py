@@ -31,11 +31,12 @@ class ModbusKlient:
     """TCP-klient mot ein Modbus-server. Handterer reconnect automatisk."""
 
     def __init__(self, host: str, port: int = 502, unit_id: int = 1,
-                 timeout_ms: int = 2000):
+                 timeout_ms: int = 2000, base_adresse: int = 0):
         self.host = host
         self.port = port
         self.unit_id = unit_id
         self.timeout_s = max(0.1, timeout_ms / 1000.0)
+        self.base_adresse = base_adresse   # Vert lagt til reg.adresse ved lesing
         self._klient = None
         self._lock = threading.Lock()
         self.tilkobla = False
@@ -130,26 +131,28 @@ class ModbusKlient:
         if self._klient is None or not self.tilkobla:
             return None
 
-        # Hopp over register som ikkje er utfylt (adresse=0 er sentinel for "fyll inn frå manual")
+        # Hopp over register som ikkje er utfylt (adresse=0 er sentinel for "fyll inn frå manual").
+        # NB: når base_adresse > 0, tolkast reg.adresse som offset — 0 er framleis sentinel.
         if reg.adresse <= 0:
             self.siste_feil = f"Register '{reg.namn}' har adresse 0 — ikkje utfylt"
             return None
 
         antall = self._registers_for_datatype(reg.datatype)
+        full_adresse = self.base_adresse + reg.adresse
 
         try:
             if reg.funksjon == "holding":
                 rr = self._les_med_kompat(
-                    self._klient.read_holding_registers, reg.adresse, antall)
+                    self._klient.read_holding_registers, full_adresse, antall)
             elif reg.funksjon == "input":
                 rr = self._les_med_kompat(
-                    self._klient.read_input_registers, reg.adresse, antall)
+                    self._klient.read_input_registers, full_adresse, antall)
             elif reg.funksjon == "coil":
                 rr = self._les_med_kompat(
-                    self._klient.read_coils, reg.adresse, 1)
+                    self._klient.read_coils, full_adresse, 1)
             elif reg.funksjon == "discrete":
                 rr = self._les_med_kompat(
-                    self._klient.read_discrete_inputs, reg.adresse, 1)
+                    self._klient.read_discrete_inputs, full_adresse, 1)
             else:
                 return None
 
@@ -273,12 +276,13 @@ class ModbusKlient:
 
 
 def test_tilkobling(host: str, port: int, unit_id: int, timeout_ms: int,
-                    registers: List[ModbusRegister]) -> dict:
+                    registers: List[ModbusRegister],
+                    base_adresse: int = 0) -> dict:
     """Test ei modbus-tilkobling og les register.
 
     Returnerer: { suksess, melding, verdiar: [ModbusTestResultat] }
     """
-    klient = ModbusKlient(host, port, unit_id, timeout_ms)
+    klient = ModbusKlient(host, port, unit_id, timeout_ms, base_adresse=base_adresse)
     ok = klient.koble_til()
     if not ok:
         return {
