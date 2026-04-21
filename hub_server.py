@@ -1233,11 +1233,24 @@ def _tel_kanalar(device) -> int:
 _kanal_readers = {}  # (node_id, signal_id) -> StreamReader
 
 
+_kanalar_cache = {"ts": 0.0, "data": []}
+_kanalar_cache_lock = threading.Lock()
+_KANALAR_CACHE_TTL = 0.75   # sekund — minskar CPU-last ved mange samtidige pollarar
+
+
 def hent_hub_kanalar() -> list:
     """Les kanal-metadata og siste verdi frå alle tilkobla nodar.
 
+    Resultat vert cacha i ~750 ms for å unngå at fleire samtidige API-kall
+    gjer duplikat openDAQ StreamReader-avlesingar.
+
     Brukar ein cached StreamReader per signal for å lese siste verdi.
     """
+    # Cache-sjekk: returner tidlegare resultat viss det er nytt nok
+    with _kanalar_cache_lock:
+        if time.time() - _kanalar_cache["ts"] < _KANALAR_CACHE_TTL:
+            return list(_kanalar_cache["data"])
+
     import opendaq as daq
 
     kanalar = []
@@ -1393,6 +1406,12 @@ def hent_hub_kanalar() -> list:
 
     log.info(f"hent_hub_kanalar: Returnerer {len(kanalar)} kanalar "
              f"({sum(1 for k in kanalar if k['verdi'] is not None)} med verdi)")
+
+    # Lagre i cache
+    with _kanalar_cache_lock:
+        _kanalar_cache["ts"] = time.time()
+        _kanalar_cache["data"] = list(kanalar)
+
     return kanalar
 
 

@@ -644,12 +644,24 @@ def oppdater_modbus_konfig_og_restart():
     threading.Thread(target=_delayed_restart, daemon=True).start()
 
 
+_modbus_kanalar_cache = {"ts": 0.0, "data": []}
+_modbus_kanalar_cache_lock = threading.Lock()
+_MODBUS_KANALAR_CACHE_TTL = 0.5   # sek
+
+
 def hent_modbus_kanalar() -> list:
     """Returner modbus-register som kanalar i same format som hub sin hent_hub_kanalar.
 
     Brukt av /api/hub/kanalar i direkte-modus så sidebar + HubPage kan vise
     og filtrere modbus-kanalar på lik linje med openDAQ-kanalar i hub-modus.
+
+    Cacha i 500 ms for å ikkje lese modbus_manager.hent_verdiar() på kvar
+    request frå fleire samtidige pollarar.
     """
+    with _modbus_kanalar_cache_lock:
+        if time.time() - _modbus_kanalar_cache["ts"] < _MODBUS_KANALAR_CACHE_TTL:
+            return list(_modbus_kanalar_cache["data"])
+
     try:
         konfig = les_hub_konfig()
     except Exception:
@@ -695,6 +707,9 @@ def hent_modbus_kanalar() -> list:
                 "modbus_adresse": reg.adresse,
                 "tilkobla": node_tilkobla,
             })
+    with _modbus_kanalar_cache_lock:
+        _modbus_kanalar_cache["ts"] = time.time()
+        _modbus_kanalar_cache["data"] = list(kanalar)
     return kanalar
 
 
