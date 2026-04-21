@@ -1243,6 +1243,10 @@ _kanalar_cache = {"ts": 0.0, "data": []}
 _kanalar_cache_lock = threading.Lock()
 _KANALAR_CACHE_TTL = 0.75   # sekund — minskar CPU-last ved mange samtidige pollarar
 
+_status_cache = {"ts": 0.0, "data": None}
+_status_cache_lock = threading.Lock()
+_STATUS_CACHE_TTL = 1.0
+
 
 def hent_hub_kanalar() -> list:
     """Les kanal-metadata og siste verdi frå alle tilkobla nodar.
@@ -1260,10 +1264,18 @@ def hent_hub_kanalar() -> list:
     import opendaq as daq
 
     kanalar = []
-    with _hub_lock:
+    # Bruk timeout på _hub_lock — viss helsesjekk-tråden heng på proxy-kall,
+    # returner stale cache i staden for å blokkere forever (→ CF 524).
+    if not _hub_lock.acquire(timeout=2.0):
+        log.warning("hent_hub_kanalar: _hub_lock timeout — returnerer cache")
+        with _kanalar_cache_lock:
+            return list(_kanalar_cache["data"])
+    try:
         nodar_snapshot = list(_node_devices.items())
         konfig_nodar = {n.id: n for n in _hub_konfig.nodar}
         modbus_nodar = [n for n in _hub_konfig.nodar if n.type == NODE_TYPE_MODBUS_TCP]
+    finally:
+        _hub_lock.release()
 
     log.info(f"hent_hub_kanalar: {len(nodar_snapshot)} openDAQ-nodar tilkobla, "
              f"{len(modbus_nodar)} modbus-nodar")
@@ -1735,24 +1747,28 @@ def _helsesjekk_loop():
                 status = _node_status.get(node.id, {})
 
             if device and status.get("tilkobla"):
-                # Sjekk om device framleis er tilgjengeleg
+                # Sjekk om device framleis er tilgjengeleg. Gjer proxy-kalla
+                # UTAN å halde _hub_lock — ellers blokkerer vi alle API-requests
+                # viss noden heng (sett CF tunnel 524 timeouts).
                 try:
                     _ = device.info.name
+                    n_ch = _tel_kanalar(device)
                     with _hub_lock:
-                        _node_status[node.id]["sist_sett"] = datetime.now().isoformat()
-                        _node_status[node.id]["antal_kanalar"] = _tel_kanalar(device)
+                        if node.id in _node_status:
+                            _node_status[node.id]["sist_sett"] = datetime.now().isoformat()
+                            _node_status[node.id]["antal_kanalar"] = n_ch
                 except Exception as e:
                     log.warning(f"Helsesjekk: '{node.namn}' fråkobla: {e}")
                     with _hub_lock:
-                        _node_status[node.id]["tilkobla"] = False
-                        _node_status[node.id]["feil"] = str(e)
-                    # Prøv remove_device frå klient-instansen
+                        if node.id in _node_status:
+                            _node_status[node.id]["tilkobla"] = False
+                            _node_status[node.id]["feil"] = str(e)
+                        _node_devices.pop(node.id, None)
+                    # Prøv remove_device (utan lås — kan blokkere)
                     try:
                         _klient_instance.remove_device(device)
                     except Exception:
                         pass
-                    with _hub_lock:
-                        _node_devices.pop(node.id, None)
             else:
                 # Ikkje tilkobla — prøv rekobling med intervall
                 siste = _siste_rekobling.get(node.id, 0)
@@ -1765,8 +1781,23 @@ def _helsesjekk_loop():
 # --- API-funksjonar for web_ui ---
 
 def hent_hub_status() -> dict:
-    """Returnerer komplett hub-status med per-node info."""
-    with _hub_lock:
+    """Returnerer komplett hub-status med per-node info.
+
+    Cacha i ~1s for å redusere _hub_lock-contention. Frontend pollar denne
+    ofte og den vert ikkje mykje nyare innan ein sekund.
+    """
+    with _status_cache_lock:
+        if _status_cache["data"] is not None and time.time() - _status_cache["ts"] < _STATUS_CACHE_TTL:
+            return dict(_status_cache["data"])
+
+    # Timeout på lock for å unngå at treg helsesjekk blokkerer API-et
+    if not _hub_lock.acquire(timeout=2.0):
+        log.warning("hent_hub_status: _hub_lock timeout — returnerer cache")
+        with _status_cache_lock:
+            if _status_cache["data"] is not None:
+                return dict(_status_cache["data"])
+        return {"modus": "hub", "nodar": [], "feil": "lock-timeout"}
+    try:
         nodar_info = []
         for node in _hub_konfig.nodar:
             status = _node_status.get(node.id, {})
@@ -1797,8 +1828,10 @@ def hent_hub_status() -> dict:
 
         totalt_kanalar = sum(n.get("antal_kanalar", 0) for n in nodar_info)
         tilkobla_antal = sum(1 for n in nodar_info if n.get("tilkobla"))
+    finally:
+        _hub_lock.release()
 
-    return {
+    resultat = {
         "modus": "hub",
         "startet": _hub_startet,
         "totalt_kanalar": totalt_kanalar,
@@ -1807,6 +1840,10 @@ def hent_hub_status() -> dict:
         "nodar": nodar_info,
         "ip": os.environ.get("OPENDAQ_IP", _hent_ip()),
     }
+    with _status_cache_lock:
+        _status_cache["ts"] = time.time()
+        _status_cache["data"] = dict(resultat)
+    return resultat
 
 
 def hent_hub_konfig_dict() -> dict:
