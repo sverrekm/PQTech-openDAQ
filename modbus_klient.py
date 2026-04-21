@@ -100,6 +100,28 @@ class ModbusKlient:
             return 2
         return 1
 
+    def _les_med_kompat(self, metode, address, count):
+        """Kall pymodbus les-metode med kompatibilitet for ulike versjonar.
+
+        pymodbus 2.x brukar `unit=`, 3.0-3.6 brukar `slave=`, 3.7+ brukar `device_id=`.
+        Cacher rett kwarg-namn per klient for å unngå gjentekne TypeError.
+        """
+        if not hasattr(self, '_slave_kwarg'):
+            self._slave_kwarg = None   # Ukjent enno — test ved neste kall
+        # Prøv cached kwarg først
+        if self._slave_kwarg:
+            return metode(address=address, count=count, **{self._slave_kwarg: self.unit_id})
+        # Finn rett kwarg-namn
+        for kw in ("device_id", "slave", "unit"):
+            try:
+                rr = metode(address=address, count=count, **{kw: self.unit_id})
+                self._slave_kwarg = kw
+                return rr
+            except TypeError:
+                continue
+        # Fallback: utan slave-arg (vil berre fungere for unit_id 0/255)
+        return metode(address=address, count=count)
+
     def _les_raw(self, reg: ModbusRegister) -> Optional[List[int]]:
         """Les rå register-verdiar (liste av 16-bit words, eller [bit] for coil/discrete).
 
@@ -111,19 +133,18 @@ class ModbusKlient:
         antall = self._registers_for_datatype(reg.datatype)
 
         try:
-            # pymodbus 3.x kwargs: slave (ikkje unit)
             if reg.funksjon == "holding":
-                rr = self._klient.read_holding_registers(
-                    address=reg.adresse, count=antall, slave=self.unit_id)
+                rr = self._les_med_kompat(
+                    self._klient.read_holding_registers, reg.adresse, antall)
             elif reg.funksjon == "input":
-                rr = self._klient.read_input_registers(
-                    address=reg.adresse, count=antall, slave=self.unit_id)
+                rr = self._les_med_kompat(
+                    self._klient.read_input_registers, reg.adresse, antall)
             elif reg.funksjon == "coil":
-                rr = self._klient.read_coils(
-                    address=reg.adresse, count=1, slave=self.unit_id)
+                rr = self._les_med_kompat(
+                    self._klient.read_coils, reg.adresse, 1)
             elif reg.funksjon == "discrete":
-                rr = self._klient.read_discrete_inputs(
-                    address=reg.adresse, count=1, slave=self.unit_id)
+                rr = self._les_med_kompat(
+                    self._klient.read_discrete_inputs, reg.adresse, 1)
             else:
                 return None
 
