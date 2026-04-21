@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { HubStatus, NodeType, ModbusRegister, ModbusTestResultat } from '../api/types'
-import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, testModbusTilkobling } from '../api/hub'
+import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, testModbusTilkobling, restartHub } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
 import ModbusRegisterTable from './ModbusRegisterTable'
@@ -130,6 +130,18 @@ export default function HubNodeConfigCard() {
     setTimeout(() => setMelding(null), 4000)
   }
 
+  const handleRestartHub = async () => {
+    if (!confirm(t('Restart hub? DewesoftX will briefly disconnect (~10 s).'))) return
+    setActionLoading('restart')
+    try {
+      const res = await restartHub()
+      setMelding(res.melding)
+    } catch (e) {
+      setMelding(`${t('Error')}: ${e}`)
+    }
+    // Ikkje nullstill actionLoading — prosessen restartar, sida treng uansett reload
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
@@ -141,6 +153,22 @@ export default function HubNodeConfigCard() {
           {leggTilOpen ? t('Cancel') : t('+ Add node')}
         </button>
       </div>
+
+      {/* Pending-changes banner (berre hub-modus) */}
+      {hub?.pending_changes && (
+        <div className="bg-amber-50 border border-amber-300 text-amber-900 text-sm rounded-lg p-3 mb-4 flex items-center justify-between gap-3">
+          <div>
+            <strong>{t('Pending changes')}</strong> — {t('restart hub to activate channel changes in DewesoftX')}
+          </div>
+          <button
+            onClick={handleRestartHub}
+            disabled={actionLoading === 'restart'}
+            className="text-sm font-medium px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {actionLoading === 'restart' ? t('Restarting...') : t('Restart hub')}
+          </button>
+        </div>
+      )}
 
       {/* Add form */}
       {leggTilOpen && (

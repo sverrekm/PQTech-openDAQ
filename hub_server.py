@@ -1247,6 +1247,10 @@ _status_cache = {"ts": 0.0, "data": None}
 _status_cache_lock = threading.Lock()
 _STATUS_CACHE_TTL = 1.0
 
+# Sett til True når node-konfig er endra utan restart — nye kanalar vises
+# ikkje i DewesoftX før hub er restarta (flat RefDevice med låst NumberOfChannels).
+_pending_changes = False
+
 
 def hent_hub_kanalar() -> list:
     """Les kanal-metadata og siste verdi frå alle tilkobla nodar.
@@ -1839,6 +1843,7 @@ def hent_hub_status() -> dict:
         "tilkobla_nodar": tilkobla_antal,
         "nodar": nodar_info,
         "ip": os.environ.get("OPENDAQ_IP", _hent_ip()),
+        "pending_changes": _pending_changes,
     }
     with _status_cache_lock:
         _status_cache["ts"] = time.time()
@@ -1861,7 +1866,7 @@ def hent_hub_buffer_status() -> dict:
 
 def oppdater_hub_konfig(ny_konfig: HubKonfig) -> tuple:
     """Oppdater og synkroniser hub-konfig. Returns (suksess, melding)."""
-    global _hub_konfig
+    global _hub_konfig, _pending_changes
 
     ok = lagre_hub_konfig(ny_konfig)
     if not ok:
@@ -1878,11 +1883,24 @@ def oppdater_hub_konfig(ny_konfig: HubKonfig) -> tuple:
         _fråkoble_node(fjerna_id)
 
     # Koble til nye nodar
+    new_opendaq_nodes = False
     for node in ny_konfig.nodar:
         if node.id not in gamle_ids and node.aktivert:
             _koble_til_node(node)
+            if node.type != NODE_TYPE_MODBUS_TCP:
+                new_opendaq_nodes = True
+    # Viss openDAQ-nodar har vorte lagt til eller fjerna, trengs restart
+    removed_opendaq = any(
+        n.type != NODE_TYPE_MODBUS_TCP
+        for n in _hub_konfig.nodar if n.id in (gamle_ids - nye_ids)
+    )
+    if new_opendaq_nodes or removed_opendaq:
+        _pending_changes = True
 
-    return True, f"Konfig oppdatert ({len(ny_konfig.nodar)} nodar)"
+    melding = f"Konfig oppdatert ({len(ny_konfig.nodar)} nodar)"
+    if _pending_changes:
+        melding += " — restart hub for å aktivere"
+    return True, melding
 
 
 def legg_til_node_api(data: dict) -> tuple:
@@ -1915,13 +1933,20 @@ def legg_til_node_api(data: dict) -> tuple:
     lagre_hub_konfig(_hub_konfig)
 
     ok = _koble_til_node(node)
+    global _pending_changes
+    if node.type != NODE_TYPE_MODBUS_TCP:
+        # openDAQ-nodar krev hub-restart for at kanalar skal vises i DewesoftX
+        _pending_changes = True
     status_tekst = "tilkobla" if ok else "lagt til (tilkobling feila)"
-    return True, f"Node '{node.namn}' {status_tekst}", node.til_dict()
+    melding = f"Node '{node.namn}' {status_tekst}"
+    if _pending_changes:
+        melding += " — restart hub for å aktivere kanalar i DewesoftX"
+    return True, melding, node.til_dict()
 
 
 def fjern_node_api(node_id: str) -> tuple:
     """Fjern ein node. Returns (suksess, melding)."""
-    global _hub_konfig
+    global _hub_konfig, _pending_changes
 
     with _hub_lock:
         node = next((n for n in _hub_konfig.nodar if n.id == node_id), None)
@@ -1931,7 +1956,37 @@ def fjern_node_api(node_id: str) -> tuple:
 
     _fråkoble_node(node_id)
     lagre_hub_konfig(_hub_konfig)
+    if node.type != NODE_TYPE_MODBUS_TCP:
+        _pending_changes = True
     return True, f"Node '{node.namn}' fjerna"
+
+
+def restart_hub() -> tuple:
+    """Restart hub-prosessen via os.execv.
+
+    Brukt når node-konfig er endra og nye kanalar må eksponerast i
+    RefDevice. openDAQ har ingen reint hot-reload for NumberOfChannels,
+    så full restart er einaste pålitelege måte. DewesoftX mister
+    tilkobling ~10 sek, deretter rekoblar den automatisk.
+
+    Returnerer ikkje i praksis — execv erstattar prosessen.
+    """
+    log.warning("RESTART: hub-prosess re-startar via execv")
+    try:
+        # Kort forsinking så HTTP-responsen kan sendast ferdig
+        def _do_restart():
+            time.sleep(1.0)
+            try:
+                # os.execv erstattar prosessen med 'python3 -m hub_server'
+                python_exe = sys.executable or "/usr/bin/python3"
+                os.execv(python_exe, [python_exe, "-m", "hub_server"])
+            except Exception as e:
+                log.error(f"execv feila: {e} — prøver os._exit(0) i staden")
+                os._exit(0)  # Container vil rekøyre entrypoint
+        threading.Thread(target=_do_restart, daemon=True).start()
+        return True, "Hub restartar om 1 sekund — rekoble nettlesar etter ~10 sek"
+    except Exception as e:
+        return False, f"Restart feila: {e}"
 
 
 def rekoble_node(node_id: str) -> tuple:

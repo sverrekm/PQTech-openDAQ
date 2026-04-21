@@ -273,6 +273,7 @@ export interface HubStatus {
   tilkobla_nodar: number
   nodar: HubNodeStatus[]
   ip: string
+  pending_changes?: boolean
 }
 
 export interface HubKonfig {

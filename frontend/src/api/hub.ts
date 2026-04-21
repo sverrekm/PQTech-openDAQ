@@ -66,3 +66,7 @@ export async function oppdaterKanalRanges(overstyringer: HubKanalRangeOverstyrin
 export async function byttModus(modus: string): Promise<ActionResult> {
   return apiPost<ActionResult>('/api/modus/bytt', { modus })
 }
+
+export async function restartHub(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/hub/restart')
+}

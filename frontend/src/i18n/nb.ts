@@ -282,6 +282,10 @@ export const nb: Record<string, string> = {
   '-- Choose preset (optional) --': '-- Vel mal (valfri) --',
   'Base address': 'Base-adresse',
   'Added to each register address. PQube 3: 7000': 'Vert lagt til kvar register-adresse. PQube 3: 7000',
+  'Pending changes': 'Endringar venter',
+  'restart hub to activate channel changes in DewesoftX': 'restart hub for å aktivere kanalendringar i DewesoftX',
+  'Restart hub': 'Restart hub',
+  'Restart hub? DewesoftX will briefly disconnect (~10 s).': 'Restart hub? DewesoftX mister tilkobling i ~10 sek.',
   'Some registers have address 0 — fill in from device manual before testing.':
     'Nokre register har adresse 0 — fyll inn frå einingsmanualen før du testar.',
 

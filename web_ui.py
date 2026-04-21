@@ -76,6 +76,7 @@ if HUB_MODUS:
         fjern_node_api, rekoble_node, hent_logg as _hub_hent_logg,
         hent_hub_kanalar, hent_hub_buffer_status,
         hent_kanal_ranges_dict, oppdater_kanal_ranges,
+        restart_hub as _hub_restart,
     )
 
 app = Flask(__name__)
@@ -1060,6 +1061,20 @@ def api_hub_rekoble_node(node_id):
         return jsonify({"suksess": True, "melding": "Modbus-nodar rekoplar"})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)})
+
+
+@app.route("/api/hub/restart", methods=["POST"])
+def api_hub_restart():
+    """Restart hub-prosessen for å aktivere node-konfig-endringar.
+
+    Berre i hub-modus — direkte-modus restartar openDAQ-brua automatisk
+    ved konfig-endring.
+    """
+    if not HUB_MODUS:
+        return jsonify({"suksess": False,
+                        "melding": "Berre tilgjengeleg i hub-modus"}), 400
+    ok, melding = _hub_restart()
+    return jsonify({"suksess": ok, "melding": melding})
 
 
 @app.route("/api/hub/kanalar")

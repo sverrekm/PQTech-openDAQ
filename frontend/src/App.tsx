@@ -106,7 +106,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <>
+    <div className="h-screen flex flex-col">
       <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} />
       <Layout>
         <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} />
@@ -116,6 +116,6 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
       </Layout>
-    </>
+    </div>
   )
 }
