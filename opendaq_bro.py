@@ -1299,8 +1299,9 @@ class OpenDAQBro:
                 log.warning(f"  MQTT kanal {ch_idx} konfig feilet: {e}")
 
         # Konfigurer Modbus-kanalar (indeks n_adc + n_mqtt +)
-        # Same strategi som MQTT-kanalar: Amplitude=0, Waveform=Sine, DC = modbus-verdi.
-        # acqLoop genererer konstant DC-basert signal.
+        # Same PostScaling-trick som hub_server: Amplitude=10 + Waveform=None
+        # aktiverer PostScaling frå CustomRange, så intern DC [-10, 10] vert
+        # mappa til fysisk range. Utan dette ville 230V vert klampa til 10.
         for midx, mb in enumerate(self._modbus_kanalar):
             ch_idx = n_adc + n_mqtt + midx
             if ch_idx >= len(channels):
@@ -1310,17 +1311,17 @@ class OpenDAQBro:
             try:
                 ch.name = reg.namn
                 ch.description = f"{mb['node_namn']} @ {reg.adresse}"
-                # Amplitude=0, DC = siste modbus-verdi
-                self._safe_set(ch, "Amplitude", 0.0)
-                self._safe_set(ch, "Frequency", 1.0)
+                # Amplitude=10 aktiverer PostScaling. Waveform=None (2) gjer at
+                # acqLoop output = 0*Amp + DC = berre DC (ingen bølgjeform).
+                self._safe_set(ch, "Amplitude", 10.0)
+                self._safe_set(ch, "Waveform", 2)      # None
+                self._safe_set(ch, "Frequency", 0.1)   # irrelevant med Waveform=None
                 self._safe_set(ch, "DC", 0.0)
-                self._safe_set(ch, "Waveform", 0)
                 # Modbus-kanalar leverer ferdig-skalerte fysiske verdiar
                 self._kanal_skala.append(1.0)
                 self._kanal_offset.append(0.0)
-                # CustomRange med 5× sikkerheitsfaktor (same som hub) så DC ikkje clampar.
-                # Intern DC er [-10, 10]. Utan PostScaling tek clamping DewesoftX si verdi
-                # ned på ±10. Men vi ønskjer fysisk range slik at DewesoftX viser rette einingar.
+                # CustomRange med 5× sikkerheitsfaktor — PostScaling mappar
+                # intern [-10, 10] → fysisk [-cr_half, cr_half].
                 RANGE_FAKTOR = 5.0
                 max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
                 cr_half = max_abs * RANGE_FAKTOR
@@ -1330,7 +1331,8 @@ class OpenDAQBro:
                 except Exception:
                     pass
                 log.info(f"  Modbus Ch{ch_idx}: {reg.namn} "
-                         f"({mb['node_namn']} @ {reg.adresse}, {reg.eining})")
+                         f"({mb['node_namn']} @ {reg.adresse}, {reg.eining}, "
+                         f"CR=[-{cr_half},{cr_half}])")
             except Exception as e:
                 log.warning(f"  Modbus kanal {ch_idx} konfig feilet: {e}")
 
