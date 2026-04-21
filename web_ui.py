@@ -53,6 +53,7 @@ try:
         hent_buffer_lagringsinfo as _buffer_hent_lagring,
         oppdater_modbus_konfig_og_restart as _modbus_restart_etter_konfig,
         hent_modbus_nodar as _sirius_hent_modbus_nodar,
+        hent_modbus_kanalar as _sirius_hent_modbus_kanalar,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -1063,13 +1064,23 @@ def api_hub_rekoble_node(node_id):
 
 @app.route("/api/hub/kanalar")
 def api_hub_kanalar():
-    """Kanal-metadata og live-verdiar frå tilkobla nodar."""
-    if not HUB_MODUS:
-        return jsonify({"kanalar": []})
-    try:
-        return jsonify({"kanalar": hent_hub_kanalar()})
-    except Exception as e:
-        return jsonify({"kanalar": [], "feil": str(e)})
+    """Kanal-metadata og live-verdiar frå tilkobla nodar.
+
+    Hub-modus: openDAQ-nodar + modbus-nodar.
+    Direkte-modus: berre modbus-nodar (openDAQ-aggregering er hub-funksjonalitet).
+    """
+    if HUB_MODUS:
+        try:
+            return jsonify({"kanalar": hent_hub_kanalar()})
+        except Exception as e:
+            return jsonify({"kanalar": [], "feil": str(e)})
+    # Direkte-modus: returner modbus-kanalar via sirius_server si helper
+    if SIRIUS_DIREKTE:
+        try:
+            return jsonify({"kanalar": _sirius_hent_modbus_kanalar()})
+        except Exception as e:
+            return jsonify({"kanalar": [], "feil": str(e)})
+    return jsonify({"kanalar": []})
 
 
 @app.route("/api/hub/kanal-ranges")

@@ -644,6 +644,60 @@ def oppdater_modbus_konfig_og_restart():
     threading.Thread(target=_delayed_restart, daemon=True).start()
 
 
+def hent_modbus_kanalar() -> list:
+    """Returner modbus-register som kanalar i same format som hub sin hent_hub_kanalar.
+
+    Brukt av /api/hub/kanalar i direkte-modus så sidebar + HubPage kan vise
+    og filtrere modbus-kanalar på lik linje med openDAQ-kanalar i hub-modus.
+    """
+    try:
+        konfig = les_hub_konfig()
+    except Exception:
+        return []
+
+    verdiar = {}
+    if _modbus_manager is not None:
+        try:
+            verdiar = _modbus_manager.hent_verdiar()
+        except Exception:
+            pass
+
+    status = {}
+    if _modbus_manager is not None:
+        try:
+            status = _modbus_manager.hent_status()
+        except Exception:
+            pass
+
+    kanalar = []
+    for node in konfig.nodar:
+        if node.type != NODE_TYPE_MODBUS_TCP:
+            continue
+        node_tilkobla = status.get(node.id, {}).get("tilkobla", False)
+        for reg in node.modbus_registers:
+            verdi = verdiar.get((node.id, reg.adresse))
+            # CustomRange = 5× range (same som opendaq_bro gjer)
+            RANGE_FAKTOR = 5.0
+            max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
+            cr_half = max_abs * RANGE_FAKTOR
+            kanalar.append({
+                "node_id": node.id,
+                "node_namn": node.namn,
+                "namn": reg.namn,
+                "verdi": verdi,
+                "eining": reg.eining,
+                "auto_range_low": reg.range_low,
+                "auto_range_high": reg.range_high,
+                "cr_low": -cr_half,
+                "cr_high": cr_half,
+                "overstyrt": False,
+                "kanal_type": "modbus",
+                "modbus_adresse": reg.adresse,
+                "tilkobla": node_tilkobla,
+            })
+    return kanalar
+
+
 def hent_modbus_nodar() -> list:
     """Returner liste av modbus-nodar med status, for web API."""
     try:

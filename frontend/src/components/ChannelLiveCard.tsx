@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
-import { hentSynlegeKanalar } from '../pages/HubPage'
+import { erKanalSynleg } from '../pages/HubPage'
 import SparklineChart from './SparklineChart'
 import { useI18n } from '../i18n'
 
@@ -143,8 +143,7 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
             )
           })}
           {(() => {
-            const synlege = hentSynlegeKanalar()
-            const synlegeHub = (hubKanalar ?? []).filter(k => synlege.has(`${k.node_id}:${k.namn}`))
+            const synlegeHub = (hubKanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`))
             if (synlegeHub.length === 0) return null
             const baseNum = (siriusTilkoblet ? (kanalar?.length ?? 0) : 0)
               + (mqttStatus?.aktivert && mqttStatus.topics ? Object.keys(mqttStatus.topics).length : 0)

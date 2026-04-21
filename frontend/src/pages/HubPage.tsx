@@ -7,11 +7,26 @@ import BufferStatusCard from '../components/BufferStatusCard'
 
 export const HUB_SYNLEGE_KEY = 'hub_synlege_kanalar'
 
-export function hentSynlegeKanalar(): Set<string> {
+/**
+ * Les synlege kanalar frå localStorage. Returnerer null viss brukar ikkje
+ * har lagra noko val enno (→ default synleg).
+ */
+export function hentSynlegeKanalar(): Set<string> | null {
   try {
     const raw = localStorage.getItem(HUB_SYNLEGE_KEY)
-    return raw ? new Set(JSON.parse(raw)) : new Set()
-  } catch { return new Set() }
+    return raw ? new Set<string>(JSON.parse(raw)) : null
+  } catch { return null }
+}
+
+/**
+ * Sjekk om ein kanal skal synast. Default: synleg (nye brukarar treng
+ * ikkje gjere noko ekstra). Berre når brukar har eksplisitt lagra eit val
+ * og kanalen ikkje er i settet, vert den skjult.
+ */
+export function erKanalSynleg(key: string): boolean {
+  const sett = hentSynlegeKanalar()
+  if (sett === null) return true
+  return sett.has(key)
 }
 
 function lagreSynlegeKanalar(set: Set<string>) {
@@ -146,7 +161,8 @@ function HubKanalTabell() {
   const kanalar: HubKanal[] = data?.kanalar ?? []
   const feil = (data as Record<string, unknown>)?.feil as string | undefined ?? pollError
 
-  const [synlege, setSynlege] = useState<Set<string>>(() => hentSynlegeKanalar())
+  // Synlege kanalar. null = brukar har ikkje lagra noko val enno → default synleg.
+  const [synlege, setSynlege] = useState<Set<string> | null>(() => hentSynlegeKanalar())
 
   // Override state: key -> { low: string, high: string }
   const [overrides, setOverrides] = useState<Record<string, { low: string; high: string }>>({})
@@ -165,25 +181,31 @@ function HubKanalTabell() {
     }).catch(() => {})
   }, [])
 
+  // Lagre berre når brukar har gjort eit eksplisitt val (synlege != null)
   useEffect(() => {
-    lagreSynlegeKanalar(synlege)
+    if (synlege !== null) lagreSynlegeKanalar(synlege)
   }, [synlege])
-
-  const toggleSynleg = (key: string) => {
-    setSynlege(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
 
   const kanalKey = (k: HubKanal) => `${k.node_id}:${k.namn}`
 
-  const alleValgt = kanalar.length > 0 && kanalar.every(k => synlege.has(kanalKey(k)))
+  // Når null: default synleg for alle. Ved fyrste toggle materialiserer vi alle keys
+  // minus den brukar slår av.
+  const materialiserAlle = (): Set<string> => new Set(kanalar.map(kanalKey))
+
+  const toggleSynleg = (key: string) => {
+    setSynlege(prev => {
+      const start = prev === null ? materialiserAlle() : new Set(prev)
+      if (start.has(key)) start.delete(key)
+      else start.add(key)
+      return start
+    })
+  }
+
+  const erSynleg = (key: string) => (synlege === null ? true : synlege.has(key))
+  const alleValgt = kanalar.length > 0 && kanalar.every(k => erSynleg(kanalKey(k)))
   const toggleAlle = () => {
     setSynlege(prev => {
-      const next = new Set(prev)
+      const next = prev === null ? materialiserAlle() : new Set(prev)
       if (alleValgt) {
         kanalar.forEach(k => next.delete(kanalKey(k)))
       } else {
@@ -263,7 +285,7 @@ function HubKanalTabell() {
                   return (
                     <tr key={`${k.node_id}-${k.namn}-${i}`} className={`hover:bg-gray-50 transition-colors ${k.overstyrt ? 'bg-orange-50/40' : ''}`}>
                       <td className="text-center px-1 py-1.5 border-b border-gray-100">
-                        <input type="checkbox" checked={synlege.has(key)} onChange={() => toggleSynleg(key)} className="accent-[#D76428]" title={t('Show in dashboard and sidebar')} />
+                        <input type="checkbox" checked={erSynleg(key)} onChange={() => toggleSynleg(key)} className="accent-[#D76428]" title={t('Show in dashboard and sidebar')} />
                       </td>
                       <td className="px-1 py-1.5 border-b border-gray-100 text-gray-700">{k.node_namn}</td>
                       <td className="px-1 py-1.5 border-b border-gray-100 text-gray-900">{k.namn}</td>

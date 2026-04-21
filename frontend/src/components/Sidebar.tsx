@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import { fetchHubStatus } from '../api/hub'
-import { hentSynlegeKanalar } from '../pages/HubPage'
+import { erKanalSynleg } from '../pages/HubPage'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
 
@@ -119,8 +119,7 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
 
 function HubKanalListe({ kanalar }: { kanalar?: HubKanal[] }) {
   const { t } = useI18n()
-  const synlege = hentSynlegeKanalar()
-  const synlegeKanalar = (kanalar ?? []).filter(k => synlege.has(`${k.node_id}:${k.namn}`))
+  const synlegeKanalar = (kanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`))
 
   if (synlegeKanalar.length === 0) return null
 
