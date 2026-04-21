@@ -221,16 +221,8 @@ class OpenDAQBro:
                     break
                 ch = channels[kanal_idx]
                 # DC er FloatProperty [-10, 10] — _safe_set klampar.
-                # CustomRange (5× sikkerheitsfaktor) mappar intern [-10,10] → fysisk.
-                # Skaler til intern: intern = verdi / cr_high
-                RANGE_FAKTOR = 5.0
-                max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
-                cr_half = max_abs * RANGE_FAKTOR
-                if cr_half > 0:
-                    intern = 10.0 * verdi / cr_half
-                else:
-                    intern = verdi
-                self._safe_set(ch, "DC", float(intern))
+                # Send rå fysisk verdi (same som MQTT).
+                self._safe_set(ch, "DC", float(verdi))
 
                 # Oppdater web UI-verdiar (med fysisk verdi, ikkje intern)
                 key = f"modbus_{midx}"
@@ -1298,12 +1290,10 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  MQTT kanal {ch_idx} konfig feilet: {e}")
 
-        # Konfigurer Modbus-kanalar (indeks n_adc + n_mqtt +)
-        # Same oppsett som MQTT-kanalar (Amplitude=0, Waveform=Sine) slik at
-        # acqLoop genererer DataPackets. DC-eigenskapen er [-10, 10] på RefDevice,
-        # so vi skalerer fysisk verdi → intern i oppdater_modbus_eigenskapar.
-        # PostScaling settast manuelt på signal descriptor i _sett_signal_descriptors
-        # slik at DewesoftX viser fysisk verdi.
+        # Konfigurer Modbus-kanalar (indeks n_adc + n_mqtt +).
+        # Kopi av MQTT-oppsettet: Amplitude=0, Waveform=Sine, CustomRange=fysisk range.
+        # acqLoop genererer signal med DC-verdi. Range-setting + descriptor gir
+        # DewesoftX nok info til å vise fysiske verdiar.
         for midx, mb in enumerate(self._modbus_kanalar):
             ch_idx = n_adc + n_mqtt + midx
             if ch_idx >= len(channels):
@@ -1316,22 +1306,18 @@ class OpenDAQBro:
                 self._safe_set(ch, "Amplitude", 0.0)
                 self._safe_set(ch, "Frequency", 1.0)
                 self._safe_set(ch, "DC", 0.0)
-                self._safe_set(ch, "Waveform", 0)      # Sine — som MQTT
+                self._safe_set(ch, "Waveform", 0)
                 self._kanal_skala.append(1.0)
                 self._kanal_offset.append(0.0)
-                # CustomRange for display/PostScaling. 5× sikkerheitsfaktor så
-                # intern [-10, 10] dekkjer fysisk range utan klamping.
-                RANGE_FAKTOR = 5.0
-                max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
-                cr_half = max_abs * RANGE_FAKTOR
                 try:
-                    custom_range = _daq.Range(-cr_half, cr_half)
+                    custom_range = _daq.Range(
+                        float(reg.range_low), float(reg.range_high))
                     ch.set_property_value("CustomRange", custom_range)
                 except Exception:
                     pass
                 log.info(f"  Modbus Ch{ch_idx}: {reg.namn} "
                          f"({mb['node_namn']} @ {reg.adresse}, {reg.eining}, "
-                         f"CR=[-{cr_half},{cr_half}])")
+                         f"range=[{reg.range_low},{reg.range_high}])")
             except Exception as e:
                 log.warning(f"  Modbus kanal {ch_idx} konfig feilet: {e}")
 
@@ -1635,27 +1621,6 @@ class OpenDAQBro:
                         float(reg.range_low), float(reg.range_high))
                 except Exception:
                     pass
-
-                # PostScaling: intern [-10, 10] → fysisk [-cr_half, cr_half].
-                # Same trick som hub_server._sett_hub_descriptors.
-                RANGE_FAKTOR = 5.0
-                max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
-                cr_half = max_abs * RANGE_FAKTOR
-                ps_scale = (2 * cr_half) / 20.0   # span / 20 (intern [-10,+10])
-                ps_offset = 0.0
-                try:
-                    if hasattr(_daq, 'ScaledSampleType'):
-                        ps = _daq.LinearScaling(ps_scale, ps_offset,
-                                                _daq.SampleType.Float64,
-                                                _daq.ScaledSampleType.Float64)
-                    else:
-                        ps = _daq.LinearScaling(ps_scale, ps_offset,
-                                                _daq.SampleType.Float64,
-                                                _daq.SampleType.Float64)
-                    desc_builder.post_scaling = ps
-                except Exception as e_ps:
-                    log.warning(f"  Modbus {reg.namn}: PostScaling feilet: {e_ps}")
-
                 new_desc = desc_builder.build()
                 try:
                     sig.set_descriptor(new_desc)
@@ -1667,8 +1632,7 @@ class OpenDAQBro:
                 if ch_idx < len(self._val_desc):
                     self._val_desc[ch_idx] = new_desc
                 sett_teller += 1
-                log.info(f"  Modbus {reg.namn}: descriptor enhet={eining}, "
-                         f"PostScaling scale={ps_scale:.2f}")
+                log.info(f"  Modbus {reg.namn}: descriptor enhet={eining}")
             except Exception as e:
                 log.warning(f"  Modbus {reg.namn}: signal descriptor feilet: {e}")
 
