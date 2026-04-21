@@ -711,6 +711,8 @@ COPY mqtt_klient.py .
 COPY enhet_konfig.py .
 COPY hub_konfig.py .
 COPY hub_server.py .
+COPY modbus_klient.py .
+COPY modbus_manager.py .
 COPY buffer_konfig.py .
 COPY buffer_skrivar.py .
 COPY hub_buffer.py .
