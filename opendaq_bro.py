@@ -1584,6 +1584,71 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  MQTT {mk.namn}: signal descriptor feilet: {e}")
 
+        # Modbus-kanalar (indeks n_adc + n_mqtt +): sett descriptor med eining frå ModbusRegister
+        n_mqtt = len(self._mqtt_kanalar)
+        for midx, mb in enumerate(self._modbus_kanalar):
+            ch_idx = self._antal_adc + n_mqtt + midx
+            if ch_idx >= len(self._kanal_signal):
+                break
+            ch, sig = self._kanal_signal[ch_idx]
+            if sig is None:
+                continue
+            reg = mb["reg"]
+            try:
+                unit_builder = _daq.UnitBuilder()
+                eining = reg.eining or ""
+                # Match namn/quantity til vanlege einingar for rett DewesoftX-visning
+                if eining == "V":
+                    unit_builder.name = "volt"
+                    unit_builder.quantity = "voltage"
+                elif eining == "A":
+                    unit_builder.name = "ampere"
+                    unit_builder.quantity = "electric_current"
+                elif eining == "W":
+                    unit_builder.name = "watt"
+                    unit_builder.quantity = "power"
+                elif eining == "VA":
+                    unit_builder.name = "voltampere"
+                    unit_builder.quantity = "apparent_power"
+                elif eining == "var":
+                    unit_builder.name = "var"
+                    unit_builder.quantity = "reactive_power"
+                elif eining == "Hz":
+                    unit_builder.name = "hertz"
+                    unit_builder.quantity = "frequency"
+                elif eining in ("°C", "C"):
+                    unit_builder.name = "degree Celsius"
+                    unit_builder.quantity = "temperature"
+                else:
+                    unit_builder.name = eining
+                    unit_builder.quantity = "modbus"
+                unit_builder.symbol = eining
+                unit_obj = unit_builder.build()
+
+                desc_builder = _daq.DataDescriptorBuilder()
+                desc_builder.name = reg.namn
+                desc_builder.sample_type = _daq.SampleType.Float64
+                desc_builder.unit = unit_obj
+                try:
+                    desc_builder.value_range = _daq.Range(
+                        float(reg.range_low), float(reg.range_high))
+                except Exception:
+                    pass
+                new_desc = desc_builder.build()
+                try:
+                    sig.set_descriptor(new_desc)
+                except Exception:
+                    try:
+                        sig.descriptor = new_desc
+                    except Exception:
+                        continue
+                if ch_idx < len(self._val_desc):
+                    self._val_desc[ch_idx] = new_desc
+                sett_teller += 1
+                log.info(f"  Modbus {reg.namn}: descriptor enhet={eining}")
+            except Exception as e:
+                log.warning(f"  Modbus {reg.namn}: signal descriptor feilet: {e}")
+
         log.info(f"  Signal descriptors sett: {sett_teller}/{len(self._kanal_signal)} kanalar")
 
     def _sett_sirius_device_info(self):
