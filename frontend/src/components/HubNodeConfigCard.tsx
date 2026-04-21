@@ -3,11 +3,13 @@ import type { HubStatus, NodeType, ModbusRegister, ModbusTestResultat } from '..
 import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, testModbusTilkobling, restartHub } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
+import { useToast } from './Toast'
 import ModbusRegisterTable from './ModbusRegisterTable'
 import { MODBUS_PRESETS, hentPreset, harUtfyltAdresser } from './modbusPresets'
 
 export default function HubNodeConfigCard() {
   const { t } = useI18n()
+  const toast = useToast()
   const hubFetcher = useCallback(() => fetchHubStatus(), [])
   const { data: hub } = usePolling(hubFetcher, 3000)
 
@@ -28,7 +30,6 @@ export default function HubNodeConfigCard() {
   const [nyRegisters, setNyRegisters] = useState<ModbusRegister[]>([])
 
   const [leggTilOpen, setLeggTilOpen] = useState(false)
-  const [melding, setMelding] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [testResultat, setTestResultat] = useState<ModbusTestResultat[] | null>(null)
 
@@ -64,10 +65,11 @@ export default function HubNodeConfigCard() {
         base_adresse: parseInt(nyBaseAdresse) || 0,
         registers: nyRegisters,
       })
-      setMelding(res.melding)
+      if (res.suksess) toast.suksess(res.melding)
+      else toast.feil(res.melding)
       setTestResultat(res.verdiar)
     } catch (e) {
-      setMelding(`${t('Error')}: ${e}`)
+      toast.feil(`${t('Error')}: ${e}`)
     }
     setActionLoading(null)
   }
@@ -93,16 +95,17 @@ export default function HubNodeConfigCard() {
         payload.modbus_registers = nyRegisters
       }
       const res = await leggTilNode(payload)
-      setMelding(res.melding)
       if (res.suksess) {
+        toast.suksess(res.melding)
         nullstillSkjema()
         setLeggTilOpen(false)
+      } else {
+        toast.feil(res.melding)
       }
     } catch (e) {
-      setMelding(`${t('Error')}: ${e}`)
+      toast.feil(`${t('Error')}: ${e}`)
     }
     setActionLoading(null)
-    setTimeout(() => setMelding(null), 6000)
   }
 
   const handleFjern = async (id: string, namn: string) => {
@@ -110,24 +113,24 @@ export default function HubNodeConfigCard() {
     setActionLoading(id)
     try {
       const res = await fjernNode(id)
-      setMelding(res.melding)
+      if (res.suksess) toast.suksess(res.melding)
+      else toast.feil(res.melding)
     } catch (e) {
-      setMelding(`${t('Error')}: ${e}`)
+      toast.feil(`${t('Error')}: ${e}`)
     }
     setActionLoading(null)
-    setTimeout(() => setMelding(null), 4000)
   }
 
   const handleRekoble = async (id: string) => {
     setActionLoading(id)
     try {
       const res = await rekobleNode(id)
-      setMelding(res.melding)
+      if (res.suksess) toast.suksess(res.melding)
+      else toast.feil(res.melding)
     } catch (e) {
-      setMelding(`${t('Error')}: ${e}`)
+      toast.feil(`${t('Error')}: ${e}`)
     }
     setActionLoading(null)
-    setTimeout(() => setMelding(null), 4000)
   }
 
   const handleRestartHub = async () => {
@@ -135,9 +138,9 @@ export default function HubNodeConfigCard() {
     setActionLoading('restart')
     try {
       const res = await restartHub()
-      setMelding(res.melding)
+      toast.info(res.melding, 10000)
     } catch (e) {
-      setMelding(`${t('Error')}: ${e}`)
+      toast.feil(`${t('Error')}: ${e}`)
     }
     // Ikkje nullstill actionLoading — prosessen restartar, sida treng uansett reload
   }
@@ -279,7 +282,7 @@ export default function HubNodeConfigCard() {
                     setNyBaseAdresse(String(preset.base_adresse))
                     setNyRegisters(preset.registers.map(r => ({ ...r })))
                     if (!nyNamn.trim()) setNyNamn(preset.namn)
-                    setMelding(preset.hjelp)
+                    toast.info(preset.hjelp, 8000)
                     e.target.value = ''  // Reset dropdown
                   }}
                   defaultValue=""
@@ -386,13 +389,6 @@ export default function HubNodeConfigCard() {
           >
             {actionLoading === 'add' ? t('Connecting to node...') : t('Add and connect')}
           </button>
-        </div>
-      )}
-
-      {/* Message banner */}
-      {melding && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg p-3 mb-3">
-          {melding}
         </div>
       )}
 
