@@ -324,6 +324,7 @@ def _oppdater_root_kanalar():
                     namn = "ukjent"
                     range_low, range_high = -5.0, 5.0
                     eining = ""
+                    sig_id = f"{node.id}_{ci}"   # Fallback-id
                     try:
                         namn = ch.name
                     except Exception:
@@ -338,6 +339,10 @@ def _oppdater_root_kanalar():
                     # Les eining + range frå signal descriptor
                     try:
                         sig = ch.signals[0]
+                        try:
+                            sig_id = sig.global_id
+                        except Exception:
+                            pass
                         desc = sig.descriptor
                         if desc:
                             if desc.unit:
@@ -357,6 +362,7 @@ def _oppdater_root_kanalar():
                         "node_id": node.id,
                         "ch_idx": ci,
                         "kanal_type": "opendaq",
+                        "sig_id": sig_id,
                     })
                     log.info(f"  Remote kanal {ci}: '{namn}' [{range_low}, {range_high}] {eining}")
             except Exception as e:
@@ -1296,113 +1302,65 @@ def hent_hub_kanalar() -> list:
                 "tilkobla": node_status.get("tilkobla", False),
             })
 
-    for node_id, device in nodar_snapshot:
+    # openDAQ-kanalar: iterer cached _fjern_kanal_info (ingen live device.channels-kall).
+    # Kun StreamReader.read() vert gjort live, og den er lokal (ingen nettverk-proxy).
+    for fk in _fjern_kanal_info:
+        if fk.get("kanal_type") != "opendaq":
+            continue
+        node_id = fk.get("node_id", "")
+        if not node_id:
+            continue
         node_info = konfig_nodar.get(node_id)
         node_namn = node_info.namn if node_info else node_id
+        ch_namn = fk.get("namn", "ukjent")
+        sig_id = fk.get("sig_id", f"{node_id}_{fk.get('ch_idx', 0)}")
 
-        try:
-            channels = device.channels
-        except Exception as e:
-            log.info(f"hent_hub_kanalar: Kan ikkje lese channels frå '{node_namn}': {e}")
-            continue
-
-        try:
-            ch_count = len(channels)
-        except Exception:
-            ch_count = 0
-
-        log.info(f"hent_hub_kanalar: Node '{node_namn}' — {ch_count} kanalar")
-
-        if ch_count == 0:
-            continue
-
-        for idx in range(ch_count):
+        # Les live verdi via cached StreamReader
+        verdi = None
+        reader_key = (node_id, sig_id)
+        reader = _kanal_readers.get(reader_key)
+        if reader is None:
+            # Lazy opprett av reader — trur device er online
+            device = dict(nodar_snapshot).get(node_id)
+            if device is not None:
+                try:
+                    sig = device.channels[fk.get("ch_idx", 0)].signals[0]
+                    reader = daq.StreamReader(sig)
+                    _kanal_readers[reader_key] = reader
+                except Exception:
+                    reader = None
+        if reader is not None:
             try:
-                ch = channels[idx]
-            except Exception as e:
-                log.info(f"hent_hub_kanalar: Kan ikkje hente kanal [{idx}] frå '{node_namn}': {e}")
-                continue
-
-            try:
-                ch_namn = ch.name
+                count = reader.available_count
+                if count > 0:
+                    values = reader.read(count)
+                    if values is not None and len(values) > 0:
+                        verdi = float(values[-1])
             except Exception:
-                ch_namn = "ukjent"
+                _kanal_readers.pop(reader_key, None)
 
-            # Hent signal og descriptor
-            eining = ""
-            verdi = None
-            try:
-                signals = ch.signals
-                sig_count = len(signals) if signals else 0
+        auto_range_low = fk.get("range_low", -5.0)
+        auto_range_high = fk.get("range_high", 5.0)
+        cr_low = fk.get("cr_low", auto_range_low * 5.0)
+        cr_high = fk.get("cr_high", auto_range_high * 5.0)
 
-                if sig_count > 0:
-                    sig = signals[0]
-                    try:
-                        sig_id = sig.global_id
-                    except Exception:
-                        sig_id = f"{node_id}_{ch_namn}_{idx}"
+        override_key = f"{node_id}:{ch_namn}"
+        overstyrt = override_key in _kanal_range_overstyringer
 
-                    # Eining frå descriptor
-                    try:
-                        desc = sig.descriptor
-                        if desc and desc.unit:
-                            eining = desc.unit.symbol or ""
-                    except Exception:
-                        pass
-
-                    # Les siste verdi via cached StreamReader
-                    reader_key = (node_id, sig_id)
-                    if reader_key not in _kanal_readers:
-                        try:
-                            _kanal_readers[reader_key] = daq.StreamReader(sig)
-                            log.info(f"hent_hub_kanalar: Oppretta StreamReader for '{ch_namn}'")
-                        except Exception as e:
-                            log.warning(f"hent_hub_kanalar: StreamReader feil for '{ch_namn}': {e}")
-
-                    reader = _kanal_readers.get(reader_key)
-                    if reader:
-                        try:
-                            count = reader.available_count
-                            if count > 0:
-                                values = reader.read(count)
-                                if values is not None and len(values) > 0:
-                                    verdi = float(values[-1])
-                        except Exception as e:
-                            log.warning(f"hent_hub_kanalar: Lesefeil for '{ch_namn}': {e}")
-                            _kanal_readers.pop(reader_key, None)
-                else:
-                    log.info(f"hent_hub_kanalar: Kanal '{ch_namn}' har 0 signal")
-            except Exception as e:
-                log.info(f"hent_hub_kanalar: Signal-feil for '{ch_namn}': {e}")
-
-            # Range-info frå cached _fjern_kanal_info (sett ved oppstart/rekobling)
-            fk_match = next(
-                (fk for fk in _fjern_kanal_info
-                 if fk.get("node_id") == node_id and fk.get("ch_idx") == idx),
-                None
-            )
-            auto_range_low = fk_match["range_low"] if fk_match else -5.0
-            auto_range_high = fk_match["range_high"] if fk_match else 5.0
-            cr_low = fk_match.get("cr_low", auto_range_low * 5.0) if fk_match else -25.0
-            cr_high = fk_match.get("cr_high", auto_range_high * 5.0) if fk_match else 25.0
-
-            override_key = f"{node_id}:{ch_namn}"
-            overstyrt = override_key in _kanal_range_overstyringer
-
-            kanalar.append({
-                "node_id": node_id,
-                "node_namn": node_namn,
-                "namn": ch_namn,
-                "verdi": verdi,
-                "eining": eining,
-                "auto_range_low": auto_range_low,
-                "auto_range_high": auto_range_high,
-                "cr_low": cr_low,
-                "cr_high": cr_high,
-                "overstyrt": overstyrt,
-                "kanal_type": "opendaq",
-                "tilkobla": True,
-            })
+        kanalar.append({
+            "node_id": node_id,
+            "node_namn": node_namn,
+            "namn": ch_namn,
+            "verdi": verdi,
+            "eining": fk.get("eining", ""),
+            "auto_range_low": auto_range_low,
+            "auto_range_high": auto_range_high,
+            "cr_low": cr_low,
+            "cr_high": cr_high,
+            "overstyrt": overstyrt,
+            "kanal_type": "opendaq",
+            "tilkobla": node_id in dict(nodar_snapshot),
+        })
 
     log.info(f"hent_hub_kanalar: Returnerer {len(kanalar)} kanalar "
              f"({sum(1 for k in kanalar if k['verdi'] is not None)} med verdi)")
