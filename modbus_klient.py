@@ -130,6 +130,11 @@ class ModbusKlient:
         if self._klient is None or not self.tilkobla:
             return None
 
+        # Hopp over register som ikkje er utfylt (adresse=0 er sentinel for "fyll inn frå manual")
+        if reg.adresse <= 0:
+            self.siste_feil = f"Register '{reg.namn}' har adresse 0 — ikkje utfylt"
+            return None
+
         antall = self._registers_for_datatype(reg.datatype)
 
         try:
