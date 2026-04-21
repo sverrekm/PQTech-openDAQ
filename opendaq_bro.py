@@ -258,6 +258,93 @@ class OpenDAQBro:
             if self._modbus_pkt_teller % 100 == 0:
                 log.warning(f"oppdater_modbus_eigenskapar feil: {e}")
 
+    def oppdater_modbus_data(self, modbus_verdiar, blokk_storleik=1024):
+        """Injiser Modbus-verdiar som DataPackets direkte (acqLoop bypass).
+
+        Brukt når antal_adc=0 (MQTT/Modbus-only modus) der acqLoop er
+        deaktivert. Same DataPacket-injeksjons-mønster som oppdater_mqtt_data.
+
+        Args:
+            modbus_verdiar: dict {(node_id, reg_adresse): float} frå ModbusManager
+            blokk_storleik: samples per pakke
+        """
+        if not self._tilgjengelig or not self._pakett_klar:
+            return
+        if not modbus_verdiar or not self._modbus_kanalar:
+            return
+        n_adc = self._antal_adc
+        n_mqtt = len(self._mqtt_kanalar)
+
+        try:
+            for midx, mb in enumerate(self._modbus_kanalar):
+                node_id = mb["node_id"]
+                reg = mb["reg"]
+                verdi = modbus_verdiar.get((node_id, reg.adresse))
+                if verdi is None:
+                    continue
+
+                kanal_idx = n_adc + n_mqtt + midx
+                if kanal_idx >= len(self._kanal_signal):
+                    break
+
+                ch, sig = self._kanal_signal[kanal_idx]
+                if sig is None:
+                    continue
+
+                # Oppdater web UI-verdiar
+                key = f"modbus_{midx}"
+                self._siste_verdiar[key] = {
+                    "snitt": round(verdi, 4),
+                    "rms": round(abs(verdi), 4),
+                    "topp": round(abs(verdi), 4),
+                    "siste": round(verdi, 4),
+                    "antall": blokk_storleik,
+                    "kjelde": "modbus",
+                    "node_id": node_id,
+                    "adresse": reg.adresse,
+                    "enhet": reg.eining,
+                }
+
+                if (kanal_idx < len(self._dom_signal) and
+                        self._dom_signal[kanal_idx] is not None):
+                    try:
+                        dom_sig = self._dom_signal[kanal_idx]
+                        dom_desc = self._dom_desc[kanal_idx]
+                        val_desc = self._val_desc[kanal_idx]
+
+                        offset = (self._start_ticks +
+                                  self._total_samples[kanal_idx] * self._tick_delta)
+
+                        time_pkt = _daq.DataPacket(dom_desc, blokk_storleik, offset)
+                        val_pkt = _daq.DataPacketWithDomain(
+                            time_pkt, val_desc, blokk_storleik, 0)
+
+                        try:
+                            buf = np.frombuffer(val_pkt.raw_data, dtype=np.float64)
+                            buf[:] = verdi
+                        except (ValueError, TypeError):
+                            import ctypes
+                            arr = (ctypes.c_double * blokk_storleik).from_address(
+                                int(val_pkt.raw_data))
+                            for j in range(blokk_storleik):
+                                arr[j] = verdi
+
+                        dom_sig.send_packet(time_pkt)
+                        sig.send_packet(val_pkt)
+                        self._total_samples[kanal_idx] += blokk_storleik
+                        self._modbus_pkt_teller += 1
+                        if self._modbus_pkt_teller == 1 or self._modbus_pkt_teller % 200 == 0:
+                            log.info(f"  Modbus pkt #{self._modbus_pkt_teller}: "
+                                     f"Ch{kanal_idx} {reg.namn}={verdi:.2f}, "
+                                     f"samples={self._total_samples[kanal_idx]}")
+                    except Exception as e:
+                        self._modbus_pkt_teller += 1
+                        if self._modbus_pkt_teller <= 5 or self._modbus_pkt_teller % 200 == 0:
+                            log.warning(f"  Modbus pakett Ch{kanal_idx} FEIL: {e}")
+        except Exception as e:
+            if self._modbus_pkt_teller % 100 == 0:
+                log.warning(f"oppdater_modbus_data feil: {e}")
+
     def start(self) -> bool:
         """Start openDAQ instance med root device, deretter servere."""
         if _daq is None:

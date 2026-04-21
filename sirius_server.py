@@ -586,7 +586,13 @@ def _modbus_straumings_loop():
                     _modbus_manager is not None):
                 verdiar = _modbus_manager.hent_verdiar()
                 if verdiar:
-                    _opendaq_bro.oppdater_modbus_eigenskapar(verdiar)
+                    # Same val som for MQTT: antal_adc=0 → DataPacket direkte
+                    # (acqLoop deaktivert), elles DC + acqLoop
+                    if _opendaq_bro._antal_adc == 0:
+                        _opendaq_bro.oppdater_modbus_data(verdiar)
+                    else:
+                        _opendaq_bro._enable_acqloop()
+                        _opendaq_bro.oppdater_modbus_eigenskapar(verdiar)
         except Exception as e:
             log.warning(f"Modbus strøyming feil: {e}")
         _modbus_straumings_stopp.wait(timeout=0.05)  # ~20 Hz
