@@ -2031,7 +2031,7 @@ def start_hub():
     log.info(f"Startar web UI på port {web_port}...")
 
     from web_ui import app as flask_app
-    flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False)
+    flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False, threaded=True)
 
 
 def main():

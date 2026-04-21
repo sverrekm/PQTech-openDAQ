@@ -1509,7 +1509,7 @@ def start_server(args):
         from web_ui import app as flask_app
         web_port = int(os.environ.get("WEB_PORT", 8080))
         log.info(f"Web UI startet paa port {web_port}")
-        flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False)
+        flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False, threaded=True)
 
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()
