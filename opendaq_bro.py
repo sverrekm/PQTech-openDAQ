@@ -204,8 +204,21 @@ class OpenDAQBro:
         Args:
             modbus_verdiar: dict {(node_id, reg_adresse): physical_value} frå ModbusManager
         """
-        if not self._tilgjengelig or not self._modbus_kanalar:
+        if not self._tilgjengelig:
+            if self._modbus_pkt_teller % 200 == 0:
+                log.info(f"oppdater_modbus_eigenskapar: tilgjengelig=False — hoppar over")
+            self._modbus_pkt_teller += 1
             return
+        if not self._modbus_kanalar:
+            if self._modbus_pkt_teller % 200 == 0:
+                log.info(f"oppdater_modbus_eigenskapar: 0 modbus-kanalar konfigurert")
+            self._modbus_pkt_teller += 1
+            return
+        # Periodisk status for debugging
+        if self._modbus_pkt_teller % 200 == 0:
+            n_verdiar = sum(1 for v in modbus_verdiar.values() if v is not None)
+            log.info(f"oppdater_modbus_eigenskapar: {len(self._modbus_kanalar)} kanalar, "
+                     f"{n_verdiar} verdiar i input, pkt #{self._modbus_pkt_teller}")
         n_adc = self._antal_adc
         n_mqtt = len(self._mqtt_kanalar)
         try:
@@ -218,11 +231,14 @@ class OpenDAQBro:
                     continue
                 kanal_idx = n_adc + n_mqtt + midx
                 if kanal_idx >= len(channels):
+                    log.warning(f"  Modbus kanal_idx {kanal_idx} >= antal channels {len(channels)}")
                     break
                 ch = channels[kanal_idx]
                 # DC er FloatProperty [-10, 10] — _safe_set klampar.
                 # Send rå fysisk verdi (same som MQTT).
-                self._safe_set(ch, "DC", float(verdi))
+                ok = self._safe_set(ch, "DC", float(verdi))
+                if self._modbus_pkt_teller < 3 or self._modbus_pkt_teller % 200 == 0:
+                    log.info(f"  Modbus Ch{kanal_idx} {reg.namn}: DC={verdi} ok={ok}")
 
                 # Oppdater web UI-verdiar (med fysisk verdi, ikkje intern)
                 key = f"modbus_{midx}"
