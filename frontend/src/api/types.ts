@@ -225,6 +225,24 @@ export interface EnhetKonfig {
 }
 
 // --- /api/hub/* ---
+export type NodeType = 'opendaq' | 'modbus_tcp'
+export type ModbusFunksjon = 'holding' | 'input' | 'coil' | 'discrete'
+export type ModbusDatatype = 'int16' | 'uint16' | 'int32' | 'uint32' | 'float32'
+export type ModbusByteOrder = 'AB_CD' | 'CD_AB' | 'BA_DC' | 'DC_BA'
+
+export interface ModbusRegister {
+  namn: string
+  adresse: number
+  funksjon: ModbusFunksjon
+  datatype: ModbusDatatype
+  byte_order: ModbusByteOrder
+  skalering: number
+  offset: number
+  eining: string
+  range_low: number
+  range_high: number
+}
+
 export interface HubNodeStatus {
   id: string
   namn: string
@@ -233,6 +251,11 @@ export interface HubNodeStatus {
   protokoll: string
   lokasjon: string
   aktivert: boolean
+  type?: NodeType
+  modbus_unit_id?: number
+  modbus_poll_hz?: number
+  modbus_timeout_ms?: number
+  modbus_registers?: ModbusRegister[]
   tilkobla: boolean
   feil: string | null
   sist_sett: string | null
@@ -291,6 +314,24 @@ export interface HubKanal {
   cr_low?: number
   cr_high?: number
   overstyrt?: boolean
+  kanal_type?: 'opendaq' | 'modbus'
+  modbus_adresse?: number
+  tilkobla?: boolean
+}
+
+// --- /api/modbus/test ---
+export interface ModbusTestResultat {
+  namn: string
+  adresse: number
+  raa: number[] | null
+  verdi: number | null
+  feil: string | null
+}
+
+export interface ModbusTestResponse {
+  suksess: boolean
+  melding: string
+  verdiar: ModbusTestResultat[]
 }
 
 // --- /api/hub/kanal-ranges ---

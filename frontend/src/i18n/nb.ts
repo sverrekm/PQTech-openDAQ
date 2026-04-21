@@ -268,6 +268,30 @@ export const nb: Record<string, string> = {
   'No nodes configured. Add a remote node to get started.': 'Ingen nodar konfigurert. Legg til ein fjern-node for å starte.',
   'Force reconnect': 'Tving rekobling',
 
+  // HubNodeConfigCard — Modbus
+  'Node type': 'Nodetype',
+  'Unit ID': 'Unit ID',
+  'Poll rate (Hz)': 'Poll-rate (Hz)',
+  'Timeout (ms)': 'Timeout (ms)',
+  'Test connection': 'Test tilkobling',
+  'Testing...': 'Testar...',
+  'Test results': 'Test-resultat',
+  'Raw': 'Rå',
+  'registers': 'register',
+
+  // ModbusRegisterTable
+  'Modbus registers': 'Modbus-register',
+  '+ Add register': '+ Legg til register',
+  'No registers. Add one to get started.': 'Ingen register. Legg til eitt for å starte.',
+  'Address': 'Adresse',
+  'Function': 'Funksjon',
+  'Data type': 'Datatype',
+  'Byte order': 'Byte-rekkefølge',
+  'Scaling': 'Skalering',
+  'Offset': 'Offset',
+  'Range min': 'Range min',
+  'Range max': 'Range max',
+
   // BufferConfigCard / BufferStatusCard
   'Measurement buffer': 'Målebuffer',
   'Buffer active': 'Buffer aktiv',

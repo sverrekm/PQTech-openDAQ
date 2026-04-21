@@ -24,30 +24,88 @@ HUB_KONFIG_STI = Path("/data/konfig/hub_nodar.json")
 HUB_KANAL_RANGE_STI = Path("/data/konfig/hub_kanal_ranges.json")
 
 
+NODE_TYPE_OPENDAQ = "opendaq"
+NODE_TYPE_MODBUS_TCP = "modbus_tcp"
+NODE_TYPAR = (NODE_TYPE_OPENDAQ, NODE_TYPE_MODBUS_TCP)
+
+MODBUS_FUNKSJONAR = ("holding", "input", "coil", "discrete")
+MODBUS_DATATYPAR = ("int16", "uint16", "int32", "uint32", "float32")
+MODBUS_BYTE_ORDERS = ("AB_CD", "CD_AB", "BA_DC", "DC_BA")
+
+
+@dataclass
+class ModbusRegister:
+    """Eit Modbus-register som vert ein kanal i hubben."""
+    namn: str
+    adresse: int
+    funksjon: str = "holding"      # holding | input | coil | discrete
+    datatype: str = "float32"      # int16 | uint16 | int32 | uint32 | float32
+    byte_order: str = "AB_CD"      # AB_CD (big) | CD_AB (mid-swap) | BA_DC | DC_BA
+    skalering: float = 1.0
+    offset: float = 0.0
+    eining: str = ""
+    range_low: float = -1000.0
+    range_high: float = 1000.0
+
+    def til_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def fraa_dict(cls, d: dict) -> 'ModbusRegister':
+        return cls(
+            namn=str(d.get("namn", "")),
+            adresse=int(d.get("adresse", 0)),
+            funksjon=str(d.get("funksjon", "holding")),
+            datatype=str(d.get("datatype", "float32")),
+            byte_order=str(d.get("byte_order", "AB_CD")),
+            skalering=float(d.get("skalering", 1.0)),
+            offset=float(d.get("offset", 0.0)),
+            eining=str(d.get("eining", "")),
+            range_low=float(d.get("range_low", -1000.0)),
+            range_high=float(d.get("range_high", 1000.0)),
+        )
+
+
 @dataclass
 class FjernNode:
-    """Ein fjern-node (Pi med SIRIUS) som hubben koplar til."""
+    """Ein fjern-node som hubben koplar til (openDAQ eller Modbus TCP)."""
     id: str                     # Unikt ID (auto UUID[:8])
     namn: str                   # "Sundet - Tavle 3"
-    adresse: str                # Tunnel-IP, t.d. "10.0.0.5"
+    adresse: str                # IP-adresse, t.d. "10.0.0.5" eller "192.168.1.81"
     port: int = 4840
     aktivert: bool = True
-    protokoll: str = "daq.opcua"  # OPC-UA (konfig + auto NativeStreaming), alt: "daq.nd"
+    protokoll: str = "daq.opcua"  # OPC-UA (for type=opendaq). Ignorert for modbus.
     lokasjon: str = ""
+    type: str = NODE_TYPE_OPENDAQ  # "opendaq" | "modbus_tcp"
+
+    # Modbus-spesifikke felt (berre i bruk når type=modbus_tcp)
+    modbus_unit_id: int = 1
+    modbus_poll_hz: float = 1.0
+    modbus_timeout_ms: int = 2000
+    modbus_registers: List[ModbusRegister] = field(default_factory=list)
 
     def til_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def fraa_dict(cls, d: dict) -> 'FjernNode':
+        node_type = str(d.get("type", NODE_TYPE_OPENDAQ))
+        default_port = 502 if node_type == NODE_TYPE_MODBUS_TCP else 7420
+        registers_data = d.get("modbus_registers", []) or []
+        registers = [ModbusRegister.fraa_dict(r) for r in registers_data]
         return cls(
             id=str(d.get("id", uuid.uuid4().hex[:8])),
             namn=str(d.get("namn", "")),
             adresse=str(d.get("adresse", "")),
-            port=int(d.get("port", 7420)),
+            port=int(d.get("port", default_port)),
             aktivert=bool(d.get("aktivert", True)),
             protokoll=str(d.get("protokoll", "daq.nd")),
             lokasjon=str(d.get("lokasjon", "")),
+            type=node_type,
+            modbus_unit_id=int(d.get("modbus_unit_id", 1)),
+            modbus_poll_hz=float(d.get("modbus_poll_hz", 1.0)),
+            modbus_timeout_ms=int(d.get("modbus_timeout_ms", 2000)),
+            modbus_registers=registers,
         )
 
     @property
@@ -96,7 +154,7 @@ def les_hub_konfig() -> HubKonfig:
             # oppdagar og koplar til NativeStreaming automatisk for data.
             migrert = False
             for node in konfig.nodar:
-                if node.protokoll == "daq.nd":
+                if node.type == NODE_TYPE_OPENDAQ and node.protokoll == "daq.nd":
                     node.protokoll = "daq.opcua"
                     node.port = 4840
                     log.info(f"  Migrert node '{node.namn}': "
@@ -212,7 +270,12 @@ def valider_hub_konfig(data: dict) -> tuple:
             return None, f"Node {i}: 'adresse' kan ikkje vere tom"
         namn = str(n.get("namn", "")).strip() or adresse
 
-        port = n.get("port", 4840)
+        node_type = str(n.get("type", NODE_TYPE_OPENDAQ)).strip()
+        if node_type not in NODE_TYPAR:
+            return None, f"Node {i}: ugyldig type '{node_type}' ({'/'.join(NODE_TYPAR)})"
+
+        default_port = 502 if node_type == NODE_TYPE_MODBUS_TCP else 4840
+        port = n.get("port", default_port)
         try:
             port = int(port)
         except (TypeError, ValueError):
@@ -220,9 +283,99 @@ def valider_hub_konfig(data: dict) -> tuple:
         if port < 1 or port > 65535:
             return None, f"Node {i}: port {port} utanfor gyldig område (1-65535)"
 
-        protokoll = str(n.get("protokoll", "daq.nd")).strip()
-        if protokoll not in ("daq.opcua", "daq.nd"):
+        protokoll = str(n.get("protokoll", "daq.opcua")).strip()
+        if node_type == NODE_TYPE_OPENDAQ and protokoll not in ("daq.opcua", "daq.nd"):
             return None, f"Node {i}: ugyldig protokoll '{protokoll}' (daq.opcua eller daq.nd)"
+
+        # Modbus-spesifikk validering
+        modbus_unit_id = 1
+        modbus_poll_hz = 1.0
+        modbus_timeout_ms = 2000
+        modbus_registers: List[ModbusRegister] = []
+        if node_type == NODE_TYPE_MODBUS_TCP:
+            try:
+                modbus_unit_id = int(n.get("modbus_unit_id", 1))
+            except (TypeError, ValueError):
+                return None, f"Node {i}: ugyldig modbus_unit_id"
+            if modbus_unit_id < 0 or modbus_unit_id > 255:
+                return None, f"Node {i}: modbus_unit_id {modbus_unit_id} utanfor 0-255"
+
+            try:
+                modbus_poll_hz = float(n.get("modbus_poll_hz", 1.0))
+            except (TypeError, ValueError):
+                return None, f"Node {i}: ugyldig modbus_poll_hz"
+            if modbus_poll_hz < 0.1 or modbus_poll_hz > 100.0:
+                return None, f"Node {i}: modbus_poll_hz {modbus_poll_hz} utanfor 0.1-100"
+
+            try:
+                modbus_timeout_ms = int(n.get("modbus_timeout_ms", 2000))
+            except (TypeError, ValueError):
+                return None, f"Node {i}: ugyldig modbus_timeout_ms"
+            if modbus_timeout_ms < 100 or modbus_timeout_ms > 30000:
+                return None, f"Node {i}: modbus_timeout_ms {modbus_timeout_ms} utanfor 100-30000"
+
+            regs_data = n.get("modbus_registers", []) or []
+            if not isinstance(regs_data, list):
+                return None, f"Node {i}: 'modbus_registers' må vere ei liste"
+            if len(regs_data) > 256:
+                return None, f"Node {i}: maks 256 register (fekk {len(regs_data)})"
+
+            reg_namn_set = set()
+            for ri, r in enumerate(regs_data):
+                if not isinstance(r, dict):
+                    return None, f"Node {i} register {ri}: forventa objekt"
+                r_namn = str(r.get("namn", "")).strip()
+                if not r_namn:
+                    return None, f"Node {i} register {ri}: 'namn' kan ikkje vere tom"
+                if r_namn in reg_namn_set:
+                    return None, f"Node {i} register {ri}: duplikat namn '{r_namn}'"
+                reg_namn_set.add(r_namn)
+
+                try:
+                    r_adr = int(r.get("adresse", 0))
+                except (TypeError, ValueError):
+                    return None, f"Node {i} register {ri}: ugyldig adresse"
+                if r_adr < 0 or r_adr > 65535:
+                    return None, f"Node {i} register {ri}: adresse {r_adr} utanfor 0-65535"
+
+                r_fn = str(r.get("funksjon", "holding"))
+                if r_fn not in MODBUS_FUNKSJONAR:
+                    return None, f"Node {i} register {ri}: ugyldig funksjon '{r_fn}' ({'/'.join(MODBUS_FUNKSJONAR)})"
+
+                r_dt = str(r.get("datatype", "float32"))
+                if r_dt not in MODBUS_DATATYPAR:
+                    return None, f"Node {i} register {ri}: ugyldig datatype '{r_dt}' ({'/'.join(MODBUS_DATATYPAR)})"
+
+                r_bo = str(r.get("byte_order", "AB_CD"))
+                if r_bo not in MODBUS_BYTE_ORDERS:
+                    return None, f"Node {i} register {ri}: ugyldig byte_order '{r_bo}' ({'/'.join(MODBUS_BYTE_ORDERS)})"
+
+                try:
+                    r_low = float(r.get("range_low", -1000.0))
+                    r_high = float(r.get("range_high", 1000.0))
+                except (TypeError, ValueError):
+                    return None, f"Node {i} register {ri}: ugyldig range-verdi"
+                if r_low >= r_high:
+                    return None, f"Node {i} register {ri}: range_low ({r_low}) må vere mindre enn range_high ({r_high})"
+
+                try:
+                    r_scale = float(r.get("skalering", 1.0))
+                    r_offset = float(r.get("offset", 0.0))
+                except (TypeError, ValueError):
+                    return None, f"Node {i} register {ri}: ugyldig skalering/offset"
+
+                modbus_registers.append(ModbusRegister(
+                    namn=r_namn,
+                    adresse=r_adr,
+                    funksjon=r_fn,
+                    datatype=r_dt,
+                    byte_order=r_bo,
+                    skalering=r_scale,
+                    offset=r_offset,
+                    eining=str(r.get("eining", "")),
+                    range_low=r_low,
+                    range_high=r_high,
+                ))
 
         nodar.append(FjernNode(
             id=str(n.get("id", uuid.uuid4().hex[:8])),
@@ -232,6 +385,11 @@ def valider_hub_konfig(data: dict) -> tuple:
             aktivert=bool(n.get("aktivert", True)),
             protokoll=protokoll,
             lokasjon=str(n.get("lokasjon", "")),
+            type=node_type,
+            modbus_unit_id=modbus_unit_id,
+            modbus_poll_hz=modbus_poll_hz,
+            modbus_timeout_ms=modbus_timeout_ms,
+            modbus_registers=modbus_registers,
         ))
 
     reconnect = data.get("reconnect_intervall", 30)

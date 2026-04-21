@@ -1050,6 +1050,47 @@ def api_hub_logg():
     return jsonify({"linjer": linjer, "antall": len(linjer)})
 
 
+# --- Modbus API ---
+
+@app.route("/api/modbus/test", methods=["POST"])
+def api_modbus_test():
+    """Test modbus-tilkobling og les register.
+
+    Body: { host, port, unit_id, timeout_ms, registers: [ModbusRegister dict] }
+    Return: { suksess, melding, verdiar: [{namn, adresse, raa, verdi, feil}] }
+
+    Tilgjengeleg uavhengig av hub-modus så brukar kan verifisere register
+    før dei lagrar konfig.
+    """
+    data = request.get_json(silent=True) or {}
+    host = str(data.get("host", "")).strip()
+    if not host:
+        return jsonify({"suksess": False, "melding": "Mangler 'host'", "verdiar": []}), 400
+
+    try:
+        port = int(data.get("port", 502))
+        unit_id = int(data.get("unit_id", 1))
+        timeout_ms = int(data.get("timeout_ms", 2000))
+    except (TypeError, ValueError):
+        return jsonify({"suksess": False, "melding": "Ugyldig port/unit_id/timeout", "verdiar": []}), 400
+
+    from hub_konfig import ModbusRegister
+    import modbus_klient as mk
+
+    regs_data = data.get("registers", [])
+    if not isinstance(regs_data, list):
+        return jsonify({"suksess": False, "melding": "'registers' må vere ei liste", "verdiar": []}), 400
+
+    try:
+        registers = [ModbusRegister.fraa_dict(r) for r in regs_data]
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": f"Ugyldig register: {e}", "verdiar": []}), 400
+
+    resultat = mk.test_tilkobling(host, port, unit_id, timeout_ms, registers)
+    status_code = 200 if resultat.get("suksess") else 502
+    return jsonify(resultat), status_code
+
+
 # --- System / Oppdatering API ---
 
 @app.route("/api/system/versjon")

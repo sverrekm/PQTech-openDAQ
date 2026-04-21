@@ -1,47 +1,99 @@
 import { useState, useCallback } from 'react'
-import type { HubStatus } from '../api/types'
-import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus } from '../api/hub'
+import type { HubStatus, NodeType, ModbusRegister, ModbusTestResultat } from '../api/types'
+import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, testModbusTilkobling } from '../api/hub'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
+import ModbusRegisterTable from './ModbusRegisterTable'
 
 export default function HubNodeConfigCard() {
   const { t } = useI18n()
   const hubFetcher = useCallback(() => fetchHubStatus(), [])
   const { data: hub } = usePolling(hubFetcher, 3000)
 
+  const [nyType, setNyType] = useState<NodeType>('opendaq')
   const [nyAdresse, setNyAdresse] = useState('')
   const [nyNamn, setNyNamn] = useState('')
   const [nyLokasjon, setNyLokasjon] = useState('')
   const [nyPort, setNyPort] = useState('4840')
   const [nyProtokoll, setNyProtokoll] = useState('daq.opcua')
+  const [nyUnitId, setNyUnitId] = useState('1')
+  const [nyPollHz, setNyPollHz] = useState('1')
+  const [nyTimeoutMs, setNyTimeoutMs] = useState('2000')
+  const [nyRegisters, setNyRegisters] = useState<ModbusRegister[]>([])
+
   const [leggTilOpen, setLeggTilOpen] = useState(false)
   const [melding, setMelding] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [testResultat, setTestResultat] = useState<ModbusTestResultat[] | null>(null)
+
+  const byttType = (t: NodeType) => {
+    setNyType(t)
+    setNyPort(t === 'modbus_tcp' ? '502' : '4840')
+    setTestResultat(null)
+  }
+
+  const nullstillSkjema = () => {
+    setNyAdresse('')
+    setNyNamn('')
+    setNyLokasjon('')
+    setNyPort(nyType === 'modbus_tcp' ? '502' : '4840')
+    setNyUnitId('1')
+    setNyPollHz('1')
+    setNyTimeoutMs('2000')
+    setNyRegisters([])
+    setTestResultat(null)
+  }
+
+  const handleTest = async () => {
+    if (!nyAdresse.trim()) return
+    setActionLoading('test')
+    setTestResultat(null)
+    try {
+      const res = await testModbusTilkobling({
+        host: nyAdresse.trim(),
+        port: parseInt(nyPort) || 502,
+        unit_id: parseInt(nyUnitId) || 1,
+        timeout_ms: parseInt(nyTimeoutMs) || 2000,
+        registers: nyRegisters,
+      })
+      setMelding(res.melding)
+      setTestResultat(res.verdiar)
+    } catch (e) {
+      setMelding(`${t('Error')}: ${e}`)
+    }
+    setActionLoading(null)
+  }
 
   const handleLeggTil = async () => {
     if (!nyAdresse.trim()) return
     setActionLoading('add')
     try {
-      const res = await leggTilNode({
+      const payload: Parameters<typeof leggTilNode>[0] = {
         adresse: nyAdresse.trim(),
         namn: nyNamn.trim() || undefined,
-        port: parseInt(nyPort) || 7420,
-        protokoll: nyProtokoll,
+        port: parseInt(nyPort) || (nyType === 'modbus_tcp' ? 502 : 4840),
         lokasjon: nyLokasjon.trim() || undefined,
-      })
+        type: nyType,
+      }
+      if (nyType === 'opendaq') {
+        payload.protokoll = nyProtokoll
+      } else {
+        payload.modbus_unit_id = parseInt(nyUnitId) || 1
+        payload.modbus_poll_hz = parseFloat(nyPollHz) || 1
+        payload.modbus_timeout_ms = parseInt(nyTimeoutMs) || 2000
+        payload.modbus_registers = nyRegisters
+      }
+      const res = await leggTilNode(payload)
       setMelding(res.melding)
       if (res.suksess) {
-        setNyAdresse('')
-        setNyNamn('')
-        setNyLokasjon('')
-        setNyPort('7420')
+        nullstillSkjema()
         setLeggTilOpen(false)
       }
     } catch (e) {
       setMelding(`${t('Error')}: ${e}`)
     }
     setActionLoading(null)
-    setTimeout(() => setMelding(null), 4000)
+    setTimeout(() => setMelding(null), 6000)
   }
 
   const handleFjern = async (id: string, namn: string) => {
@@ -84,12 +136,41 @@ export default function HubNodeConfigCard() {
       {/* Add form */}
       {leggTilOpen && (
         <div className="border border-gray-200 rounded-lg p-3 mb-4 bg-gray-50">
+          {/* Node type toggle */}
+          <div className="mb-3">
+            <label className="block text-xs text-gray-500 mb-1">{t('Node type')}</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => byttType('opendaq')}
+                className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                  nyType === 'opendaq'
+                    ? 'bg-[#D76428] text-white border-[#D76428]'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                }`}
+              >
+                openDAQ
+              </button>
+              <button
+                type="button"
+                onClick={() => byttType('modbus_tcp')}
+                className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                  nyType === 'modbus_tcp'
+                    ? 'bg-[#D76428] text-white border-[#D76428]'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                }`}
+              >
+                Modbus TCP
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">{t('IP address *')}</label>
               <input
                 type="text" value={nyAdresse} onChange={e => setNyAdresse(e.target.value)}
-                placeholder="10.0.0.5"
+                placeholder={nyType === 'modbus_tcp' ? '192.168.1.81' : '10.0.0.5'}
                 className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
               />
             </div>
@@ -97,7 +178,7 @@ export default function HubNodeConfigCard() {
               <label className="block text-xs text-gray-500 mb-1">{t('Name')}</label>
               <input
                 type="text" value={nyNamn} onChange={e => setNyNamn(e.target.value)}
-                placeholder="Sundet - Tavle 3"
+                placeholder={nyType === 'modbus_tcp' ? 'PQube 3' : 'Sundet - Tavle 3'}
                 className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
               />
             </div>
@@ -117,18 +198,98 @@ export default function HubNodeConfigCard() {
                   className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
                 />
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">{t('Protocol')}</label>
-                <select
-                  value={nyProtokoll} onChange={e => setNyProtokoll(e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
-                >
-                  <option value="daq.opcua">OPC-UA</option>
-                  <option value="daq.nd">NativeStreaming</option>
-                </select>
-              </div>
+              {nyType === 'opendaq' ? (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{t('Protocol')}</label>
+                  <select
+                    value={nyProtokoll} onChange={e => setNyProtokoll(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+                  >
+                    <option value="daq.opcua">OPC-UA</option>
+                    <option value="daq.nd">NativeStreaming</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{t('Unit ID')}</label>
+                  <input
+                    type="number" min="0" max="255" value={nyUnitId}
+                    onChange={e => setNyUnitId(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+                  />
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Modbus-spesifikke felt */}
+          {nyType === 'modbus_tcp' && (
+            <>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{t('Poll rate (Hz)')}</label>
+                  <input
+                    type="number" step="0.1" min="0.1" max="100" value={nyPollHz}
+                    onChange={e => setNyPollHz(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">{t('Timeout (ms)')}</label>
+                  <input
+                    type="number" min="100" max="30000" value={nyTimeoutMs}
+                    onChange={e => setNyTimeoutMs(e.target.value)}
+                    className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+                  />
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <ModbusRegisterTable registers={nyRegisters} onChange={setNyRegisters} />
+              </div>
+
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={handleTest}
+                  disabled={!nyAdresse.trim() || actionLoading === 'test'}
+                  className="text-sm font-medium px-4 py-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50 transition-colors"
+                >
+                  {actionLoading === 'test' ? t('Testing...') : t('Test connection')}
+                </button>
+              </div>
+
+              {/* Test-resultat */}
+              {testResultat && testResultat.length > 0 && (
+                <div className="border border-gray-200 rounded-lg p-2 mb-3 bg-white">
+                  <h5 className="text-xs font-semibold text-gray-700 mb-1">{t('Test results')}</h5>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-gray-500 border-b border-gray-200">
+                        <th className="py-1">{t('Name')}</th>
+                        <th className="py-1">{t('Address')}</th>
+                        <th className="py-1">{t('Raw')}</th>
+                        <th className="py-1">{t('Value')}</th>
+                        <th className="py-1">{t('Error')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {testResultat.map((r, i) => (
+                        <tr key={i} className="border-b border-gray-100 last:border-0">
+                          <td className="py-0.5">{r.namn}</td>
+                          <td className="py-0.5">{r.adresse}</td>
+                          <td className="py-0.5 font-mono">{r.raa ? `[${r.raa.join(',')}]` : '—'}</td>
+                          <td className="py-0.5 font-mono">{r.verdi !== null ? r.verdi.toFixed(3) : '—'}</td>
+                          <td className="py-0.5 text-red-600">{r.feil || ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
           <button
             onClick={handleLeggTil}
             disabled={!nyAdresse.trim() || actionLoading === 'add'}
@@ -176,6 +337,7 @@ function NodeRow({ node, actionLoading, onRekoble, onFjern }: {
   const statusColor = node.tilkobla ? 'bg-green-500' : 'bg-red-500'
   const statusText = node.tilkobla ? t('Connected') : t('Disconnected')
   const isLoading = actionLoading === node.id
+  const isModbus = node.type === 'modbus_tcp'
 
   return (
     <div className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
@@ -185,11 +347,21 @@ function NodeRow({ node, actionLoading, onRekoble, onFjern }: {
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium text-gray-900 truncate">{node.namn}</span>
           <span className="text-xs text-gray-400">{node.adresse}:{node.port}</span>
+          {isModbus && (
+            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+              Modbus TCP
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 mt-0.5">
           <span className={`text-xs ${node.tilkobla ? 'text-green-600' : 'text-red-600'}`}>{statusText}</span>
           {node.lokasjon && <span className="text-xs text-gray-400">{node.lokasjon}</span>}
-          {node.tilkobla && <span className="text-xs text-gray-500">{node.antal_kanalar} {t('channels')}</span>}
+          <span className="text-xs text-gray-500">
+            {node.antal_kanalar} {isModbus ? t('registers') : t('channels')}
+          </span>
+          {isModbus && node.modbus_poll_hz !== undefined && (
+            <span className="text-xs text-gray-400">{node.modbus_poll_hz} Hz</span>
+          )}
           {node.feil && !node.tilkobla && <span className="text-xs text-red-500 truncate">{node.feil}</span>}
         </div>
       </div>

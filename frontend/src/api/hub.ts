@@ -1,5 +1,8 @@
 import { apiGet, apiPut, apiPost, apiDelete } from './client'
-import type { HubStatus, HubKonfig, HubNodeResult, HubKanal, HubKanalRangeOverstyring, ActionResult } from './types'
+import type {
+  HubStatus, HubKonfig, HubNodeResult, HubKanal, HubKanalRangeOverstyring,
+  ActionResult, NodeType, ModbusRegister, ModbusTestResponse,
+} from './types'
 
 export async function fetchHubStatus(): Promise<HubStatus> {
   return apiGet<HubStatus>('/api/hub/status')
@@ -19,8 +22,23 @@ export async function leggTilNode(data: {
   port?: number
   protokoll?: string
   lokasjon?: string
+  type?: NodeType
+  modbus_unit_id?: number
+  modbus_poll_hz?: number
+  modbus_timeout_ms?: number
+  modbus_registers?: ModbusRegister[]
 }): Promise<HubNodeResult> {
   return apiPost<HubNodeResult>('/api/hub/nodar', data)
+}
+
+export async function testModbusTilkobling(data: {
+  host: string
+  port: number
+  unit_id: number
+  timeout_ms: number
+  registers: ModbusRegister[]
+}): Promise<ModbusTestResponse> {
+  return apiPost<ModbusTestResponse>('/api/modbus/test', data)
 }
 
 export async function fjernNode(nodeId: string): Promise<ActionResult> {
