@@ -44,6 +44,8 @@ from enhet_konfig import (les_enhet_konfig, lagre_enhet_konfig, valider_enhet_ko
 import usbip_manager
 from buffer_konfig import les_buffer_konfig, lagre_buffer_konfig, valider_buffer_konfig
 from buffer_skrivar import BufferSkrivar
+from hub_konfig import les_hub_konfig, NODE_TYPE_MODBUS_TCP
+from modbus_manager import ModbusManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -112,6 +114,10 @@ _enhet_konfig: EnhetKonfig = None
 _mqtt_straumings_stopp: threading.Event = None
 _buffer_skrivar: BufferSkrivar = None
 _args = None
+
+# Modbus-integrasjon (brukt når hub_konfig har modbus-type nodar)
+_modbus_manager: ModbusManager = None
+_modbus_straumings_stopp: threading.Event = None
 _lock = threading.Lock()
 
 # Stopp-event frå førre driver — brukast til å stoppe foreldrelause
@@ -565,6 +571,113 @@ def _mqtt_straumings_loop():
     log.info("MQTT strøymingstråd stoppa")
 
 
+def _modbus_straumings_loop():
+    """Bakgrunnstråd som oppdaterer Modbus-kanalane sin DC-eigenskap.
+
+    ModbusManager pollar i bakgrunnen. Denne tråden les cached verdiar
+    og dyttar dei inn i openDAQ-brua ~20 Hz (raskare enn Modbus poll-rate
+    så alt vert jamt ut).
+    """
+    global _modbus_straumings_stopp
+    log.info("Modbus strøymingstråd starta")
+    while not _modbus_straumings_stopp.is_set():
+        try:
+            if (_opendaq_bro and _opendaq_bro.tilgjengelig and
+                    _modbus_manager is not None):
+                verdiar = _modbus_manager.hent_verdiar()
+                if verdiar:
+                    _opendaq_bro.oppdater_modbus_eigenskapar(verdiar)
+        except Exception as e:
+            log.warning(f"Modbus strøyming feil: {e}")
+        _modbus_straumings_stopp.wait(timeout=0.05)  # ~20 Hz
+    log.info("Modbus strøymingstråd stoppa")
+
+
+def _start_modbus_manager():
+    """Start eller restart ModbusManager med noverande hub-konfig.
+
+    Les modbus-type nodar frå /data/konfig/hub_nodar.json og pollar dei.
+    openDAQ-brua vert oppdatert via _modbus_straumings_loop.
+    """
+    global _modbus_manager, _modbus_straumings_stopp
+
+    try:
+        konfig = les_hub_konfig()
+    except Exception as e:
+        log.warning(f"Kunne ikkje lese hub-konfig for modbus: {e}")
+        return
+
+    modbus_nodar = [n for n in konfig.nodar
+                    if n.type == NODE_TYPE_MODBUS_TCP and n.aktivert]
+
+    if _modbus_manager is None:
+        _modbus_manager = ModbusManager()
+
+    if modbus_nodar:
+        _modbus_manager.restart(modbus_nodar)
+        log.info(f"ModbusManager: {len(modbus_nodar)} nodar starta")
+
+        # Start streaming-tråd viss ikkje allereie
+        if _modbus_straumings_stopp is None or _modbus_straumings_stopp.is_set():
+            _modbus_straumings_stopp = threading.Event()
+            t = threading.Thread(target=_modbus_straumings_loop, daemon=True)
+            t.start()
+    else:
+        # Ingen modbus-nodar — stopp eventuell eksisterande manager
+        _modbus_manager.stop()
+        if _modbus_straumings_stopp is not None:
+            _modbus_straumings_stopp.set()
+        log.info("ModbusManager: ingen modbus-nodar konfigurert")
+
+
+def oppdater_modbus_konfig_og_restart():
+    """Kallast etter at hub_konfig er lagra med modbus-endringar.
+
+    Restart ModbusManager + restart openDAQ-bru slik at nye kanalar vert synlege.
+    """
+    log.info("Modbus-konfig endra — restart ModbusManager + openDAQ-bru")
+    _start_modbus_manager()
+
+    def _delayed_restart():
+        time.sleep(0.5)
+        restart_opendaq_bro()
+    threading.Thread(target=_delayed_restart, daemon=True).start()
+
+
+def hent_modbus_nodar() -> list:
+    """Returner liste av modbus-nodar med status, for web API."""
+    try:
+        konfig = les_hub_konfig()
+    except Exception:
+        return []
+    mb_nodar = [n for n in konfig.nodar if n.type == NODE_TYPE_MODBUS_TCP]
+    status = {}
+    if _modbus_manager is not None:
+        status = _modbus_manager.hent_status()
+    resultat = []
+    for n in mb_nodar:
+        s = status.get(n.id, {})
+        resultat.append({
+            "id": n.id,
+            "namn": n.namn,
+            "adresse": n.adresse,
+            "port": n.port,
+            "lokasjon": n.lokasjon,
+            "aktivert": n.aktivert,
+            "type": n.type,
+            "modbus_unit_id": n.modbus_unit_id,
+            "modbus_poll_hz": n.modbus_poll_hz,
+            "modbus_timeout_ms": n.modbus_timeout_ms,
+            "modbus_registers": [r.til_dict() for r in n.modbus_registers],
+            "tilkobla": s.get("tilkobla", False),
+            "feil": s.get("feil"),
+            "sist_sett": s.get("sist_sett"),
+            "tilkobla_sidan": s.get("tilkobla_sidan"),
+            "antal_kanalar": len(n.modbus_registers),
+        })
+    return resultat
+
+
 def _start_mqtt_straumings_traad():
     """Start eller restart MQTT-strøymingstråden."""
     global _mqtt_straumings_stopp
@@ -877,8 +990,17 @@ def restart_opendaq_bro(force_adc=None):
             else:
                 effektiv_adc = 0
                 log.info("  SIRIUS fråkobla — restart med 0 ADC, berre MQTT")
+        # Hent modbus-einingar frå hub-konfig (delt lagring for begge modus)
+        try:
+            _hub_k = les_hub_konfig()
+            modbus_einingar = [n for n in _hub_k.nodar
+                               if n.type == NODE_TYPE_MODBUS_TCP and n.aktivert]
+        except Exception:
+            modbus_einingar = []
+
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_k,
+                                  modbus_einingar=modbus_einingar,
                                   antal_adc=effektiv_adc)
         ok = _opendaq_bro.start()
         if ok:
@@ -1397,8 +1519,17 @@ def start_server(args):
         os.environ["OPENDAQ_SERIAL"] = sn
         log.info(f"  OPENDAQ_SERIAL sett dynamisk: {sn}")
         _oppdater_serial_filer(sn)
+        # Hent modbus-einingar frå hub-konfig (delt lagring)
+        try:
+            _hub_k = les_hub_konfig()
+            modbus_einingar = [n for n in _hub_k.nodar
+                               if n.type == NODE_TYPE_MODBUS_TCP and n.aktivert]
+        except Exception:
+            modbus_einingar = []
+
         _opendaq_bro = OpenDAQBro(serienummer=sn, enhetsnamn=enamn,
                                   mqtt_kanalar=mqtt_kanalar,
+                                  modbus_einingar=modbus_einingar,
                                   antal_adc=effektiv_adc)
         # Registrer skalering-callback for buffer
         if _buffer_skrivar is not None:
@@ -1418,6 +1549,9 @@ def start_server(args):
 
     # Start MQTT-strøymingstråd (uavhengig av SIRIUS)
     _start_mqtt_straumings_traad()
+
+    # Start ModbusManager + streaming-tråd (les modbus-type nodar frå hub_konfig)
+    _start_modbus_manager()
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet and _driver.ep2_ok:

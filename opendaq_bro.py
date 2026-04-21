@@ -52,7 +52,7 @@ class OpenDAQBro:
     """
 
     def __init__(self, module_path=None, serienummer="", enhetsnamn="",
-                 mqtt_kanalar=None, antal_adc=8):
+                 mqtt_kanalar=None, modbus_einingar=None, antal_adc=8):
         self._instance = None
         self._device = None
         self._tilgjengelig = False
@@ -62,7 +62,18 @@ class OpenDAQBro:
         self._serienummer = serienummer
         self._enhetsnamn = enhetsnamn
         self._mqtt_kanalar = mqtt_kanalar or []  # Liste av MqttKanalKonfig
+        # Modbus: flat liste av {node_id, node_namn, reg} frå FjernNode-ar med type=modbus_tcp
+        self._modbus_einingar = modbus_einingar or []
+        self._modbus_kanalar = []
+        for node in self._modbus_einingar:
+            for reg in node.modbus_registers:
+                self._modbus_kanalar.append({
+                    "node_id": node.id,
+                    "node_namn": node.namn,
+                    "reg": reg,
+                })
         self._antal_adc = antal_adc             # Antal ADC-kanalar (avheng av SIRIUS-modell)
+        self._modbus_pkt_teller = 0
         self._lock = threading.Lock()
         self._kanal_signal = []     # Liste av (channel, signal) tupler for data-injeksjon
         self._kanal_skala = []      # Skaleringsfaktor per kanal: physical = raw_int16 * skala
@@ -183,6 +194,61 @@ class OpenDAQBro:
         except Exception as e:
             if self._mqtt_pkt_teller % 100 == 0:
                 log.warning(f"oppdater_mqtt_eigenskapar feil: {e}")
+
+    def oppdater_modbus_eigenskapar(self, modbus_verdiar):
+        """Oppdater Modbus-kanalane via RefDevice eigenskapar (DC).
+
+        Same mønster som oppdater_mqtt_eigenskapar — acqLoop genererer signal,
+        vi set DC-eigenskapen på kanalen.
+
+        Args:
+            modbus_verdiar: dict {(node_id, reg_adresse): physical_value} frå ModbusManager
+        """
+        if not self._tilgjengelig or not self._modbus_kanalar:
+            return
+        n_adc = self._antal_adc
+        n_mqtt = len(self._mqtt_kanalar)
+        try:
+            channels = list(self._device.channels)
+            for midx, mb in enumerate(self._modbus_kanalar):
+                node_id = mb["node_id"]
+                reg = mb["reg"]
+                verdi = modbus_verdiar.get((node_id, reg.adresse))
+                if verdi is None:
+                    continue
+                kanal_idx = n_adc + n_mqtt + midx
+                if kanal_idx >= len(channels):
+                    break
+                ch = channels[kanal_idx]
+                # DC er FloatProperty [-10, 10] — _safe_set klampar.
+                # CustomRange (5× sikkerheitsfaktor) mappar intern [-10,10] → fysisk.
+                # Skaler til intern: intern = verdi / cr_high
+                RANGE_FAKTOR = 5.0
+                max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
+                cr_half = max_abs * RANGE_FAKTOR
+                if cr_half > 0:
+                    intern = 10.0 * verdi / cr_half
+                else:
+                    intern = verdi
+                self._safe_set(ch, "DC", float(intern))
+
+                # Oppdater web UI-verdiar (med fysisk verdi, ikkje intern)
+                key = f"modbus_{midx}"
+                self._siste_verdiar[key] = {
+                    "snitt": round(verdi, 4),
+                    "rms": round(abs(verdi), 4),
+                    "topp": round(abs(verdi), 4),
+                    "siste": round(verdi, 4),
+                    "antall": 0,
+                    "kjelde": "modbus-acqloop",
+                    "node_id": node_id,
+                    "adresse": reg.adresse,
+                    "enhet": reg.eining,
+                }
+                self._modbus_pkt_teller += 1
+        except Exception as e:
+            if self._modbus_pkt_teller % 100 == 0:
+                log.warning(f"oppdater_modbus_eigenskapar feil: {e}")
 
     def start(self) -> bool:
         """Start openDAQ instance med root device, deretter servere."""
@@ -494,7 +560,7 @@ class OpenDAQBro:
             # set_property_value() endrar intern state (kanalar VERT oppretta),
             # men OPC-UA-noden beheld gammal verdi (t.d. NumberOfChannels=2).
             # Skriv riktig verdi direkte til OPC-UA via asyncua.
-            n_total = self._antal_adc + len(self._mqtt_kanalar)
+            n_total = self._antal_adc + len(self._mqtt_kanalar) + len(self._modbus_kanalar)
             self._fiks_opcua_verdiar(n_total)
 
             with self._lock:
@@ -1102,7 +1168,8 @@ class OpenDAQBro:
         """
         n_adc = self._antal_adc
         n_mqtt = len(self._mqtt_kanalar)
-        n_total = n_adc + n_mqtt
+        n_modbus = len(self._modbus_kanalar)
+        n_total = n_adc + n_mqtt + n_modbus
         # Ref device krev minst 1 kanal — viss ingen kanalar, bruk 1 dummy
         if n_total < 1:
             n_total = 1
@@ -1115,7 +1182,7 @@ class OpenDAQBro:
         except Exception as e:
             log.warning(f"  Kunne ikkje sette NumberOfChannels={n_total}: {e}")
             return
-        log.info(f"  NumberOfChannels sett til {n_total} ({n_adc} ADC + {n_mqtt} MQTT)")
+        log.info(f"  NumberOfChannels sett til {n_total} ({n_adc} ADC + {n_mqtt} MQTT + {n_modbus} Modbus)")
 
         # GlobalSampleRate er FloatProperty — MÅ vere float, ikkje int!
         # Les frå SAMPLE_RATE env var (default 20000 = SIRIUS hardware rate)
@@ -1231,9 +1298,45 @@ class OpenDAQBro:
             except Exception as e:
                 log.warning(f"  MQTT kanal {ch_idx} konfig feilet: {e}")
 
+        # Konfigurer Modbus-kanalar (indeks n_adc + n_mqtt +)
+        # Same strategi som MQTT-kanalar: Amplitude=0, Waveform=Sine, DC = modbus-verdi.
+        # acqLoop genererer konstant DC-basert signal.
+        for midx, mb in enumerate(self._modbus_kanalar):
+            ch_idx = n_adc + n_mqtt + midx
+            if ch_idx >= len(channels):
+                break
+            ch = channels[ch_idx]
+            reg = mb["reg"]
+            try:
+                ch.name = reg.namn
+                ch.description = f"{mb['node_namn']} @ {reg.adresse}"
+                # Amplitude=0, DC = siste modbus-verdi
+                self._safe_set(ch, "Amplitude", 0.0)
+                self._safe_set(ch, "Frequency", 1.0)
+                self._safe_set(ch, "DC", 0.0)
+                self._safe_set(ch, "Waveform", 0)
+                # Modbus-kanalar leverer ferdig-skalerte fysiske verdiar
+                self._kanal_skala.append(1.0)
+                self._kanal_offset.append(0.0)
+                # CustomRange med 5× sikkerheitsfaktor (same som hub) så DC ikkje clampar.
+                # Intern DC er [-10, 10]. Utan PostScaling tek clamping DewesoftX si verdi
+                # ned på ±10. Men vi ønskjer fysisk range slik at DewesoftX viser rette einingar.
+                RANGE_FAKTOR = 5.0
+                max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
+                cr_half = max_abs * RANGE_FAKTOR
+                try:
+                    custom_range = _daq.Range(-cr_half, cr_half)
+                    ch.set_property_value("CustomRange", custom_range)
+                except Exception:
+                    pass
+                log.info(f"  Modbus Ch{ch_idx}: {reg.namn} "
+                         f"({mb['node_namn']} @ {reg.adresse}, {reg.eining})")
+            except Exception as e:
+                log.warning(f"  Modbus kanal {ch_idx} konfig feilet: {e}")
+
         # Logg alle kanalar sine eigenskapar for å finne nil-verdiar
         for idx, ch in enumerate(channels):
-            if idx < len(kanal_konfig) + len(self._mqtt_kanalar):
+            if idx < len(kanal_konfig) + len(self._mqtt_kanalar) + len(self._modbus_kanalar):
                 self._logg_eigenskapar(ch, f"Ch{idx}.")
 
     def _legg_til_sample_rate_eigenskap(self):

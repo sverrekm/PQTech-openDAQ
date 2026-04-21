@@ -10,11 +10,15 @@ export default function HubNodeConfigCard() {
   const hubFetcher = useCallback(() => fetchHubStatus(), [])
   const { data: hub } = usePolling(hubFetcher, 3000)
 
-  const [nyType, setNyType] = useState<NodeType>('opendaq')
+  // I direkte-modus (ikkje hub) er berre modbus_tcp relevant
+  const erHubModus = hub?.modus === 'hub'
+  const standardType: NodeType = erHubModus ? 'opendaq' : 'modbus_tcp'
+
+  const [nyType, setNyType] = useState<NodeType>(standardType)
   const [nyAdresse, setNyAdresse] = useState('')
   const [nyNamn, setNyNamn] = useState('')
   const [nyLokasjon, setNyLokasjon] = useState('')
-  const [nyPort, setNyPort] = useState('4840')
+  const [nyPort, setNyPort] = useState(erHubModus ? '4840' : '502')
   const [nyProtokoll, setNyProtokoll] = useState('daq.opcua')
   const [nyUnitId, setNyUnitId] = useState('1')
   const [nyPollHz, setNyPollHz] = useState('1')
@@ -136,34 +140,36 @@ export default function HubNodeConfigCard() {
       {/* Add form */}
       {leggTilOpen && (
         <div className="border border-gray-200 rounded-lg p-3 mb-4 bg-gray-50">
-          {/* Node type toggle */}
-          <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">{t('Node type')}</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => byttType('opendaq')}
-                className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-                  nyType === 'opendaq'
-                    ? 'bg-[#D76428] text-white border-[#D76428]'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                }`}
-              >
-                openDAQ
-              </button>
-              <button
-                type="button"
-                onClick={() => byttType('modbus_tcp')}
-                className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-                  nyType === 'modbus_tcp'
-                    ? 'bg-[#D76428] text-white border-[#D76428]'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
-                }`}
-              >
-                Modbus TCP
-              </button>
+          {/* Node type toggle (berre synleg i hub-modus — direkte-modus er alltid modbus) */}
+          {erHubModus && (
+            <div className="mb-3">
+              <label className="block text-xs text-gray-500 mb-1">{t('Node type')}</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => byttType('opendaq')}
+                  className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                    nyType === 'opendaq'
+                      ? 'bg-[#D76428] text-white border-[#D76428]'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  openDAQ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => byttType('modbus_tcp')}
+                  className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                    nyType === 'modbus_tcp'
+                      ? 'bg-[#D76428] text-white border-[#D76428]'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                  }`}
+                >
+                  Modbus TCP
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>

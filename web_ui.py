@@ -51,6 +51,8 @@ try:
         hent_buffer_hendingar as _buffer_hent_hendingar,
         hent_buffer_mqtt_logg as _buffer_hent_mqtt_logg,
         hent_buffer_lagringsinfo as _buffer_hent_lagring,
+        oppdater_modbus_konfig_og_restart as _modbus_restart_etter_konfig,
+        hent_modbus_nodar as _sirius_hent_modbus_nodar,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -880,13 +882,37 @@ def _hent_ip_intern():
 
 @app.route("/api/hub/status")
 def api_hub_status():
-    """Hub-status med per-node info."""
+    """Hub-status med per-node info.
+
+    I direkte-modus: modbus-nodar har live tilkobling-status frå ModbusManager,
+    openDAQ-nodar er ikkje aktive (hub aggregerer dei).
+    """
     if HUB_MODUS:
         return jsonify(hent_hub_status())
-    # Node-modus: bygg status frå konfig-fil (ikkje live)
+
     konfig = les_hub_konfig()
+
+    # Hent modbus-status frå sirius_server sin ModbusManager (viss tilgjengeleg)
+    modbus_status = {}
+    if SIRIUS_DIREKTE:
+        try:
+            mb_nodar = _sirius_hent_modbus_nodar()
+            for n in mb_nodar:
+                modbus_status[n["id"]] = n
+        except Exception:
+            pass
+
     nodar_info = []
+    tilkobla_count = 0
+    total_kanalar = 0
     for node in konfig.nodar:
+        mb = modbus_status.get(node.id, {})
+        er_modbus = node.type == "modbus_tcp"
+        tilkobla = mb.get("tilkobla", False) if er_modbus else False
+        antal_kanalar = len(node.modbus_registers) if er_modbus else 0
+        if tilkobla:
+            tilkobla_count += 1
+        total_kanalar += antal_kanalar
         nodar_info.append({
             "id": node.id,
             "namn": node.namn,
@@ -895,19 +921,24 @@ def api_hub_status():
             "protokoll": node.protokoll,
             "lokasjon": node.lokasjon,
             "aktivert": node.aktivert,
-            "tilkobla": False,
-            "feil": None,
-            "sist_sett": None,
-            "tilkobla_sidan": None,
-            "antal_kanalar": 0,
+            "type": node.type,
+            "modbus_unit_id": node.modbus_unit_id,
+            "modbus_poll_hz": node.modbus_poll_hz,
+            "modbus_timeout_ms": node.modbus_timeout_ms,
+            "modbus_registers": [r.til_dict() for r in node.modbus_registers],
+            "tilkobla": tilkobla,
+            "feil": mb.get("feil") if er_modbus else None,
+            "sist_sett": mb.get("sist_sett") if er_modbus else None,
+            "tilkobla_sidan": mb.get("tilkobla_sidan") if er_modbus else None,
+            "antal_kanalar": antal_kanalar,
         })
     return jsonify({
         "modus": "node",
-        "aktiv": False,
+        "aktiv": True if SIRIUS_DIREKTE else False,
         "startet": None,
-        "totalt_kanalar": 0,
+        "totalt_kanalar": total_kanalar,
         "totalt_nodar": len(nodar_info),
-        "tilkobla_nodar": 0,
+        "tilkobla_nodar": tilkobla_count,
         "nodar": nodar_info,
         "ip": _hent_ip_intern(),
     })
@@ -934,18 +965,21 @@ def api_hub_konfig_oppdater():
     if HUB_MODUS:
         ok, melding = oppdater_hub_konfig(konfig)
         return jsonify({"suksess": ok, "melding": melding})
-    # Node-modus: berre lagre til fil (ingen live tilkoblingar)
+    # Node-modus: lagre til fil + trigg modbus-restart viss SIRIUS køyrer
     ok = lagre_hub_konfig(konfig)
-    return jsonify({
-        "suksess": ok,
-        "melding": "Konfig lagra (hub ikkje aktiv — vert brukt ved neste hub-oppstart)" if ok
-        else "Kunne ikkje lagre konfig"
-    })
+    melding_base = "Konfig lagra" if ok else "Kunne ikkje lagre konfig"
+    if ok and SIRIUS_DIREKTE:
+        try:
+            _modbus_restart_etter_konfig()
+            melding_base = "Konfig lagra — ModbusManager + openDAQ-bru restartar"
+        except Exception as e:
+            melding_base = f"Konfig lagra, men restart feila: {e}"
+    return jsonify({"suksess": ok, "melding": melding_base})
 
 
 @app.route("/api/hub/nodar", methods=["POST"])
 def api_hub_legg_til_node():
-    """Legg til ein ny fjern-node."""
+    """Legg til ein ny fjern-node (openDAQ eller modbus_tcp)."""
     data = request.get_json(silent=True) or {}
     if HUB_MODUS:
         ok, melding, node = legg_til_node_api(data)
@@ -953,28 +987,38 @@ def api_hub_legg_til_node():
         if node:
             result["node"] = node
         return jsonify(result), 200 if ok else 400
-    # Node-modus: legg til i konfig-fil
+
+    # Node-modus: valider via hub_konfig-validator (støttar både openDAQ + modbus)
     import uuid as _uuid
-    adresse = str(data.get("adresse", "")).strip()
-    if not adresse:
+    if not isinstance(data, dict):
+        return jsonify({"suksess": False, "melding": "Forventa objekt"}), 400
+    node_dict = dict(data)
+    if "id" not in node_dict:
+        node_dict["id"] = _uuid.uuid4().hex[:8]
+    if not str(node_dict.get("adresse", "")).strip():
         return jsonify({"suksess": False, "melding": "Mangler 'adresse'"}), 400
-    namn = str(data.get("namn", "")).strip() or adresse
-    node = FjernNode(
-        id=_uuid.uuid4().hex[:8],
-        namn=namn,
-        adresse=adresse,
-        port=int(data.get("port", 4840)),
-        aktivert=True,
-        protokoll=str(data.get("protokoll", "daq.opcua")),
-        lokasjon=str(data.get("lokasjon", "")),
-    )
+
+    validert, feil = valider_hub_konfig({"nodar": [node_dict]})
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    ny_node = validert.nodar[0]
+
     konfig = les_hub_konfig()
-    konfig.nodar.append(node)
+    konfig.nodar.append(ny_node)
     ok = lagre_hub_konfig(konfig)
+
+    melding = f"Node '{ny_node.namn}' lagt til"
+    if ok and SIRIUS_DIREKTE:
+        try:
+            _modbus_restart_etter_konfig()
+            melding += " — openDAQ-bru restartar"
+        except Exception as e:
+            melding += f" (restart feila: {e})"
+
     return jsonify({
         "suksess": ok,
-        "melding": f"Node '{namn}' lagt til (hub ikkje aktiv)" if ok else "Lagring feila",
-        "node": node.til_dict() if ok else None,
+        "melding": melding if ok else "Lagring feila",
+        "node": ny_node.til_dict() if ok else None,
     })
 
 
@@ -991,16 +1035,30 @@ def api_hub_fjern_node(node_id):
         return jsonify({"suksess": False, "melding": f"Node '{node_id}' ikkje funnen"}), 404
     konfig.nodar = [n for n in konfig.nodar if n.id != node_id]
     ok = lagre_hub_konfig(konfig)
-    return jsonify({"suksess": ok, "melding": f"Node '{node.namn}' fjerna"})
+    melding = f"Node '{node.namn}' fjerna"
+    if ok and SIRIUS_DIREKTE:
+        try:
+            _modbus_restart_etter_konfig()
+        except Exception:
+            pass
+    return jsonify({"suksess": ok, "melding": melding})
 
 
 @app.route("/api/hub/nodar/<node_id>/rekoble", methods=["POST"])
 def api_hub_rekoble_node(node_id):
     """Tving rekobling av ein node."""
-    if not HUB_MODUS:
-        return jsonify({"suksess": False, "melding": "Hub ikkje aktiv — start med OPENDAQ_MODUS=hub"})
-    ok, melding = rekoble_node(node_id)
-    return jsonify({"suksess": ok, "melding": melding})
+    if HUB_MODUS:
+        ok, melding = rekoble_node(node_id)
+        return jsonify({"suksess": ok, "melding": melding})
+    # Node-modus: trig restart av modbus-manageren viss det er ein modbus-node
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False,
+                        "melding": "Hub ikkje aktiv og SIRIUS ikkje tilgjengeleg"})
+    try:
+        _modbus_restart_etter_konfig()
+        return jsonify({"suksess": True, "melding": "Modbus-nodar rekoplar"})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)})
 
 
 @app.route("/api/hub/kanalar")

@@ -32,7 +32,7 @@ from hub_konfig import (
 )
 from buffer_konfig import les_buffer_konfig
 from hub_buffer import HubBuffer
-import modbus_klient
+from modbus_manager import ModbusManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,11 +94,16 @@ _ACQLOOP_TOGGLE = "/tmp/opendaq_disable_acq"
 _fjern_kanal_info = []   # Info om fjern-kanalar for descriptor-bygging
 _kanal_range_overstyringer = {}  # "node_id:kanal_namn" -> (low, high)
 
-# --- Modbus TCP-nodar ---
-_modbus_klientar = {}    # node_id -> ModbusKlient
-_modbus_threads = {}     # node_id -> threading.Thread
-_modbus_verdiar = {}     # (node_id, reg_adresse) -> siste fysiske verdi
-_modbus_stop = threading.Event()
+# --- Modbus TCP-nodar (via ModbusManager) ---
+def _modbus_status_cb(node_id: str, status: dict):
+    """Propager modbus-status til _node_status så hent_hub_status ser den."""
+    with _hub_lock:
+        eksisterande = _node_status.get(node_id, {})
+        eksisterande.update(status)
+        _node_status[node_id] = eksisterande
+
+
+_modbus_manager = ModbusManager(status_callback=_modbus_status_cb)
 
 
 def hent_logg(antall=200):
@@ -854,13 +859,14 @@ def _les_fjern_verdiar():
             continue
 
         if kanal_type == "modbus":
-            # Modbus: slå opp cached verdi frå polling-tråden
+            # Modbus: slå opp cached verdi frå manager
             try:
                 reg_adr = _fjern_kanal_info[idx].get("modbus_adresse")
             except (IndexError, AttributeError):
                 reg_adr = None
             if reg_adr is not None:
-                v = _modbus_verdiar.get((nid, reg_adr))
+                mb_verdiar = _modbus_manager.hent_verdiar()
+                v = mb_verdiar.get((nid, reg_adr))
                 if v is not None:
                     verdiar[idx] = v
             continue
@@ -1021,7 +1027,7 @@ def _dc_relay_steg():
         if hub_idx >= len(hub_channels) or not nid:
             continue
 
-        # Modbus-kanalar: hent cached verdi frå polling-tråden
+        # Modbus-kanalar: hent cached verdi frå manager
         if kanal_type == "modbus":
             try:
                 reg_adr = _fjern_kanal_info[hub_idx].get("modbus_adresse")
@@ -1029,7 +1035,7 @@ def _dc_relay_steg():
                 continue
             if reg_adr is None:
                 continue
-            physical_val = _modbus_verdiar.get((nid, reg_adr))
+            physical_val = _modbus_manager.hent_verdiar().get((nid, reg_adr))
             if physical_val is None:
                 continue
             if scale != 0:
@@ -1187,23 +1193,8 @@ def _fråkoble_node(node_id: str):
     """Fråkoble og fjern ein node frå klient-instansen (openDAQ) eller stopp modbus-tråd."""
     global _klient_instance, _node_devices, _node_status
 
-    # Modbus: stopp polling-tråd + lukk tilkobling
-    klient = _modbus_klientar.pop(node_id, None)
-    thread = _modbus_threads.pop(node_id, None)
-    if klient is not None:
-        try:
-            klient.lukk()
-        except Exception:
-            pass
-        # Fjern cached verdiar for denne noden
-        for key in list(_modbus_verdiar.keys()):
-            if key[0] == node_id:
-                _modbus_verdiar.pop(key, None)
-        log.info(f"  Modbus-klient stengd for node {node_id}")
-    if thread is not None and thread.is_alive():
-        # Thread sjekkar _modbus_stop + per-thread stop-flagg; den vil terminere
-        # innan poll-intervall (satt som daemon, krasjar ikkje container ved shutdown)
-        pass
+    # Modbus: be manager stoppe polling for denne noden
+    _modbus_manager.fjern_node(node_id)
 
     with _hub_lock:
         device = _node_devices.pop(node_id, None)
@@ -1218,98 +1209,13 @@ def _fråkoble_node(node_id: str):
 
 
 def _start_modbus_node(node: FjernNode) -> bool:
-    """Opprett modbus-klient + start polling-tråd for ein node.
-
-    Returnerer True viss tilkobling lukkast (tråden startar uansett,
-    og prøver reconnect ved kvar poll-iterasjon ved feil).
-    """
-    # Rens opp eventuell gammal klient/tråd
-    gammal_klient = _modbus_klientar.pop(node.id, None)
-    if gammal_klient is not None:
-        try:
-            gammal_klient.lukk()
-        except Exception:
-            pass
-
-    klient = modbus_klient.ModbusKlient(
-        host=node.adresse,
-        port=node.port,
-        unit_id=node.modbus_unit_id,
-        timeout_ms=node.modbus_timeout_ms,
-    )
-    ok = klient.koble_til()
-    _modbus_klientar[node.id] = klient
-
+    """Legg til ein modbus-node i den delte ModbusManager-en."""
+    ok = _modbus_manager.legg_til_node(node)
+    # Oppdater _node_status med antal_kanalar (manager set dei andre feilta via callback)
     with _hub_lock:
-        _node_status[node.id] = {
-            "tilkobla": ok,
-            "feil": klient.siste_feil,
-            "sist_sett": datetime.now().isoformat() if ok else None,
-            "tilkobla_sidan": datetime.now().isoformat() if ok else None,
-            "antal_kanalar": len(node.modbus_registers),
-        }
-
-    if ok:
-        log.info(f"  Tilkobla modbus '{node.namn}' {node.adresse}:{node.port} — "
-                 f"{len(node.modbus_registers)} register")
-
-    # Start polling-tråd uansett — den handterer reconnect
-    node_id = node.id
-    node_poll_hz = max(0.1, node.modbus_poll_hz)
-    intervall = 1.0 / node_poll_hz
-
-    def poll_loop():
-        reconnect_pause = 5.0
-        siste_ok = ok
-        while not _modbus_stop.is_set():
-            k = _modbus_klientar.get(node_id)
-            if k is None:
-                # Node fjerna — avslutt tråd
-                return
-
-            if not k.tilkobla:
-                if siste_ok:
-                    log.warning(f"  Modbus '{node.namn}' fråkobla: {k.siste_feil}")
-                siste_ok = False
-                # Prøv reconnect
-                k.koble_til()
-                if k.tilkobla:
-                    log.info(f"  Modbus '{node.namn}' rekobla")
-                    siste_ok = True
-                    with _hub_lock:
-                        if node_id in _node_status:
-                            _node_status[node_id]["tilkobla"] = True
-                            _node_status[node_id]["feil"] = None
-                            _node_status[node_id]["tilkobla_sidan"] = datetime.now().isoformat()
-                else:
-                    with _hub_lock:
-                        if node_id in _node_status:
-                            _node_status[node_id]["tilkobla"] = False
-                            _node_status[node_id]["feil"] = k.siste_feil
-                    if _modbus_stop.wait(reconnect_pause):
-                        return
-                    continue
-
-            # Les alle register
-            for reg in node.modbus_registers:
-                if _modbus_stop.is_set():
-                    return
-                v = k.les_register(reg)
-                if v is not None:
-                    _modbus_verdiar[(node_id, reg.adresse)] = v
-
-            if k.tilkobla:
-                with _hub_lock:
-                    if node_id in _node_status:
-                        _node_status[node_id]["sist_sett"] = datetime.now().isoformat()
-
-            if _modbus_stop.wait(intervall):
-                return
-
-    thread = threading.Thread(target=poll_loop, daemon=True,
-                              name=f"modbus_{node.id}")
-    thread.start()
-    _modbus_threads[node.id] = thread
+        if node.id not in _node_status:
+            _node_status[node.id] = {}
+        _node_status[node.id]["antal_kanalar"] = len(node.modbus_registers)
     return ok
 
 
@@ -1343,11 +1249,12 @@ def hent_hub_kanalar() -> list:
     log.info(f"hent_hub_kanalar: {len(nodar_snapshot)} openDAQ-nodar tilkobla, "
              f"{len(modbus_nodar)} modbus-nodar")
 
-    # Modbus-nodar: hent verdiar frå cache (polling-tråden skriv inn)
+    # Modbus-nodar: hent verdiar frå manager
+    mb_verdiar = _modbus_manager.hent_verdiar()
     for node in modbus_nodar:
         node_status = _node_status.get(node.id, {})
         for ri, reg in enumerate(node.modbus_registers):
-            verdi = _modbus_verdiar.get((node.id, reg.adresse))
+            verdi = mb_verdiar.get((node.id, reg.adresse))
 
             override_key = f"{node.id}:{reg.namn}"
             overstyrt = override_key in _kanal_range_overstyringer
@@ -2068,12 +1975,22 @@ def start_hub():
     # Opprett openDAQ Instance
     _opprett_instance()
 
-    # Koble til aktive nodar
+    # Start modbus-manager (pollar alle modbus-nodar parallelt)
+    _modbus_manager.start(_hub_konfig.nodar)
+
+    # Koble til aktive openDAQ-nodar (modbus er alt starta av manager ovanfor)
     for node in _hub_konfig.nodar:
-        if node.aktivert:
-            _koble_til_node(node)
-        else:
+        if not node.aktivert:
             log.info(f"  Node '{node.namn}' deaktivert — hoppar over")
+            continue
+        if node.type == NODE_TYPE_MODBUS_TCP:
+            # Set antal_kanalar + tilkobla-status manuelt (manager brukar callback)
+            with _hub_lock:
+                if node.id not in _node_status:
+                    _node_status[node.id] = {}
+                _node_status[node.id]["antal_kanalar"] = len(node.modbus_registers)
+            continue
+        _koble_til_node(node)
 
     # Oppdater root device kanalar til å matche fjern-nodar.
     # Må skje FØR server-start slik at OPC-UA/NativeStreaming
