@@ -278,6 +278,10 @@ export const nb: Record<string, string> = {
   'Test results': 'Test-resultat',
   'Raw': 'Rå',
   'registers': 'register',
+  'Device preset': 'Einingsmal',
+  '-- Choose preset (optional) --': '-- Vel mal (valfri) --',
+  'Some registers have address 0 — fill in from device manual before testing.':
+    'Nokre register har adresse 0 — fyll inn frå einingsmanualen før du testar.',
 
   // ModbusRegisterTable
   'Modbus registers': 'Modbus-register',

@@ -4,6 +4,7 @@ import { leggTilNode, fjernNode, rekobleNode, fetchHubStatus, testModbusTilkobli
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
 import ModbusRegisterTable from './ModbusRegisterTable'
+import { MODBUS_PRESETS, hentPreset, harUtfyltAdresser } from './modbusPresets'
 
 export default function HubNodeConfigCard() {
   const { t } = useI18n()
@@ -231,6 +232,33 @@ export default function HubNodeConfigCard() {
           {/* Modbus-spesifikke felt */}
           {nyType === 'modbus_tcp' && (
             <>
+              {/* Preset-dropdown */}
+              <div className="mb-3">
+                <label className="block text-xs text-gray-500 mb-1">{t('Device preset')}</label>
+                <select
+                  onChange={e => {
+                    if (!e.target.value) return
+                    const preset = hentPreset(e.target.value)
+                    if (!preset) return
+                    setNyPort(String(preset.port))
+                    setNyUnitId(String(preset.unit_id))
+                    setNyPollHz(String(preset.poll_hz))
+                    setNyTimeoutMs(String(preset.timeout_ms))
+                    setNyRegisters(preset.registers.map(r => ({ ...r })))
+                    if (!nyNamn.trim()) setNyNamn(preset.namn)
+                    setMelding(preset.hjelp)
+                    e.target.value = ''  // Reset dropdown
+                  }}
+                  defaultValue=""
+                  className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+                >
+                  <option value="">{t('-- Choose preset (optional) --')}</option>
+                  {MODBUS_PRESETS.map(p => (
+                    <option key={p.id} value={p.id}>{p.namn}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">{t('Poll rate (Hz)')}</label>
@@ -253,6 +281,13 @@ export default function HubNodeConfigCard() {
               <div className="mb-3">
                 <ModbusRegisterTable registers={nyRegisters} onChange={setNyRegisters} />
               </div>
+
+              {/* Varsel om manglande adresser */}
+              {nyRegisters.length > 0 && !harUtfyltAdresser(nyRegisters) && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg p-2 mb-3">
+                  {t('Some registers have address 0 — fill in from device manual before testing.')}
+                </div>
+              )}
 
               <div className="flex gap-2 mb-3">
                 <button
