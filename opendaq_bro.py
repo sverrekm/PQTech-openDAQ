@@ -1299,9 +1299,11 @@ class OpenDAQBro:
                 log.warning(f"  MQTT kanal {ch_idx} konfig feilet: {e}")
 
         # Konfigurer Modbus-kanalar (indeks n_adc + n_mqtt +)
-        # Same PostScaling-trick som hub_server: Amplitude=10 + Waveform=None
-        # aktiverer PostScaling frå CustomRange, så intern DC [-10, 10] vert
-        # mappa til fysisk range. Utan dette ville 230V vert klampa til 10.
+        # Same oppsett som MQTT-kanalar (Amplitude=0, Waveform=Sine) slik at
+        # acqLoop genererer DataPackets. DC-eigenskapen er [-10, 10] på RefDevice,
+        # so vi skalerer fysisk verdi → intern i oppdater_modbus_eigenskapar.
+        # PostScaling settast manuelt på signal descriptor i _sett_signal_descriptors
+        # slik at DewesoftX viser fysisk verdi.
         for midx, mb in enumerate(self._modbus_kanalar):
             ch_idx = n_adc + n_mqtt + midx
             if ch_idx >= len(channels):
@@ -1311,17 +1313,14 @@ class OpenDAQBro:
             try:
                 ch.name = reg.namn
                 ch.description = f"{mb['node_namn']} @ {reg.adresse}"
-                # Amplitude=10 aktiverer PostScaling. Waveform=None (2) gjer at
-                # acqLoop output = 0*Amp + DC = berre DC (ingen bølgjeform).
-                self._safe_set(ch, "Amplitude", 10.0)
-                self._safe_set(ch, "Waveform", 2)      # None
-                self._safe_set(ch, "Frequency", 0.1)   # irrelevant med Waveform=None
+                self._safe_set(ch, "Amplitude", 0.0)
+                self._safe_set(ch, "Frequency", 1.0)
                 self._safe_set(ch, "DC", 0.0)
-                # Modbus-kanalar leverer ferdig-skalerte fysiske verdiar
+                self._safe_set(ch, "Waveform", 0)      # Sine — som MQTT
                 self._kanal_skala.append(1.0)
                 self._kanal_offset.append(0.0)
-                # CustomRange med 5× sikkerheitsfaktor — PostScaling mappar
-                # intern [-10, 10] → fysisk [-cr_half, cr_half].
+                # CustomRange for display/PostScaling. 5× sikkerheitsfaktor så
+                # intern [-10, 10] dekkjer fysisk range utan klamping.
                 RANGE_FAKTOR = 5.0
                 max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
                 cr_half = max_abs * RANGE_FAKTOR
@@ -1636,6 +1635,27 @@ class OpenDAQBro:
                         float(reg.range_low), float(reg.range_high))
                 except Exception:
                     pass
+
+                # PostScaling: intern [-10, 10] → fysisk [-cr_half, cr_half].
+                # Same trick som hub_server._sett_hub_descriptors.
+                RANGE_FAKTOR = 5.0
+                max_abs = max(abs(reg.range_low), abs(reg.range_high), 1.0)
+                cr_half = max_abs * RANGE_FAKTOR
+                ps_scale = (2 * cr_half) / 20.0   # span / 20 (intern [-10,+10])
+                ps_offset = 0.0
+                try:
+                    if hasattr(_daq, 'ScaledSampleType'):
+                        ps = _daq.LinearScaling(ps_scale, ps_offset,
+                                                _daq.SampleType.Float64,
+                                                _daq.ScaledSampleType.Float64)
+                    else:
+                        ps = _daq.LinearScaling(ps_scale, ps_offset,
+                                                _daq.SampleType.Float64,
+                                                _daq.SampleType.Float64)
+                    desc_builder.post_scaling = ps
+                except Exception as e_ps:
+                    log.warning(f"  Modbus {reg.namn}: PostScaling feilet: {e_ps}")
+
                 new_desc = desc_builder.build()
                 try:
                     sig.set_descriptor(new_desc)
@@ -1647,7 +1667,8 @@ class OpenDAQBro:
                 if ch_idx < len(self._val_desc):
                     self._val_desc[ch_idx] = new_desc
                 sett_teller += 1
-                log.info(f"  Modbus {reg.namn}: descriptor enhet={eining}")
+                log.info(f"  Modbus {reg.namn}: descriptor enhet={eining}, "
+                         f"PostScaling scale={ps_scale:.2f}")
             except Exception as e:
                 log.warning(f"  Modbus {reg.namn}: signal descriptor feilet: {e}")
 
