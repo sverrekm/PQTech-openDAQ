@@ -1308,6 +1308,11 @@ class OpenDAQBro:
         self._nullpunkt_count = {}
         self._nullpunkt_n = 0
 
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = ""
+
         channels = list(self._device.channels)
         for i, ch in enumerate(channels):
             if i >= n_adc or i >= len(kanal_konfig):
@@ -1316,8 +1321,21 @@ class OpenDAQBro:
             # Bruk SUNDET_KANALAR for amplitude/freq som fallback
             sundet = self.SUNDET_KANALAR[i] if i < len(self.SUNDET_KANALAR) else None
             try:
+                # Fang original-ID (t.d. "AI 0") før vi overstyrer namn,
+                # slik at Description kan kombinere RefDevice-ID + hostname.
+                orig_id = ""
+                try:
+                    orig_id = ch.local_id
+                except Exception:
+                    try:
+                        orig_id = ch.name
+                    except Exception:
+                        pass
+
                 ch.name = kk.namn
                 ch.description = kk.namn
+                self._sett_description_prop(
+                    ch, f"{orig_id}{hostname}", logg_prefiks=f"{kk.namn}: ")
 
                 amp = sundet["amplitude"] if sundet else 0.0
                 freq = sundet["freq"] if sundet else 50.0
@@ -1379,8 +1397,19 @@ class OpenDAQBro:
                 break
             ch = channels[ch_idx]
             try:
+                orig_id = ""
+                try:
+                    orig_id = ch.local_id
+                except Exception:
+                    try:
+                        orig_id = ch.name
+                    except Exception:
+                        pass
                 ch.name = mk.namn or mk.topic
                 ch.description = mk.namn or mk.topic
+                self._sett_description_prop(
+                    ch, f"{orig_id}{hostname}",
+                    logg_prefiks=f"MQTT {mk.namn or mk.topic}: ")
                 self._safe_set(ch, "Amplitude", 0.0)
                 self._safe_set(ch, "Frequency", 1.0)
                 self._safe_set(ch, "DC", 0.0)
@@ -1409,8 +1438,19 @@ class OpenDAQBro:
             ch = channels[ch_idx]
             reg = mb["reg"]
             try:
+                orig_id = ""
+                try:
+                    orig_id = ch.local_id
+                except Exception:
+                    try:
+                        orig_id = ch.name
+                    except Exception:
+                        pass
                 ch.name = reg.namn
                 ch.description = f"{mb['node_namn']} @ {reg.adresse}"
+                self._sett_description_prop(
+                    ch, f"{orig_id}{hostname}",
+                    logg_prefiks=f"Modbus {reg.namn}: ")
                 self._safe_set(ch, "Amplitude", 0.0)
                 self._safe_set(ch, "Frequency", 1.0)
                 self._safe_set(ch, "DC", 0.0)
@@ -1879,6 +1919,31 @@ class OpenDAQBro:
                     log.warning(f"  Cap {proto_id}: Kunne ikkje sette PrimaryConnectionString")
         except Exception as e:
             log.warning(f"  _fiks_primary_connection_strings feilet: {e}")
+
+    def _sett_description_prop(self, ch, tekst, logg_prefiks=""):
+        """Legg til (eller oppdater) StringProperty som DewesoftX viser som
+        Description. openDAQ sin Component.description blir ikkje plukka opp
+        av DewesoftX — ho les frå ein StringProperty på kanalen.
+
+        Prøver "Description" først, deretter fallback-namn. Returnerer
+        property-namnet som vart sett, eller None ved feil.
+        """
+        kandidatar = ("Description", "ChannelDescription",
+                      "DisplayDescription", "Comment")
+        for namn in kandidatar:
+            try:
+                try:
+                    ch.get_property(namn)
+                    ch.set_property_value(namn, tekst)
+                except Exception:
+                    prop = _daq.StringPropertyBuilder(namn, tekst)
+                    ch.add_property(prop.build())
+                log.info(f"  {logg_prefiks}{namn}={tekst!r}")
+                return namn
+            except Exception:
+                continue
+        log.warning(f"  {logg_prefiks}Description-property feilet (alle kandidatar)")
+        return None
 
     def _safe_set(self, obj, namn, verdi):
         """Sett eigenskap med automatisk type-konvertering og range-klamping.
