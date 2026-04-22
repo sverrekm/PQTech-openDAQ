@@ -1165,7 +1165,20 @@ def _koble_til_node(node: FjernNode) -> bool:
                 "tilkobla_sidan": datetime.now().isoformat(),
                 "antal_kanalar": n_ch,
             }
-        log.info(f"  Tilkobla: '{node.namn}' — {n_ch} kanalar")
+            # Invalider cached readers — gamle peikar på dei døde signala frå
+            # før reconnect. Lazy-rebuild ved neste hent_hub_kanalar/_les_fjern_verdiar.
+            for k in list(_kanal_readers.keys()):
+                if k[0] == node.id:
+                    _kanal_readers.pop(k, None)
+            for k in list(_relay_readers.keys()):
+                if k[0] == node.id:
+                    _relay_readers.pop(k, None)
+        # Tøm status-cache så ny tilkobling vert reflektert i UI med ein gong
+        with _status_cache_lock:
+            _status_cache["ts"] = 0.0
+        with _kanalar_cache_lock:
+            _kanalar_cache["ts"] = 0.0
+        log.info(f"  Tilkobla: '{node.namn}' — {n_ch} kanalar (readers invalidert)")
 
         # Diagnostikk: list sub-device info og streaming-kjelder
         try:
@@ -1205,6 +1218,13 @@ def _fråkoble_node(node_id: str):
     with _hub_lock:
         device = _node_devices.pop(node_id, None)
         _node_status.pop(node_id, None)
+        # Invalider cached readers — peikar på signal frå gammal tilkobling
+        for k in list(_kanal_readers.keys()):
+            if k[0] == node_id:
+                _kanal_readers.pop(k, None)
+        for k in list(_relay_readers.keys()):
+            if k[0] == node_id:
+                _relay_readers.pop(k, None)
 
     if device and _klient_instance:
         try:
@@ -1768,6 +1788,13 @@ def _helsesjekk_loop():
                             _node_status[node.id]["tilkobla"] = False
                             _node_status[node.id]["feil"] = str(e)
                         _node_devices.pop(node.id, None)
+                        # Invalider readers — gamle peikar på dei døde signala
+                        for k in list(_kanal_readers.keys()):
+                            if k[0] == node.id:
+                                _kanal_readers.pop(k, None)
+                        for k in list(_relay_readers.keys()):
+                            if k[0] == node.id:
+                                _relay_readers.pop(k, None)
                     # Prøv remove_device (utan lås — kan blokkere)
                     try:
                         _klient_instance.remove_device(device)
