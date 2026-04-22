@@ -72,7 +72,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   // Hub-mode detection
   const hubStatusFetcher = useCallback(() => fetchHubStatus(), [])
   const { data: hubStatusData } = usePolling(hubStatusFetcher, 5000)
-  const isHubMode = hubStatusData?.aktiv !== false
+  // modus='hub' vs 'node'. 'aktiv' vert sett òg i direkte-modus for
+  // modbus-status, so vi må sjekke sjølve modus-feltet.
+  const isHubMode = hubStatusData?.modus === 'hub'
 
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
