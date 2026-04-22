@@ -385,10 +385,15 @@ class OpenDAQBro:
             # DewesoftX finn den automatisk (same som offisielt eksempel).
             builder.add_discovery_server("mdns")
 
-            builder.set_root_device("daqref://device0")
+            # Device-indeks frå env (default 0). Må vere unik per Pi når
+            # fleire nodar koplast til same hub, ellers får hub
+            # "Device with same local ID already exists" (alle blir RefDev0).
+            dev_idx = os.environ.get("OPENDAQ_DEVICE_IDX", "0").strip() or "0"
+            conn_str = f"daqref://device{dev_idx}"
+            builder.set_root_device(conn_str)
             self._instance = builder.build()
             self._device = self._instance  # Instance wraps root device
-            log.info("  Instance oppretta med root device (daqref://device0)")
+            log.info(f"  Instance oppretta med root device ({conn_str})")
 
             enhet_namn = ""
             try:
