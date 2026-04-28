@@ -678,7 +678,7 @@ RUN git clone --depth 1 https://github.com/mvp/uhubctl /tmp/uhubctl \
     && apt-get purge -y --auto-remove git build-essential libusb-1.0-0-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir numpy flask pyusb paho-mqtt asyncua pymodbus>=3.6.0
+RUN pip install --no-cache-dir numpy flask pyusb paho-mqtt asyncua pymodbus>=3.6.0 requests>=2.31.0
 
 # Tailscale VPN (mesh-nettverk mellom nodar/hub)
 RUN curl -fsSL https://tailscale.com/install.sh | sh

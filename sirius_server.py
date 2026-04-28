@@ -46,6 +46,8 @@ from buffer_konfig import les_buffer_konfig, lagre_buffer_konfig, valider_buffer
 from buffer_skrivar import BufferSkrivar
 from hub_konfig import les_hub_konfig, NODE_TYPE_MODBUS_TCP
 from modbus_manager import ModbusManager
+from push_konfig import les_push_konfig, PushKonfig
+from hub_pusher import HubPusher
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,6 +121,10 @@ _args = None
 _modbus_manager: ModbusManager = None
 _modbus_straumings_stopp: threading.Event = None
 _lock = threading.Lock()
+
+# Push-pusher: sender lokale kanalverdiar til ein parent hub via HTTPS
+# når push_konfig.parent_url er sett. Ingen-op viss ikkje konfigurert.
+_hub_pusher: HubPusher = None
 
 # Stopp-event frå førre driver — brukast til å stoppe foreldrelause
 # ADC/heartbeat-trådar når _driver vert sett til None uforventa.
@@ -717,6 +723,79 @@ def hent_modbus_kanalar() -> list:
         _modbus_kanalar_cache["ts"] = time.time()
         _modbus_kanalar_cache["data"] = list(kanalar)
     return kanalar
+
+
+def _start_hub_pusher():
+    """Start push-pusher hvis push_konfig.parent_url er sett.
+
+    Pusher les frå _opendaq_bro.hent_siste_verdiar() (live-cache med
+    SIRIUS + MQTT + Modbus-verdiar) og POST-ar JSON-batchar til
+    {parent_url}/api/ingest kvart 1/push_hz sek.
+    """
+    global _hub_pusher
+    if _hub_pusher is not None:
+        try:
+            _hub_pusher.stopp()
+        except Exception:
+            pass
+        _hub_pusher = None
+
+    try:
+        konfig = les_push_konfig()
+    except Exception as e:
+        log.warning(f"Push-pusher: kunne ikkje lese konfig: {e}")
+        return
+
+    if not konfig.parent_url:
+        log.info("Push-pusher: parent_url ikkje sett - hopper over")
+        return
+
+    def _hent():
+        if _opendaq_bro is None:
+            return {}
+        try:
+            return _opendaq_bro.hent_siste_verdiar()
+        except Exception:
+            return {}
+
+    _hub_pusher = HubPusher(hent_verdiar_fn=_hent, konfig=konfig)
+    _hub_pusher.start()
+
+
+def hent_push_status() -> dict:
+    """Status for push-pusher (utgåande). Brukt av /api/push/status."""
+    if _hub_pusher is None:
+        try:
+            konfig = les_push_konfig()
+            return {
+                "konfigurert": bool(konfig.parent_url),
+                "kjorer": False,
+                "parent_url": konfig.parent_url,
+                "node_id": konfig.node_id,
+                "node_namn": konfig.node_namn,
+                "push_hz": konfig.push_hz,
+                "sendt_ok": 0, "sendt_feil": 0,
+            }
+        except Exception:
+            return {"konfigurert": False, "kjorer": False}
+    return _hub_pusher.status()
+
+
+def oppdater_push_konfig(ny_konfig: PushKonfig):
+    """Restart push-pusher med ny konfig. Vert kalla frå web_ui."""
+    global _hub_pusher
+    if _hub_pusher is not None:
+        try:
+            _hub_pusher.oppdater_konfig(ny_konfig)
+        except Exception as e:
+            log.warning(f"Push-pusher: oppdater_konfig feila: {e}")
+            try:
+                _hub_pusher.stopp()
+            except Exception:
+                pass
+            _hub_pusher = None
+    if _hub_pusher is None:
+        _start_hub_pusher()
 
 
 def hent_modbus_nodar() -> list:
@@ -1627,6 +1706,9 @@ def start_server(args):
 
     # Start ModbusManager + streaming-tråd (les modbus-type nodar frå hub_konfig)
     _start_modbus_manager()
+
+    # Start hub-pusher (utgåande push til parent hvis konfigurert)
+    _start_hub_pusher()
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet and _driver.ep2_ok:

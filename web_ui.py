@@ -63,6 +63,19 @@ from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, 
 from mqtt_konfig import valider_mqtt_konfig
 from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB
 from buffer_konfig import valider_buffer_konfig, les_buffer_konfig
+from push_konfig import (
+    valider_push_konfig, les_push_konfig, lagre_push_konfig, PushKonfig,
+)
+
+# Globalt register over mottatte push-batchar (RAM, ringbuffer-basert).
+# Berre dei siste N batchar per node held vi i minne for live-visning.
+# Vidare lagring/openDAQ-injeksjon kjem dag 2.
+import collections
+_INGEST_BUFFER_PER_NODE = 200
+_ingest_data: dict = collections.defaultdict(
+    lambda: collections.deque(maxlen=_INGEST_BUFFER_PER_NODE))
+_ingest_lock = threading.Lock()
+_ingest_stats = {"totalt": 0, "avvist": 0, "siste_ts": 0.0}
 
 # Hub-konfig er alltid tilgjengeleg (for GUI), men hub_server berre i hub-modus
 HUB_MODUS = os.environ.get("OPENDAQ_MODUS") == "hub"
@@ -1218,6 +1231,163 @@ def api_system_restart():
     log.info("Restart forespurt via API — avsluttar om 2 sek...")
     threading.Timer(2.0, lambda: os._exit(0)).start()
     return jsonify({"suksess": True, "melding": "Omstart om 2 sekund..."})
+
+
+# --- Buffer API ---
+
+# --- Push/ingest API ---
+
+@app.route("/api/push/konfig")
+def api_push_konfig_hent():
+    """Hent push-konfig (kva parent denne konteinaren pushar til)."""
+    from dataclasses import asdict
+    konfig = les_push_konfig()
+    return jsonify(asdict(konfig))
+
+
+@app.route("/api/push/konfig", methods=["PUT"])
+def api_push_konfig_oppdater():
+    """Oppdater push-konfig + restart push-pusher."""
+    data = request.get_json(silent=True) or {}
+    konfig, feil = valider_push_konfig(data)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    if not lagre_push_konfig(konfig):
+        return jsonify({"suksess": False, "melding": "Lagring feila"}), 500
+    # Be sirius_server om å restarte pushar med ny konfig
+    if SIRIUS_DIREKTE:
+        try:
+            from sirius_server import oppdater_push_konfig as _oppdater_push
+            _oppdater_push(konfig)
+        except ImportError:
+            pass
+        except Exception as e:
+            return jsonify({"suksess": False,
+                            "melding": f"Konfig lagra, men restart feila: {e}"}), 500
+    return jsonify({"suksess": True, "melding": "Push-konfig lagra"})
+
+
+@app.route("/api/push/status")
+def api_push_status():
+    """Status for utgåande push-pusher (kva denne konteinaren sender)."""
+    if SIRIUS_DIREKTE:
+        try:
+            from sirius_server import hent_push_status as _push_status
+            return jsonify(_push_status())
+        except ImportError:
+            pass
+        except Exception as e:
+            return jsonify({"konfigurert": False, "feil": str(e)})
+    return jsonify({"konfigurert": False, "kjorer": False})
+
+
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    """Mottak-endepunkt: barn-nodar POST-ar JSON-batchar hit.
+
+    Validerer Authorization: Bearer <token> mot push_konfig.ingest_token
+    (eller env INGEST_TOKEN som fallback).
+
+    Body: {node_id, node_namn, ts, kanalar: {namn: verdi}, buffer_lag_ms}
+
+    Dag 1: lagrar batch i RAM-ringbuffer + loggar. Dag 2: injiserer i
+    openDAQ-pipeline.
+    """
+    # Token-validering
+    auth = request.headers.get("Authorization", "")
+    token = ""
+    if auth.startswith("Bearer "):
+        token = auth[7:].strip()
+
+    forventa = ""
+    try:
+        forventa = les_push_konfig().ingest_token
+    except Exception:
+        pass
+    if not forventa:
+        forventa = os.environ.get("INGEST_TOKEN", "")
+
+    if not forventa:
+        return jsonify({"suksess": False,
+                        "melding": "Ingest ikkje konfigurert (manglar token)"}), 503
+    if token != forventa:
+        with _ingest_lock:
+            _ingest_stats["avvist"] += 1
+        return jsonify({"suksess": False, "melding": "Ugyldig token"}), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"suksess": False, "melding": "Ugyldig JSON"}), 400
+
+    node_id = str(data.get("node_id", "")).strip()
+    if not node_id:
+        return jsonify({"suksess": False, "melding": "Manglar node_id"}), 400
+
+    kanalar = data.get("kanalar", {})
+    if not isinstance(kanalar, dict):
+        return jsonify({"suksess": False, "melding": "kanalar maa vere eit objekt"}), 400
+
+    ts = float(data.get("ts", 0.0))
+    node_namn = str(data.get("node_namn", node_id))
+    buffer_lag_ms = float(data.get("buffer_lag_ms", 0))
+
+    batch = {
+        "ts": ts,
+        "node_namn": node_namn,
+        "kanalar": kanalar,
+        "buffer_lag_ms": buffer_lag_ms,
+        "mottatt_ts": __import__("time").time(),
+    }
+
+    with _ingest_lock:
+        _ingest_data[node_id].append(batch)
+        _ingest_stats["totalt"] += 1
+        _ingest_stats["siste_ts"] = batch["mottatt_ts"]
+
+    if _ingest_stats["totalt"] % 100 == 1:
+        latens_ms = max(0.0, (batch["mottatt_ts"] - ts) * 1000.0) if ts > 0 else 0.0
+        try:
+            __import__("logging").getLogger("ingest").info(
+                f"Ingest #{_ingest_stats['totalt']}: node={node_id} "
+                f"({node_namn}), {len(kanalar)} kanalar, "
+                f"latens={latens_ms:.0f}ms, lag={buffer_lag_ms:.0f}ms")
+        except Exception:
+            pass
+
+    return jsonify({"suksess": True, "mottatt": len(kanalar)})
+
+
+@app.route("/api/ingest/status")
+def api_ingest_status():
+    """Status for ingest-mottak: kva nodar pushar til oss."""
+    with _ingest_lock:
+        nodar = []
+        for node_id, batch_q in _ingest_data.items():
+            if not batch_q:
+                continue
+            siste = batch_q[-1]
+            nodar.append({
+                "node_id": node_id,
+                "node_namn": siste.get("node_namn", node_id),
+                "siste_ts": siste.get("ts", 0),
+                "siste_mottatt": siste.get("mottatt_ts", 0),
+                "antal_kanalar": len(siste.get("kanalar", {})),
+                "antal_batchar": len(batch_q),
+                "siste_lag_ms": siste.get("buffer_lag_ms", 0),
+            })
+        stats = dict(_ingest_stats)
+    return jsonify({"nodar": nodar, "stats": stats})
+
+
+@app.route("/api/ingest/data/<node_id>")
+def api_ingest_data(node_id: str):
+    """Hent siste batchar frå ein spesifikk node (for live-visning)."""
+    limit = request.args.get("limit", 50, type=int)
+    limit = max(1, min(limit, 200))
+    with _ingest_lock:
+        batchar = list(_ingest_data.get(node_id, []))
+    return jsonify({"node_id": node_id,
+                    "batchar": batchar[-limit:]})
 
 
 # --- Buffer API ---
