@@ -212,7 +212,11 @@ class HubPusher:
                     if status.get(namn, True) is False:
                         continue  # eksplisitt inaktiv i kanal_konfig
                     if isinstance(v, dict):
-                        verdi = v.get("siste")
+                        # Verdi-type frå konfig: 'siste' / 'rms' / 'snitt'
+                        vt = self._konfig.verdi_type or "siste"
+                        verdi = v.get(vt)
+                        if verdi is None:
+                            verdi = v.get("siste")  # fallback
                         if verdi is None:
                             verdi = v.get("snitt")
                         if verdi is None:

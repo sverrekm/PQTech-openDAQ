@@ -33,6 +33,11 @@ class PushKonfig:
     push_hz: float = 10.0             # Send-rate i Hz (1-50)
     accept_ingest: bool = False       # True = denne konteinaren mottek òg push (sub-hub/sentral)
     ingest_token: str = ""            # Token denne konteinaren krev av sine eigne barn
+    # Verdi-type: kva felt frå opendaq_bro._siste_verdiar som vert sendt.
+    # 'siste' = siste sample (god for DC, temp, low-rate)
+    # 'rms'   = RMS av siste pakke (god for AC-spenning, AC-straum)
+    # 'snitt' = gjennomsnitt
+    verdi_type: str = "siste"
 
     def __post_init__(self):
         if not self.node_id:
@@ -52,6 +57,7 @@ def les_push_konfig() -> PushKonfig:
                 push_hz=float(data.get("push_hz", 10.0)),
                 accept_ingest=bool(data.get("accept_ingest", False)),
                 ingest_token=str(data.get("ingest_token", "")).strip(),
+                verdi_type=str(data.get("verdi_type", "siste")),
             )
             log.info(f"Lasta push-konfig: parent={konfig.parent_url or '(ingen)'}, "
                      f"node_id={konfig.node_id}, push_hz={konfig.push_hz}, "
