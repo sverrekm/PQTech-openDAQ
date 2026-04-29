@@ -52,6 +52,45 @@ def _hent_kanal_status() -> Optional[dict]:
     except Exception:
         return None
 
+
+def _bygg_namn_mapping() -> dict:
+    """Bygg mapping {opendaq_bro-key -> kanalnamn} så push-batch kan
+    sende navn som matchar hub si fjern_kanal_info.
+
+    Keys i opendaq_bro._siste_verdiar er generiske: kanal_N (SIRIUS),
+    mqtt_N (MQTT), modbus_N (Modbus). Hub forventar namn som "AI 0",
+    "temp-verksted", "V_L1_N", "Frekvens", osv. — frå brukar si konfig.
+    """
+    mapping = {}
+    # SIRIUS ADC
+    try:
+        from kanal_konfig import les_konfig
+        for i, kk in enumerate(les_konfig()):
+            mapping[f"kanal_{i}"] = kk.namn
+    except Exception:
+        pass
+    # MQTT
+    try:
+        from mqtt_konfig import les_mqtt_konfig
+        mk_konfig = les_mqtt_konfig()
+        for i, mk in enumerate(mk_konfig.kanalar):
+            mapping[f"mqtt_{i}"] = mk.namn or mk.topic or f"mqtt_{i}"
+    except Exception:
+        pass
+    # Modbus (frå hub_konfig sine modbus_registers per node)
+    try:
+        from hub_konfig import les_hub_konfig
+        hk = les_hub_konfig()
+        midx = 0
+        for n in hk.nodar:
+            if getattr(n, "type", "") == "modbus_tcp":
+                for reg in n.modbus_registers:
+                    mapping[f"modbus_{midx}"] = reg.namn
+                    midx += 1
+    except Exception:
+        pass
+    return mapping
+
 log = logging.getLogger('hub_pusher')
 
 
@@ -79,6 +118,8 @@ class HubPusher:
         # Cache av {kanal_namn: aktiv} — refresh kvar _AKTIV_CACHE_TTL sek
         self._kanal_status: Optional[dict] = None
         self._kanal_status_ts: float = 0.0
+        # Cache av {opendaq_bro-key -> kanalnamn} (refresh saman med status)
+        self._namn_mapping: dict = {}
 
     @property
     def aktiv(self) -> bool:
@@ -150,26 +191,27 @@ class HubPusher:
             try:
                 verdiar = self._hent_verdiar() or {}
 
-                # Refresh kanal-status (aktiv-flag) periodisk
+                # Refresh konfig-cache periodisk
                 if t_start - self._kanal_status_ts > _AKTIV_CACHE_TTL:
                     self._kanal_status = _hent_kanal_status()
+                    self._namn_mapping = _bygg_namn_mapping()
                     self._kanal_status_ts = t_start
 
                 # Filtrer: numeriske verdiar, ikkje debug-felt, og hopp over
-                # SIRIUS-kanalar markert inaktiv i kanal_konfig.
-                # opendaq_bro._siste_verdiar har struktur:
-                #   - dict {snitt, rms, topp, siste, antall, kjelde} for SIRIUS/MQTT
-                #   - float for enkle verdiar
-                # Vi sender 'siste'-feltet som primær verdi.
+                # SIRIUS-kanalar markert inaktiv i kanal_konfig. Mapping
+                # konverterer generiske keys (kanal_N, mqtt_N, modbus_N) til
+                # kanalnamn så hub kan matche dei mot fjern_kanal_info.
                 status = self._kanal_status or {}
+                mapping = self._namn_mapping
                 kanalar = {}
                 for k, v in verdiar.items():
                     if k.startswith("_"):
                         continue
-                    if status.get(k, True) is False:
+                    # Mapp key til kanalnamn (hvis kjent), behold ellers
+                    namn = mapping.get(k, k)
+                    if status.get(namn, True) is False:
                         continue  # eksplisitt inaktiv i kanal_konfig
                     if isinstance(v, dict):
-                        # Hent 'siste' eller 'snitt' frå dict-strukturen
                         verdi = v.get("siste")
                         if verdi is None:
                             verdi = v.get("snitt")
@@ -177,9 +219,9 @@ class HubPusher:
                             continue
                         if not isinstance(verdi, (int, float)):
                             continue
-                        kanalar[k] = verdi
+                        kanalar[namn] = verdi
                     elif isinstance(v, (int, float)):
-                        kanalar[k] = v
+                        kanalar[namn] = v
 
                 # Send alltid (også tomme kanalar = heartbeat) — gir hub
                 # synlegheit av at noden er online sjølv før SIRIUS er klar.
