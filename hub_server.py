@@ -511,11 +511,18 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
     if target_node is None:
         return 0
 
+    # Bruk DataPacket-injeksjon hvis aktiv, ellers fall tilbake til DC-relay
+    use_datapacket = _pakett_klar and _kanal_signals
+
     # Hent hub-channel-liste éin gong
     try:
         hub_channels = list(_instance.channels)
     except Exception:
         return 0
+
+    if use_datapacket:
+        import opendaq as daq
+        import ctypes
 
     oppdatert = 0
     # For kvar kanal i push: finn matching hub-kanal med same node_id + namn.
@@ -552,17 +559,37 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
                 continue
             if hub_idx >= len(hub_channels):
                 continue
-            # Hent scale/offset frå _kanal_mapping for fysisk → intern DC
             try:
                 _, _, scale, offset, _ = _kanal_mapping[hub_idx]
             except Exception:
                 scale, offset = 1.0, 0.0
             if scale == 0:
                 scale = 1.0
-            dc_val = (float(verdi) - offset) / scale
+            internal_v = (float(verdi) - offset) / scale
+            internal_v = max(-10.0, min(10.0, internal_v))
             try:
-                _safe_set(hub_channels[hub_idx], "DC", dc_val)
-                oppdatert += 1
+                if use_datapacket and hub_idx < len(_kanal_signals):
+                    # Send 1-sample DataPacket
+                    _, sig = _kanal_signals[hub_idx]
+                    dom_sig = _dom_signals[hub_idx]
+                    val_desc = _val_descs[hub_idx]
+                    dom_desc = _dom_descs[hub_idx]
+                    if sig is not None and dom_sig is not None and val_desc is not None:
+                        tick_offset = _total_samples[hub_idx] * _tick_delta
+                        time_pkt = daq.DataPacket(dom_desc, 1, tick_offset)
+                        val_pkt = daq.DataPacketWithDomain(
+                            time_pkt, val_desc, 1, 0)
+                        arr = (ctypes.c_double * 1).from_address(
+                            int(val_pkt.raw_data))
+                        arr[0] = internal_v
+                        dom_sig.send_packet(time_pkt)
+                        sig.send_packet(val_pkt)
+                        _total_samples[hub_idx] += 1
+                        oppdatert += 1
+                else:
+                    # Fallback: DC-property (acqLoop generere)
+                    _safe_set(hub_channels[hub_idx], "DC", internal_v)
+                    oppdatert += 1
             except Exception:
                 pass
             break  # gå til neste kanal i push-batch
@@ -799,10 +826,20 @@ def _init_data_injeksjon():
     if n_desc > 0:
         _send_descriptor_events()
 
-    # IKKJE sett _pakett_klar — bruk DC relay i staden for DataPacket-injeksjon.
-    # DataPacket-injeksjon krev nøyaktig timing som polling-basert relay
-    # ikkje kan levere påliteleg.
-    log.info(f"  Brukar DC relay (acqLoop genererer data, DC styrer verdiar)")
+    # Aktiver DataPacket-injeksjon (send_packet) for å støtte både skalar-
+    # push (1 sample per kanal) og rå-data push (2000 samples). acqLoop
+    # vert deaktivert via toggle-fil så den ikkje interleavar.
+    if n_desc > 0:
+        _pakett_klar = True
+        try:
+            with open(_ACQLOOP_TOGGLE, "w") as f:
+                f.write("disabled")
+            log.info("  acqLoop DEAKTIVERT — DataPacket-injeksjon overtek")
+        except Exception as e:
+            log.warning(f"  Kunne ikkje skrive {_ACQLOOP_TOGGLE}: {e}")
+        log.info(f"  Brukar DataPacket-injeksjon (send_packet for skalar + rå-data)")
+    else:
+        log.info(f"  Brukar DC relay (acqLoop genererer data, DC styrer verdiar)")
 
 
 def _bygg_post_scaling(scale_factor, offset_val):
