@@ -903,10 +903,21 @@ def _les_fjern_verdiar():
 
             reader = _relay_readers[key]
             count = reader.available_count
+            if count > 50000:
+                # Streaming overload (typisk treig Tailscale DERP) — drop
+                # reader så han vert lazy-oppretta neste runde.
+                _relay_readers.pop(key, None)
+                continue
             if count > 0:
-                values = reader.read(count)
+                chunk = min(count, 1000)
+                values = reader.read(chunk)
                 if values is not None and len(values) > 0:
                     verdiar[idx] = float(values[-1])
+                if count > chunk:
+                    try:
+                        reader.skip(count - chunk)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -1077,8 +1088,12 @@ def _dc_relay_steg():
 
             reader = _relay_readers[key]
             count = reader.available_count
+            if count > 50000:
+                _relay_readers.pop(key, None)
+                continue
             if count > 0:
-                values = reader.read(count)
+                chunk = min(count, 1000)
+                values = reader.read(chunk)
                 if values is not None and len(values) > 0:
                     physical_val = float(values[-1])
                     # Skaler til intern DC-range: DC = (physical - offset) / scale
@@ -1087,6 +1102,11 @@ def _dc_relay_steg():
                     else:
                         dc_val = physical_val
                     _safe_set(hub_channels[hub_idx], "DC", dc_val)
+                if count > chunk:
+                    try:
+                        reader.skip(count - chunk)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
