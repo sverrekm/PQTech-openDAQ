@@ -105,5 +105,10 @@ def init_app(app):
         # Unntatt: auth-endepunkt og ikkje-API-ruter (frontend, statiske filer)
         if request.path.startswith("/api/auth/") or not request.path.startswith("/api/"):
             return
+        # Unntatt: POST /api/ingest har eigen Bearer-token-auth (kallast frå
+        # node-konteinarar bak CGNAT, kan ikkje session-cookies). GET-endepunkt
+        # under /api/ingest/ er admin-only (status, data) -> session-auth.
+        if request.path == "/api/ingest" and request.method == "POST":
+            return
         if "brukar" not in session:
             return jsonify({"feil": "Ikkje innlogga"}), 401
