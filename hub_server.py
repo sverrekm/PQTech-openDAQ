@@ -478,6 +478,75 @@ def _oppdater_root_kanalar():
     log.info(f"  {len(_kanal_mapping)} hub-kanalar konfigurert")
 
 
+def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
+    """Injiser verdiar frå push-batch i lokale hub-kanalar (DC-relay).
+
+    Brukast av /api/ingest når ein node POST-ar batch. DewesoftX ser
+    desse verdiane via openDAQ-bridge (acqLoop sin DC-property).
+
+    Args:
+        node_id_eller_namn: matcher mot FjernNode.id eller FjernNode.namn
+        kanalar: dict {kanal_namn: fysisk_verdi}
+
+    Returns:
+        Antal kanalar som vart oppdatert.
+    """
+    if not kanalar or not _instance:
+        return 0
+
+    # Finn hub-node med matching id eller namn (fuzzy via lower-case)
+    target_node = None
+    nid_norm = node_id_eller_namn.lower().strip()
+    try:
+        for n in _hub_konfig.nodar:
+            if n.id == node_id_eller_namn or n.namn == node_id_eller_namn:
+                target_node = n
+                break
+            if n.namn.lower().strip() == nid_norm:
+                target_node = n
+                break
+    except Exception:
+        return 0
+    if target_node is None:
+        return 0
+
+    # Hent hub-channel-liste éin gong
+    try:
+        hub_channels = list(_instance.channels)
+    except Exception:
+        return 0
+
+    oppdatert = 0
+    # For kvar kanal i push: finn matching hub-kanal med same node_id + namn
+    for ch_namn, verdi in kanalar.items():
+        if not isinstance(verdi, (int, float)):
+            continue
+        for hub_idx, fk in enumerate(_fjern_kanal_info):
+            if fk.get("kanal_type") != "opendaq":
+                continue
+            if fk.get("node_id") != target_node.id:
+                continue
+            if fk.get("namn") != ch_namn:
+                continue
+            if hub_idx >= len(hub_channels):
+                continue
+            # Hent scale/offset frå _kanal_mapping for fysisk → intern DC
+            try:
+                _, _, scale, offset, _ = _kanal_mapping[hub_idx]
+            except Exception:
+                scale, offset = 1.0, 0.0
+            if scale == 0:
+                scale = 1.0
+            dc_val = (float(verdi) - offset) / scale
+            try:
+                _safe_set(hub_channels[hub_idx], "DC", dc_val)
+                oppdatert += 1
+            except Exception:
+                pass
+            break  # gå til neste kanal i push-batch
+    return oppdatert
+
+
 def _init_data_injeksjon():
     """Initialiser DataPacket-injeksjon etter server-start.
 

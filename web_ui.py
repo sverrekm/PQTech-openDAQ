@@ -1459,17 +1459,34 @@ def api_ingest():
         _ingest_stats["totalt"] += 1
         _ingest_stats["siste_ts"] = batch["mottatt_ts"]
 
+    # Injiser verdiar i hub si openDAQ-pipeline (DC-relay) så DewesoftX
+    # ser pushed data. node_namn brukast som primær matche-nøkkel sidan
+    # push-konfig.node_id ofte avvikar frå hub_konfig si auto-genererte id.
+    injisert = 0
+    if HUB_MODUS and kanalar:
+        try:
+            from hub_server import injiser_push_verdiar
+            # Prøv namn først, så id som fallback
+            injisert = injiser_push_verdiar(node_namn, kanalar)
+            if injisert == 0:
+                injisert = injiser_push_verdiar(node_id, kanalar)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
     if _ingest_stats["totalt"] % 100 == 1:
         latens_ms = max(0.0, (batch["mottatt_ts"] - ts) * 1000.0) if ts > 0 else 0.0
         try:
             __import__("logging").getLogger("ingest").info(
                 f"Ingest #{_ingest_stats['totalt']}: node={node_id} "
                 f"({node_namn}), {len(kanalar)} kanalar, "
-                f"latens={latens_ms:.0f}ms, lag={buffer_lag_ms:.0f}ms")
+                f"injisert={injisert}, latens={latens_ms:.0f}ms")
         except Exception:
             pass
 
-    return jsonify({"suksess": True, "mottatt": len(kanalar)})
+    return jsonify({"suksess": True, "mottatt": len(kanalar),
+                    "injisert": injisert})
 
 
 @app.route("/api/ingest/status")
