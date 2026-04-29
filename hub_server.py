@@ -518,16 +518,33 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
         return 0
 
     oppdatert = 0
-    # For kvar kanal i push: finn matching hub-kanal med same node_id + namn
+    # For kvar kanal i push: finn matching hub-kanal med same node_id + namn.
+    # Pusher kan sende anten 'AI 0' (openDAQ-namn) eller 'kanal_0' (sirius-
+    # driver-keys). Vi prøver begge og ein index-baserte fallback.
     for ch_namn, verdi in kanalar.items():
         if not isinstance(verdi, (int, float)):
             continue
+        # Bygg liste over namn å prøve
+        try_namn = [ch_namn]
+        if ch_namn.startswith("kanal_"):
+            try:
+                idx = int(ch_namn.split("_")[1])
+                try_namn.append(f"AI {idx}")
+                try_namn.append(f"AI{idx}")
+            except (ValueError, IndexError):
+                pass
+        elif ch_namn.startswith("AI "):
+            try:
+                idx = int(ch_namn[3:])
+                try_namn.append(f"kanal_{idx}")
+            except ValueError:
+                pass
         for hub_idx, fk in enumerate(_fjern_kanal_info):
             if fk.get("kanal_type") != "opendaq":
                 continue
             if fk.get("node_id") != target_node.id:
                 continue
-            if fk.get("namn") != ch_namn:
+            if fk.get("namn") not in try_namn:
                 continue
             if hub_idx >= len(hub_channels):
                 continue
