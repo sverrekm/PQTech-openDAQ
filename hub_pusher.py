@@ -134,39 +134,37 @@ class HubPusher:
                            if not k.startswith("_")
                            and isinstance(v, (int, float))}
 
-                if kanalar:
-                    payload = {
-                        "node_id": self._konfig.node_id,
-                        "node_namn": self._konfig.node_namn,
-                        "ts": t_start,
-                        "kanalar": kanalar,
-                        "buffer_lag_ms": 0,
-                    }
-                    body = json.dumps(payload).encode("utf-8")
+                # Send alltid (også tomme kanalar = heartbeat) — gir hub
+                # synlegheit av at noden er online sjølv før SIRIUS er klar.
+                payload = {
+                    "node_id": self._konfig.node_id,
+                    "node_namn": self._konfig.node_namn,
+                    "ts": t_start,
+                    "kanalar": kanalar,
+                    "buffer_lag_ms": 0,
+                }
+                body = json.dumps(payload).encode("utf-8")
 
-                    t_post = time.time()
-                    resp = sesjon.post(
-                        url, data=body, headers=headers, timeout=5.0)
-                    self._siste_latens_ms = (time.time() - t_post) * 1000.0
-                    self._siste_status_kode = resp.status_code
-                    self._siste_send_ts = t_start
+                t_post = time.time()
+                resp = sesjon.post(
+                    url, data=body, headers=headers, timeout=5.0)
+                self._siste_latens_ms = (time.time() - t_post) * 1000.0
+                self._siste_status_kode = resp.status_code
+                self._siste_send_ts = t_start
 
-                    if 200 <= resp.status_code < 300:
-                        self._sendt_ok += 1
-                        feilteller = 0
-                        if self._sendt_ok % 100 == 1:
-                            log.info(f"Push OK #{self._sendt_ok}: "
-                                     f"{len(kanalar)} kanalar, "
-                                     f"{self._siste_latens_ms:.0f}ms")
-                    else:
-                        self._sendt_feil += 1
-                        feilteller += 1
-                        self._siste_feilmelding = f"HTTP {resp.status_code}: {resp.text[:120]}"
-                        if feilteller <= 3 or feilteller % 50 == 0:
-                            log.warning(f"Push feil #{feilteller}: {self._siste_feilmelding}")
+                if 200 <= resp.status_code < 300:
+                    self._sendt_ok += 1
+                    feilteller = 0
+                    if self._sendt_ok % 100 == 1:
+                        log.info(f"Push OK #{self._sendt_ok}: "
+                                 f"{len(kanalar)} kanalar, "
+                                 f"{self._siste_latens_ms:.0f}ms")
                 else:
-                    # Ingen verdiar enno — vent og prøv igjen
-                    pass
+                    self._sendt_feil += 1
+                    feilteller += 1
+                    self._siste_feilmelding = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                    if feilteller <= 3 or feilteller % 50 == 0:
+                        log.warning(f"Push feil #{feilteller}: {self._siste_feilmelding}")
 
             except requests.exceptions.RequestException as e:
                 self._sendt_feil += 1
