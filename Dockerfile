@@ -716,6 +716,8 @@ COPY modbus_manager.py .
 COPY buffer_konfig.py .
 COPY buffer_skrivar.py .
 COPY hub_buffer.py .
+COPY push_konfig.py .
+COPY hub_pusher.py .
 COPY oppdatering.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
