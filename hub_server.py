@@ -232,6 +232,7 @@ def _opprett_instance():
 
 
 _kanal_mapping = []     # [(node_id, ch_index, scale, offset), ...]
+_dc_relay_teller = 0
 _relay_readers = {}     # (node_id, signal_id) -> StreamReader
 _relay_aktiv = True
 
@@ -1108,10 +1109,14 @@ def _dc_relay_steg():
     with _hub_lock:
         devices = dict(_node_devices)
 
+    # Debug-statistikk for ein iterasjon
+    stats = {"total": 0, "ingen_dev": 0, "ingen_data": 0, "lest": 0, "overload": 0, "feil": 0}
+
     for hub_idx, entry in enumerate(_kanal_mapping):
         nid, remote_idx, scale, offset, kanal_type = entry
         if hub_idx >= len(hub_channels) or not nid:
             continue
+        stats["total"] += 1
 
         # Modbus-kanalar: hent cached verdi frå manager
         if kanal_type == "modbus":
@@ -1129,11 +1134,13 @@ def _dc_relay_steg():
             else:
                 dc_val = physical_val
             _safe_set(hub_channels[hub_idx], "DC", dc_val)
+            stats["lest"] += 1
             continue
 
         # openDAQ-kanalar: les via StreamReader
         dev = devices.get(nid)
         if not dev:
+            stats["ingen_dev"] += 1
             continue
 
         try:
@@ -1153,31 +1160,46 @@ def _dc_relay_steg():
                 try:
                     _relay_readers[key] = daq.StreamReader(sig)
                 except Exception:
+                    stats["feil"] += 1
                     continue
 
             reader = _relay_readers[key]
             count = reader.available_count
             if count > 50000:
                 _relay_readers.pop(key, None)
+                stats["overload"] += 1
                 continue
             if count > 0:
                 chunk = min(count, 1000)
                 values = reader.read(chunk)
                 if values is not None and len(values) > 0:
                     physical_val = float(values[-1])
-                    # Skaler til intern DC-range: DC = (physical - offset) / scale
                     if scale != 0:
                         dc_val = (physical_val - offset) / scale
                     else:
                         dc_val = physical_val
                     _safe_set(hub_channels[hub_idx], "DC", dc_val)
+                    stats["lest"] += 1
                 if count > chunk:
                     try:
                         reader.skip(count - chunk)
                     except Exception:
                         pass
+            else:
+                stats["ingen_data"] += 1
         except Exception:
-            pass
+            stats["feil"] += 1
+
+    # Logg statistikk kvar 20. iterasjon (~10 sek ved 0.5s sleep)
+    global _dc_relay_teller
+    try:
+        _dc_relay_teller += 1
+    except NameError:
+        _dc_relay_teller = 1
+    if _dc_relay_teller % 20 == 1:
+        log.info(f"  DC-relay stats: total={stats['total']} lest={stats['lest']} "
+                 f"ingen_data={stats['ingen_data']} ingen_dev={stats['ingen_dev']} "
+                 f"overload={stats['overload']} feil={stats['feil']}")
 
 
 def _koble_til_node(node: FjernNode) -> bool:
