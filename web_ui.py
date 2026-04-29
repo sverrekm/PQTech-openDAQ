@@ -1459,17 +1459,36 @@ def api_ingest():
         _ingest_stats["totalt"] += 1
         _ingest_stats["siste_ts"] = batch["mottatt_ts"]
 
-    # Injiser verdiar i hub si openDAQ-pipeline (DC-relay) så DewesoftX
-    # ser pushed data. node_namn brukast som primær matche-nøkkel sidan
-    # push-konfig.node_id ofte avvikar frå hub_konfig si auto-genererte id.
+    # Injiser verdiar i hub si openDAQ-pipeline (DC-relay for skalarar,
+    # DataPacket.send_packet for sample-arrays). node_namn er primær
+    # matche-nøkkel sidan push-konfig.node_id ofte avvikar frå hub-id.
     injisert = 0
     if HUB_MODUS and kanalar:
+        # Sjekk om vi har sample-arrays (raw mode) eller skalarar
+        has_arrays = any(isinstance(v, list) for v in kanalar.values())
+        sample_rate = int(data.get("sample_rate", 20000))
         try:
             from hub_server import injiser_push_verdiar
-            # Prøv namn først, så id som fallback
-            injisert = injiser_push_verdiar(node_namn, kanalar)
-            if injisert == 0:
-                injisert = injiser_push_verdiar(node_id, kanalar)
+            if has_arrays:
+                from hub_server import injiser_push_array
+                # Skalar-deler først (DC-relay)
+                skalar = {k: v for k, v in kanalar.items()
+                          if not isinstance(v, list)}
+                if skalar:
+                    injisert = injiser_push_verdiar(node_namn, skalar)
+                    if injisert == 0:
+                        injisert = injiser_push_verdiar(node_id, skalar)
+                # Array-deler (raw waveform)
+                arrays = {k: v for k, v in kanalar.items()
+                          if isinstance(v, list)}
+                arr_inj = injiser_push_array(node_namn, arrays, sample_rate)
+                if arr_inj == 0:
+                    arr_inj = injiser_push_array(node_id, arrays, sample_rate)
+                injisert += arr_inj
+            else:
+                injisert = injiser_push_verdiar(node_namn, kanalar)
+                if injisert == 0:
+                    injisert = injiser_push_verdiar(node_id, kanalar)
         except ImportError:
             pass
         except Exception:

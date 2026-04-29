@@ -37,7 +37,11 @@ class PushKonfig:
     # 'siste' = siste sample (god for DC, temp, low-rate)
     # 'rms'   = RMS av siste pakke (god for AC-spenning, AC-straum)
     # 'snitt' = gjennomsnitt
+    # 'raw'   = rå sample-array per kanal (krev sample_rate + array på hub-side)
     verdi_type: str = "siste"
+    # Rå-modus: tal samples å sende per batch (berre brukt når verdi_type='raw')
+    samples_per_pakke: int = 2000
+    sample_rate: int = 20000
 
     def __post_init__(self):
         if not self.node_id:
@@ -58,6 +62,8 @@ def les_push_konfig() -> PushKonfig:
                 accept_ingest=bool(data.get("accept_ingest", False)),
                 ingest_token=str(data.get("ingest_token", "")).strip(),
                 verdi_type=str(data.get("verdi_type", "siste")),
+                samples_per_pakke=int(data.get("samples_per_pakke", 2000)),
+                sample_rate=int(data.get("sample_rate", 20000)),
             )
             log.info(f"Lasta push-konfig: parent={konfig.parent_url or '(ingen)'}, "
                      f"node_id={konfig.node_id}, push_hz={konfig.push_hz}, "

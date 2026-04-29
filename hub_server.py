@@ -521,7 +521,11 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
     # For kvar kanal i push: finn matching hub-kanal med same node_id + namn.
     # Pusher kan sende anten 'AI 0' (openDAQ-namn) eller 'kanal_0' (sirius-
     # driver-keys). Vi prøver begge og ein index-baserte fallback.
+    # NB: skalar-verdi (int/float) er DC-relay. Array-verdi er raw-injeksjon
+    # (handtert i injiser_push_array, kalla frå /api/ingest separat).
     for ch_namn, verdi in kanalar.items():
+        if isinstance(verdi, list):
+            continue  # array-verdi handterast av injiser_push_array
         if not isinstance(verdi, (int, float)):
             continue
         # Bygg liste over namn å prøve
@@ -562,6 +566,111 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
             except Exception:
                 pass
             break  # gå til neste kanal i push-batch
+    return oppdatert
+
+
+def injiser_push_array(node_id_eller_namn: str, kanalar: dict,
+                       sample_rate: int = 20000) -> int:
+    """Injiser sample-arrays via DataPacket.send_packet — gir DewesoftX
+    rå waveform-data via push.
+
+    Args:
+        node_id_eller_namn: matcher mot FjernNode.id eller FjernNode.namn
+        kanalar: dict {kanal_namn: list[float]} med samples
+        sample_rate: sample rate (Hz) — for tick-delta-berekning
+
+    Returns:
+        Antal kanalar som vart oppdatert.
+    """
+    if not kanalar or not _instance:
+        return 0
+    if not _pakett_klar:
+        # DataPacket-injeksjon ikkje initialisert (eller fallback til DC-relay)
+        return 0
+    if not _kanal_signals:
+        return 0
+
+    import opendaq as daq
+    import ctypes
+
+    # Finn target-node
+    target_node = None
+    nid_norm = node_id_eller_namn.lower().strip()
+    try:
+        for n in _hub_konfig.nodar:
+            if n.id == node_id_eller_namn or n.namn == node_id_eller_namn:
+                target_node = n
+                break
+            if n.namn.lower().strip() == nid_norm:
+                target_node = n
+                break
+    except Exception:
+        return 0
+    if target_node is None:
+        return 0
+
+    oppdatert = 0
+    for ch_namn, samples in kanalar.items():
+        if not isinstance(samples, list) or len(samples) == 0:
+            continue
+        # Map til lokal hub-kanal-indeks
+        try_namn = [ch_namn]
+        if ch_namn.startswith("kanal_"):
+            try:
+                idx = int(ch_namn.split("_")[1])
+                try_namn.append(f"AI {idx}")
+            except (ValueError, IndexError):
+                pass
+        elif ch_namn.startswith("AI "):
+            try:
+                idx = int(ch_namn[3:])
+                try_namn.append(f"kanal_{idx}")
+            except ValueError:
+                pass
+
+        for hub_idx, fk in enumerate(_fjern_kanal_info):
+            if fk.get("kanal_type") != "opendaq":
+                continue
+            if fk.get("node_id") != target_node.id:
+                continue
+            if fk.get("namn") not in try_namn:
+                continue
+            if hub_idx >= len(_kanal_signals) or hub_idx >= len(_dom_signals):
+                continue
+            _, sig = _kanal_signals[hub_idx]
+            dom_sig = _dom_signals[hub_idx]
+            val_desc = _val_descs[hub_idx]
+            dom_desc = _dom_descs[hub_idx]
+            if sig is None or dom_sig is None or val_desc is None:
+                continue
+
+            try:
+                # Konverter fysisk → intern verdi (PostScaling rear-konvertering)
+                _, _, scale, offset, _ = _kanal_mapping[hub_idx]
+                if scale == 0:
+                    scale = 1.0
+
+                n = len(samples)
+                tick_offset = (_total_samples[hub_idx] * _tick_delta)
+                time_pkt = daq.DataPacket(dom_desc, n, tick_offset)
+                val_pkt = daq.DataPacketWithDomain(time_pkt, val_desc, n, 0)
+
+                arr = (ctypes.c_double * n).from_address(int(val_pkt.raw_data))
+                for j in range(n):
+                    v = (samples[j] - offset) / scale
+                    if v > 10.0:
+                        v = 10.0
+                    elif v < -10.0:
+                        v = -10.0
+                    arr[j] = v
+
+                dom_sig.send_packet(time_pkt)
+                sig.send_packet(val_pkt)
+                _total_samples[hub_idx] += n
+                oppdatert += 1
+            except Exception as e:
+                log.warning(f"  injiser_push_array Ch{hub_idx} ({ch_namn}): {e}")
+            break
     return oppdatert
 
 

@@ -86,6 +86,12 @@ class OpenDAQBro:
         self._NULLPUNKT_BLOKKER = 40  # ~2s ved 20 pkt/sek
         self._skalering_callback = None  # Callback(skala, offset, nullpunkt) etter kalibrering
         self._siste_verdiar = {}    # Siste verdi per kanal for live-visning i web UI
+        # Sample-ringbuffer per kanal — bruk for rå-data push.
+        # Dict {kanal_namn: deque[float]} med maxlen ~5 sek × sample_rate.
+        # Pusher tar siste N samples kvar 100ms.
+        import collections as _coll
+        self._sample_ringbuffer = _coll.defaultdict(
+            lambda: _coll.deque(maxlen=200000))  # 10s ved 20kHz
         self._data_teller = 0       # Totalt antal datapunkt motteke
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
         self._sirius_ts = 0.0       # Tidsstempel for siste SIRIUS-data
@@ -959,6 +965,13 @@ class OpenDAQBro:
                         "kjelde": "sirius",
                     }
 
+                # Append rå sample-array til ringbuffer (for push-av-rå-data).
+                # Pusher har name-mapping (kanal_N → namn), så vi brukar key.
+                try:
+                    self._sample_ringbuffer[key].extend(fdata.tolist())
+                except Exception:
+                    pass
+
                 # Send reelle data som DataPacket via openDAQ-signal
                 if (self._pakett_klar and
                         kanal_idx < len(self._dom_signal) and
@@ -1124,6 +1137,24 @@ class OpenDAQBro:
                 self._total_samples[idx] += blokk_storleik
             except Exception:
                 pass  # Stille feil — idle-data er ikkje kritisk
+
+    def hent_sample_buffer(self, max_samples: int = 2000) -> dict:
+        """Returner siste N samples per kanal frå ringbufferen og fjern dei.
+
+        Brukt av hub_pusher i 'raw' verdi_type-modus. Kvar kanal får
+        opp til `max_samples` siste samples (FIFO — eldste først).
+        Returnerer {kanal_key: list[float]}.
+        """
+        result = {}
+        for k, ringbuf in list(self._sample_ringbuffer.items()):
+            n = min(len(ringbuf), max_samples)
+            if n == 0:
+                continue
+            samples = []
+            for _ in range(n):
+                samples.append(ringbuf.popleft())
+            result[k] = samples
+        return result
 
     def hent_siste_verdiar(self) -> dict:
         """Returner siste kanal-verdiar for web UI live-visning."""
