@@ -157,17 +157,29 @@ class HubPusher:
 
                 # Filtrer: numeriske verdiar, ikkje debug-felt, og hopp over
                 # SIRIUS-kanalar markert inaktiv i kanal_konfig.
-                # MQTT/Modbus-kanalar finst ikkje i kanal_status og slepp gjennom.
+                # opendaq_bro._siste_verdiar har struktur:
+                #   - dict {snitt, rms, topp, siste, antall, kjelde} for SIRIUS/MQTT
+                #   - float for enkle verdiar
+                # Vi sender 'siste'-feltet som primær verdi.
                 status = self._kanal_status or {}
                 kanalar = {}
                 for k, v in verdiar.items():
                     if k.startswith("_"):
                         continue
-                    if not isinstance(v, (int, float)):
-                        continue
                     if status.get(k, True) is False:
                         continue  # eksplisitt inaktiv i kanal_konfig
-                    kanalar[k] = v
+                    if isinstance(v, dict):
+                        # Hent 'siste' eller 'snitt' frå dict-strukturen
+                        verdi = v.get("siste")
+                        if verdi is None:
+                            verdi = v.get("snitt")
+                        if verdi is None:
+                            continue
+                        if not isinstance(verdi, (int, float)):
+                            continue
+                        kanalar[k] = verdi
+                    elif isinstance(v, (int, float)):
+                        kanalar[k] = v
 
                 # Send alltid (også tomme kanalar = heartbeat) — gir hub
                 # synlegheit av at noden er online sjølv før SIRIUS er klar.
