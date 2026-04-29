@@ -603,8 +603,16 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
                     # Fallback: DC-property (acqLoop generere)
                     _safe_set(hub_channels[hub_idx], "DC", internal_v)
                     oppdatert += 1
-            except Exception:
-                pass
+            except Exception as e:
+                # Log første feil per kanal for diagnose
+                global _injiser_feil_logga
+                try:
+                    _injiser_feil_logga
+                except NameError:
+                    _injiser_feil_logga = set()
+                if hub_idx not in _injiser_feil_logga:
+                    log.warning(f"injiser_push_verdiar Ch{hub_idx} ({ch_namn}): {type(e).__name__}: {e}")
+                    _injiser_feil_logga.add(hub_idx)
             break  # gå til neste kanal i push-batch
     return oppdatert
 
