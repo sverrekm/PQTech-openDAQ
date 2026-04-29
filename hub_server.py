@@ -1371,46 +1371,12 @@ def hent_hub_kanalar() -> list:
         ch_namn = fk.get("namn", "ukjent")
         sig_id = fk.get("sig_id", f"{node_id}_{fk.get('ch_idx', 0)}")
 
-        # Les live verdi via cached StreamReader
+        # Live verdi for openDAQ-kanal vert primært tatt frå data-relay-tråden
+        # sin DC-relay (sjå _les_fjern_verdiar). Vi gjer IKKJE StreamReader-
+        # avlesing her — det blokkerer Flask-tråden ved overlasta Tailscale-
+        # tilkoblingar (åpne 100k+ samples i buffer). UI viser verdi gjennom
+        # /api/kanalar/live i staden, som kjem frå opendaq_bro.
         verdi = None
-        reader_key = (node_id, sig_id)
-        reader = _kanal_readers.get(reader_key)
-        if reader is None:
-            # Lazy opprett av reader — trur device er online
-            device = dict(nodar_snapshot).get(node_id)
-            if device is not None:
-                try:
-                    sig = device.channels[fk.get("ch_idx", 0)].signals[0]
-                    reader = daq.StreamReader(sig)
-                    _kanal_readers[reader_key] = reader
-                except Exception:
-                    reader = None
-        if reader is not None:
-            try:
-                count = reader.available_count
-                # Streaming-overload: hub har ikkje konsumert raskt nok
-                # (vanleg når Tailscale DERP er treig). Drop reader så han
-                # vert lazy-oppretta neste gong, og hopper denne kanalen.
-                if count > 50000:
-                    log.warning(
-                        f"hent_hub_kanalar: reader overload ({count} samples) "
-                        f"for {node_id}/{ch_namn} — invalidating")
-                    _kanal_readers.pop(reader_key, None)
-                elif count > 0:
-                    # Cap read til 1000 samples — vi treng berre siste verdi.
-                    # Større read() blokkerer pga minne-allokering + IO.
-                    chunk = min(count, 1000)
-                    values = reader.read(chunk)
-                    if values is not None and len(values) > 0:
-                        verdi = float(values[-1])
-                    # Skip resten så bufferen ikkje hopar seg opp
-                    if count > chunk:
-                        try:
-                            reader.skip(count - chunk)
-                        except Exception:
-                            pass
-            except Exception:
-                _kanal_readers.pop(reader_key, None)
 
         auto_range_low = fk.get("range_low", -5.0)
         auto_range_high = fk.get("range_high", 5.0)
