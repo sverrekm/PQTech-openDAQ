@@ -1368,10 +1368,27 @@ def hent_hub_kanalar() -> list:
         if reader is not None:
             try:
                 count = reader.available_count
-                if count > 0:
-                    values = reader.read(count)
+                # Streaming-overload: hub har ikkje konsumert raskt nok
+                # (vanleg når Tailscale DERP er treig). Drop reader så han
+                # vert lazy-oppretta neste gong, og hopper denne kanalen.
+                if count > 50000:
+                    log.warning(
+                        f"hent_hub_kanalar: reader overload ({count} samples) "
+                        f"for {node_id}/{ch_namn} — invalidating")
+                    _kanal_readers.pop(reader_key, None)
+                elif count > 0:
+                    # Cap read til 1000 samples — vi treng berre siste verdi.
+                    # Større read() blokkerer pga minne-allokering + IO.
+                    chunk = min(count, 1000)
+                    values = reader.read(chunk)
                     if values is not None and len(values) > 0:
                         verdi = float(values[-1])
+                    # Skip resten så bufferen ikkje hopar seg opp
+                    if count > chunk:
+                        try:
+                            reader.skip(count - chunk)
+                        except Exception:
+                            pass
             except Exception:
                 _kanal_readers.pop(reader_key, None)
 
