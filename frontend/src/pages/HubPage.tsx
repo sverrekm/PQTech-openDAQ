@@ -68,7 +68,9 @@ export default function HubPage() {
     )
   }
 
-  const hubAktiv = hub?.aktiv !== false
+  // Hub-status: 'aktiv' er sant i både direkte- og hub-modus (begge har
+  // openDAQ-server). Modus-feltet er den autoritative kjelda.
+  const hubAktiv = hub?.modus === 'hub'
 
   return (
     <>
