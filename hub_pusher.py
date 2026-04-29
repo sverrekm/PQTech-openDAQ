@@ -35,6 +35,23 @@ except ImportError:
 
 from push_konfig import PushKonfig, les_push_konfig
 
+# Cache av aktiv-status per kanal — refresh maks éin gong per N sek for å
+# unngå fil-IO på kvar push-iterasjon.
+_AKTIV_CACHE_TTL = 5.0
+
+
+def _hent_kanal_status() -> Optional[dict]:
+    """Returner dict {kanal_namn: aktiv-bool} frå kanal_konfig (SIRIUS ADC).
+
+    None ved feil → fail-open (alle slepp gjennom). MQTT/Modbus-kanalar
+    finst ikkje her, så dei vert ikkje filtrert ut av denne dict-en.
+    """
+    try:
+        from kanal_konfig import les_konfig
+        return {kk.namn: kk.aktiv for kk in les_konfig()}
+    except Exception:
+        return None
+
 log = logging.getLogger('hub_pusher')
 
 
@@ -59,6 +76,9 @@ class HubPusher:
         self._siste_feilmelding: str = ""
         self._siste_send_ts: float = 0.0
         self._siste_latens_ms: float = 0.0
+        # Cache av {kanal_namn: aktiv} — refresh kvar _AKTIV_CACHE_TTL sek
+        self._kanal_status: Optional[dict] = None
+        self._kanal_status_ts: float = 0.0
 
     @property
     def aktiv(self) -> bool:
@@ -129,10 +149,25 @@ class HubPusher:
             t_start = time.time()
             try:
                 verdiar = self._hent_verdiar() or {}
-                # Fjern interne debug-felt frå payload
-                kanalar = {k: v for k, v in verdiar.items()
-                           if not k.startswith("_")
-                           and isinstance(v, (int, float))}
+
+                # Refresh kanal-status (aktiv-flag) periodisk
+                if t_start - self._kanal_status_ts > _AKTIV_CACHE_TTL:
+                    self._kanal_status = _hent_kanal_status()
+                    self._kanal_status_ts = t_start
+
+                # Filtrer: numeriske verdiar, ikkje debug-felt, og hopp over
+                # SIRIUS-kanalar markert inaktiv i kanal_konfig.
+                # MQTT/Modbus-kanalar finst ikkje i kanal_status og slepp gjennom.
+                status = self._kanal_status or {}
+                kanalar = {}
+                for k, v in verdiar.items():
+                    if k.startswith("_"):
+                        continue
+                    if not isinstance(v, (int, float)):
+                        continue
+                    if status.get(k, True) is False:
+                        continue  # eksplisitt inaktiv i kanal_konfig
+                    kanalar[k] = v
 
                 # Send alltid (også tomme kanalar = heartbeat) — gir hub
                 # synlegheit av at noden er online sjølv før SIRIUS er klar.
