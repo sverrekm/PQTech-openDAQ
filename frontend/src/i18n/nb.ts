@@ -241,6 +241,8 @@ export const nb: Record<string, string> = {
   'Disable Hub mode': 'Deaktiver Hub-modus',
   'Connected nodes': 'Tilkobla nodar',
   'Total channels': 'Totalt kanalar',
+  'Nodes': 'Nodar',
+  'Open UI': 'Opne UI',
   'Hub IP': 'Hub IP',
   'Hub channels (table)': 'Hub-kanalar',
   'Hub log': 'Hub-logg',

@@ -10,12 +10,14 @@ Apne: http://<pi-ip>:8080
 """
 
 import os
+import re
 import subprocess
 import socket
 import threading
 import glob as glob_mod
 
-from flask import Flask, jsonify, request, session, send_file
+import requests as _http_proxy
+from flask import Flask, jsonify, request, session, send_file, redirect, Response
 
 import usbip_manager
 import tailscale_manager
@@ -202,6 +204,119 @@ def hent_status():
         "antall_maalinger": antall_maalinger,
         "autonom": autonom,
     }
+
+
+# --- Node-proxy: hub forwardar HTTP til ein remote node si web-UI ---
+#
+# Bruksmåte: brukar opnar https://opendac.pqtech.no/node-proxy/<node_id>/
+# Hub-session må vere aktiv. Hub forwardar HTTP-call til
+# http://<node-tailscale-ip>:8080/... over Tailscale. Browser ser proxy-URL,
+# node ser hub som klient.
+#
+# Node har eigen login — brukar må logge inn på node sin web-UI separat
+# (cookies blir forwarded så det held over reload).
+
+_NODE_PROXY_PORT = int(os.environ.get("NODE_PROXY_PORT", "8080"))
+_NODE_PROXY_HOP_HEADERS = {
+    "content-length", "content-encoding", "transfer-encoding",
+    "connection", "keep-alive", "upgrade", "proxy-authorization",
+    "proxy-authenticate", "te", "trailers",
+}
+
+
+def _hent_node_for_proxy(node_id: str):
+    """Finn fjern-node frå hub-konfig. Returnerer None hvis ikkje funne."""
+    try:
+        konfig = les_hub_konfig()
+    except Exception:
+        return None
+    for n in konfig.nodar:
+        if n.id == node_id:
+            return n
+    return None
+
+
+@app.route("/node-proxy/<node_id>/", defaults={"sub_path": ""},
+           methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+@app.route("/node-proxy/<node_id>/<path:sub_path>",
+           methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+def node_proxy(node_id, sub_path):
+    """Reverse-proxy til node si web-UI.
+
+    Hub-session krevst for å nå denne ruta. Trafikken blir forwarda til
+    http://<node-adresse>:8080/<sub_path> via Tailscale.
+    """
+    if "brukar" not in session:
+        # Send tilbake til hub-login (med return-URL)
+        return redirect("/")
+
+    node = _hent_node_for_proxy(node_id)
+    if node is None:
+        return jsonify({"feil": f"Node {node_id} finst ikkje i hub-konfig"}), 404
+
+    # Bruk berre IP-delen av node.adresse (uten port)
+    node_host = str(node.adresse).split(":")[0].strip()
+    if not node_host:
+        return jsonify({"feil": "Node manglar IP-adresse"}), 502
+
+    target_url = f"http://{node_host}:{_NODE_PROXY_PORT}/{sub_path}"
+
+    # Bygg forward-request
+    fwd_headers = {k: v for k, v in request.headers
+                   if k.lower() not in _NODE_PROXY_HOP_HEADERS
+                   and k.lower() != "host"}
+    # Set X-Forwarded-* slik at noden veit kva proxy-prefiks å bruke
+    fwd_headers["X-Forwarded-Host"] = request.host
+    fwd_headers["X-Forwarded-Proto"] = request.scheme
+    fwd_headers["X-Forwarded-Prefix"] = f"/node-proxy/{node_id}"
+
+    try:
+        upstream = _http_proxy.request(
+            method=request.method,
+            url=target_url,
+            headers=fwd_headers,
+            data=request.get_data(),
+            cookies=request.cookies,
+            params=request.query_string,
+            allow_redirects=False,
+            stream=True,
+            timeout=30.0,
+        )
+    except _http_proxy.exceptions.RequestException as e:
+        return jsonify({"feil": f"Node ikkje nåbar: {e}"}), 502
+
+    # Bygg respons med headers (filtrer bort hop-by-hop)
+    resp_headers = []
+    for k, v in upstream.raw.headers.items():
+        if k.lower() in _NODE_PROXY_HOP_HEADERS:
+            continue
+        # Rewrite Location-headers så redirect held seg innanfor proxy
+        if k.lower() == "location" and v.startswith("/"):
+            v = f"/node-proxy/{node_id}{v}"
+        resp_headers.append((k, v))
+
+    return Response(upstream.content, status=upstream.status_code,
+                    headers=resp_headers)
+
+
+@app.before_request
+def _proxy_assets_rewrite():
+    """Frontend laster /assets/foo.js som absolutt path. Når browser er
+    inni node-proxy, peikar Referer på /node-proxy/<id>/ — då redirect
+    /assets/* og andre rot-stiar til riktig proxy-prefiks.
+    """
+    if request.method != "GET":
+        return None
+    if request.path.startswith("/node-proxy/"):
+        return None
+    if not (request.path.startswith("/assets/")
+            or request.path in ("/favicon.svg", "/favicon.ico", "/vite.svg")):
+        return None
+    referer = request.headers.get("Referer", "")
+    m = re.search(r"/node-proxy/([A-Za-z0-9_-]+)/", referer)
+    if not m:
+        return None
+    return redirect(f"/node-proxy/{m.group(1)}{request.path}", code=302)
 
 
 # --- API ---
