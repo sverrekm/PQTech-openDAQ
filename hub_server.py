@@ -512,7 +512,20 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
         return 0
 
     # Bruk DataPacket-injeksjon hvis aktiv, ellers fall tilbake til DC-relay
-    use_datapacket = _pakett_klar and _kanal_signals
+    use_datapacket = _pakett_klar and bool(_kanal_signals)
+    # Debug-log éin gong per node for å verifisere modus
+    global _injiser_log_one
+    try:
+        _injiser_log_one
+    except NameError:
+        _injiser_log_one = set()
+    if target_node.id not in _injiser_log_one:
+        log.info(f"injiser_push_verdiar: node={target_node.namn} "
+                 f"use_datapacket={use_datapacket} _pakett_klar={_pakett_klar} "
+                 f"len(_kanal_signals)={len(_kanal_signals)} "
+                 f"len(_fjern_kanal_info)={len(_fjern_kanal_info)} "
+                 f"first_kanaler={list(kanalar.keys())[:3]}")
+        _injiser_log_one.add(target_node.id)
 
     # Hent hub-channel-liste éin gong
     try:
