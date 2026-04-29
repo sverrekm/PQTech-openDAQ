@@ -22,6 +22,8 @@ import os
 import time
 import logging
 import threading
+
+import numpy as np
 from datetime import datetime
 
 from hub_konfig import (
@@ -592,9 +594,14 @@ def injiser_push_verdiar(node_id_eller_namn: str, kanalar: dict) -> int:
                         time_pkt = daq.DataPacket(dom_desc, 1, tick_offset)
                         val_pkt = daq.DataPacketWithDomain(
                             time_pkt, val_desc, 1, 0)
-                        arr = (ctypes.c_double * 1).from_address(
-                            int(val_pkt.raw_data))
-                        arr[0] = internal_v
+                        # np.frombuffer fungerer betre enn ctypes for openDAQ-binding
+                        try:
+                            buf = np.frombuffer(val_pkt.raw_data, dtype=np.float64)
+                            buf[0] = internal_v
+                        except (ValueError, TypeError):
+                            arr = (ctypes.c_double * 1).from_address(
+                                int(val_pkt.raw_data))
+                            arr[0] = internal_v
                         dom_sig.send_packet(time_pkt)
                         sig.send_packet(val_pkt)
                         _total_samples[hub_idx] += 1
@@ -703,14 +710,22 @@ def injiser_push_array(node_id_eller_namn: str, kanalar: dict,
                 time_pkt = daq.DataPacket(dom_desc, n, tick_offset)
                 val_pkt = daq.DataPacketWithDomain(time_pkt, val_desc, n, 0)
 
-                arr = (ctypes.c_double * n).from_address(int(val_pkt.raw_data))
-                for j in range(n):
-                    v = (samples[j] - offset) / scale
-                    if v > 10.0:
-                        v = 10.0
-                    elif v < -10.0:
-                        v = -10.0
-                    arr[j] = v
+                # Konverter sample-array til intern-skala (clamp [-10, 10])
+                samples_np = np.asarray(samples, dtype=np.float64)
+                if scale != 0:
+                    internal_arr = (samples_np - offset) / scale
+                else:
+                    internal_arr = samples_np
+                np.clip(internal_arr, -10.0, 10.0, out=internal_arr)
+
+                # Skriv inn i pakke-bufferen via numpy (raskt + bug-fri)
+                try:
+                    buf = np.frombuffer(val_pkt.raw_data, dtype=np.float64)
+                    np.copyto(buf, internal_arr[:n])
+                except (ValueError, TypeError):
+                    arr = (ctypes.c_double * n).from_address(int(val_pkt.raw_data))
+                    for j in range(n):
+                        arr[j] = float(internal_arr[j])
 
                 dom_sig.send_packet(time_pkt)
                 sig.send_packet(val_pkt)
