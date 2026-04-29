@@ -103,8 +103,10 @@ class HubPusher:
     """
 
     def __init__(self, hent_verdiar_fn: Callable[[], dict],
-                 konfig: Optional[PushKonfig] = None):
+                 konfig: Optional[PushKonfig] = None,
+                 hent_samples_fn: Optional[Callable[[int], dict]] = None):
         self._hent_verdiar = hent_verdiar_fn
+        self._hent_samples = hent_samples_fn
         self._konfig = konfig if konfig is not None else les_push_konfig()
         self._stopp = threading.Event()
         self._traad: Optional[threading.Thread] = None
@@ -188,21 +190,13 @@ class HubPusher:
 
         # Sjekk om vi skal pushe rå sample-arrays i staden for skalare verdiar
         is_raw_mode = (self._konfig.verdi_type == "raw")
-        # Hent referanse til opendaq_bro for raw-modus (treng hent_sample_buffer)
-        get_samples_fn = None
+        get_samples_fn = self._hent_samples if is_raw_mode else None
         if is_raw_mode:
-            try:
-                # Antas at hent_verdiar_fn er bunden til opendaq_bro-instans;
-                # vi kan gå via __self__ for å nå hent_sample_buffer
-                bro = getattr(self._hent_verdiar, "__self__", None)
-                if bro is not None and hasattr(bro, "hent_sample_buffer"):
-                    get_samples_fn = bro.hent_sample_buffer
-                    log.info("Push-pusher: rå-modus aktiv (sample-arrays)")
-            except Exception:
-                pass
-            if get_samples_fn is None:
-                log.warning("Push-pusher: rå-modus krevd, men hent_sample_buffer "
-                            "ikkje tilgjengeleg — fell tilbake til skalar")
+            if get_samples_fn is not None:
+                log.info("Push-pusher: rå-modus aktiv (sample-arrays)")
+            else:
+                log.warning("Push-pusher: rå-modus krevd, men hent_samples_fn "
+                            "ikkje gitt — fell tilbake til skalar")
 
         while not self._stopp.is_set():
             t_start = time.time()

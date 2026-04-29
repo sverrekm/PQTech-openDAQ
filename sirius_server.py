@@ -758,7 +758,16 @@ def _start_hub_pusher():
         except Exception:
             return {}
 
-    _hub_pusher = HubPusher(hent_verdiar_fn=_hent, konfig=konfig)
+    def _hent_samples(n):
+        if _opendaq_bro is None:
+            return {}
+        try:
+            return _opendaq_bro.hent_sample_buffer(n)
+        except Exception:
+            return {}
+
+    _hub_pusher = HubPusher(hent_verdiar_fn=_hent, konfig=konfig,
+                            hent_samples_fn=_hent_samples)
     _hub_pusher.start()
 
 
