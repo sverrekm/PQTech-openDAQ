@@ -71,6 +71,10 @@ services:
       #- OPENDAQ_MAC=
       # OPC-UA annonsert IP — sett til container-IP (macvlan)
       - OPENDAQ_IP=${CONTAINER_IP:-192.168.1.161}
+      # Device-indeks for daqref://device{N} — gir unik localId per node
+      # (unngår "Device with the same local ID already exists" når hub
+      # koblar til fleire nodar samtidig). Sett 0, 1, 2, ... per node.
+      - OPENDAQ_DEVICE_IDX=${OPENDAQ_DEVICE_IDX:-0}
       # Push-token: nodar som POST-ar til /api/ingest må bruke dette tokenet
       # i Authorization: Bearer-header. Tom = endepunktet returnerer 503.
       # Kan òg setjast i /data/konfig/push.json (ingest_token-feltet).
