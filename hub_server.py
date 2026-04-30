@@ -862,20 +862,11 @@ def _init_data_injeksjon():
     if n_desc > 0:
         _send_descriptor_events()
 
-    # Aktiver DataPacket-injeksjon (send_packet) for å støtte både skalar-
-    # push (1 sample per kanal) og rå-data push (2000 samples). acqLoop
-    # vert deaktivert via toggle-fil så den ikkje interleavar.
-    if n_desc > 0:
-        _pakett_klar = True
-        try:
-            with open(_ACQLOOP_TOGGLE, "w") as f:
-                f.write("disabled")
-            log.info("  acqLoop DEAKTIVERT — DataPacket-injeksjon overtek")
-        except Exception as e:
-            log.warning(f"  Kunne ikkje skrive {_ACQLOOP_TOGGLE}: {e}")
-        log.info(f"  Brukar DataPacket-injeksjon (send_packet for skalar + rå-data)")
-    else:
-        log.info(f"  Brukar DC relay (acqLoop genererer data, DC styrer verdiar)")
+    # Behold DC-relay som primær modus (acqLoop genererer streaming-pakker
+    # som DewesoftX kan subskribere på). injiser_push_verdiar set DC.
+    # injiser_push_array (rå-data) brukar send_packet på toppen — det vil
+    # leverast hvis acqLoop ikkje overstyrer per-kanal-basis.
+    log.info(f"  Brukar DC relay (acqLoop genererer data, DC styrer verdiar)")
 
 
 def _bygg_post_scaling(scale_factor, offset_val):
