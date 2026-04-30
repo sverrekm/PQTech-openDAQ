@@ -1652,12 +1652,28 @@ def hent_hub_kanalar() -> list:
         ch_namn = fk.get("namn", "ukjent")
         sig_id = fk.get("sig_id", f"{node_id}_{fk.get('ch_idx', 0)}")
 
-        # Live verdi for openDAQ-kanal vert primært tatt frå data-relay-tråden
-        # sin DC-relay (sjå _les_fjern_verdiar). Vi gjer IKKJE StreamReader-
-        # avlesing her — det blokkerer Flask-tråden ved overlasta Tailscale-
-        # tilkoblingar (åpne 100k+ samples i buffer). UI viser verdi gjennom
-        # /api/kanalar/live i staden, som kjem frå opendaq_bro.
+        # Live verdi: finn hub-kanal-idx via _fjern_kanal_info-posisjon, les
+        # DC-property og konverter intern → fysisk via scale/offset.
         verdi = None
+        try:
+            hub_idx_lokal = None
+            for hi, mapping in enumerate(_kanal_mapping):
+                m_nid, m_idx, _, _, m_type = mapping
+                if (m_type == "opendaq" and m_nid == node_id
+                        and m_idx == fk.get("ch_idx", 0)):
+                    hub_idx_lokal = hi
+                    break
+            if hub_idx_lokal is not None:
+                # Hub-kanaler er i samme rekkefølge som _kanal_mapping
+                if _instance is not None:
+                    chs = list(_instance.channels)
+                    if hub_idx_lokal < len(chs):
+                        dc = chs[hub_idx_lokal].get_property_value("DC")
+                        if dc is not None:
+                            _, _, scale, offset, _ = _kanal_mapping[hub_idx_lokal]
+                            verdi = float(dc) * scale + offset
+        except Exception:
+            pass
 
         auto_range_low = fk.get("range_low", -5.0)
         auto_range_high = fk.get("range_high", 5.0)
