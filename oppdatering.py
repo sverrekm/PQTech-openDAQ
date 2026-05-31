@@ -99,13 +99,19 @@ def lagre_oppdater_konfig(repo_url: str, branch: str = "main",
 # --- Forge-deteksjon + API-hjelparar ---
 
 def _forge(host: str) -> str:
-    """github.com -> github, *gitea* -> gitea, elles -> gitlab (sjoelvhosta)."""
+    """Forge-type ut frå vertsnamn. Kan overstyrast med env OPPDATER_FORGE.
+
+    github.com -> github, *gitlab* -> gitlab, elles -> gitea (default).
+    git.pqtech.no er Gitea, difor er gitea standard for ukjende vertar."""
+    overstyr = os.environ.get("OPPDATER_FORGE", "").strip().lower()
+    if overstyr in ("github", "gitlab", "gitea"):
+        return overstyr
     h = (host or "").lower()
     if "github.com" in h:
         return "github"
-    if "gitea" in h:
-        return "gitea"
-    return "gitlab"
+    if "gitlab" in h:
+        return "gitlab"
+    return "gitea"
 
 
 def _eigar_repo(repo_url: str):
