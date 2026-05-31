@@ -2,14 +2,14 @@
 """
 Oppdateringsfunksjon - Hent nyaste versjon fraa Git-tarball
 ===========================================================
-Lastar ned tarball fraa eit Gitea- (eller GitHub-) repo, pakkar ut, og
-erstattar Python-filer + frontend/dist i /app/. Konteineren restartar seg
+Lastar ned tarball fraa eit GitLab- (eller GitHub-/Gitea-) repo, pakkar ut,
+og erstattar Python-filer + frontend/dist i /app/. Konteineren restartar seg
 sjoelv via Docker restart-policy etter os._exit(0) (gjort i web_ui.py).
 
 Repo-URL, branch og (valfri) access-token er konfigurerbare fraa Admin-GUI-et
 og vert lagra i /data/konfig/oppdatering.json. Token vert sendt som
-Authorization: token <token>-header (Gitea/GitHub), ALDRI i URL, og ALDRI
-returnert til GUI-et.
+header (GitLab: PRIVATE-TOKEN, GitHub/Gitea: Authorization: token), ALDRI i
+URL, og ALDRI returnert til GUI-et.
 """
 
 import json
@@ -19,7 +19,7 @@ import tempfile
 import shutil
 import urllib.request
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +28,14 @@ OPPDATER_KONFIG_FIL = os.environ.get(
     "OPPDATER_KONFIG_STI", "/data/konfig/oppdatering.json")
 APP_DIR = "/app"
 
-# Standard repo (kan overstyrast fraa GUI / konfig-fil)
+# Standard repo (kan overstyrast fraa GUI / konfig-fil).
+# git.pqtech.no er GitLab og er naabar over internett (5G) fraa nodane.
 _STANDARD_REPO_URL = os.environ.get(
-    "OPPDATER_REPO_URL", "http://192.168.1.58/sverre/pq-tech-opendaq")
+    "OPPDATER_REPO_URL", "https://git.pqtech.no/sverre/pq-tech-opendaq")
 _STANDARD_BRANCH = os.environ.get("OPPDATER_BRANCH", "main")
 
+
+# --- Konfigurasjon ---
 
 def hent_oppdater_konfig() -> dict:
     """Les oppdaterings-konfig (repo_url, branch, token). Env gir standard,
@@ -93,6 +96,18 @@ def lagre_oppdater_konfig(repo_url: str, branch: str = "main",
     }
 
 
+# --- Forge-deteksjon + API-hjelparar ---
+
+def _forge(host: str) -> str:
+    """github.com -> github, *gitea* -> gitea, elles -> gitlab (sjoelvhosta)."""
+    h = (host or "").lower()
+    if "github.com" in h:
+        return "github"
+    if "gitea" in h:
+        return "gitea"
+    return "gitlab"
+
+
 def _eigar_repo(repo_url: str):
     """Parse (parsed_url, eigar, repo) fraa repo-URL."""
     p = urlparse(repo_url)
@@ -106,46 +121,33 @@ def _eigar_repo(repo_url: str):
     return p, eigar, repo
 
 
-def _req(url: str, token: str):
+def _gitlab_prosjekt(eigar: str, repo: str) -> str:
+    """URL-enkoda prosjektsti for GitLab API v4 (eigar%2Frepo)."""
+    return quote(f"{eigar}/{repo}", safe="")
+
+
+def _req(url: str, token: str, forge: str = "gitea"):
     headers = {"User-Agent": "PQTech-openDAQ-updater", "Accept": "application/json"}
     if token:
-        headers["Authorization"] = f"token {token}"
+        if forge == "gitlab":
+            headers["PRIVATE-TOKEN"] = token
+        else:
+            headers["Authorization"] = f"token {token}"
     return urllib.request.Request(url, headers=headers)
 
 
-def sjekk_github():
-    """Sjekk remote (Gitea eller GitHub) for nyaste commit. Namnet er behalde
-    av historiske grunnar - fungerer for begge."""
-    konfig = hent_oppdater_konfig()
-    repo_url = konfig["repo_url"]
-    branch = konfig["branch"]
-    token = konfig["token"]
-    p, eigar, repo = _eigar_repo(repo_url)
+def _tarball_url(p, eigar, repo, branch):
+    forge = _forge(p.hostname)
+    if forge == "github":
+        return f"https://api.github.com/repos/{eigar}/{repo}/tarball/{branch}"
+    if forge == "gitlab":
+        prosjekt = _gitlab_prosjekt(eigar, repo)
+        return (f"{p.scheme}://{p.netloc}/api/v4/projects/{prosjekt}"
+                f"/repository/archive.tar.gz?sha={branch}")
+    return f"{p.scheme}://{p.netloc}/api/v1/repos/{eigar}/{repo}/archive/{branch}.tar.gz"
 
-    if p.hostname and p.hostname.endswith("github.com"):
-        url = f"https://api.github.com/repos/{eigar}/{repo}/commits/{branch}"
-        with urllib.request.urlopen(_req(url, token), timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    else:
-        base = f"{p.scheme}://{p.netloc}/api/v1/repos/{eigar}/{repo}"
-        url = f"{base}/commits?sha={branch}&limit=1"
-        with urllib.request.urlopen(_req(url, token), timeout=15) as resp:
-            liste = json.loads(resp.read().decode())
-        if not liste:
-            raise RuntimeError("Tomt repo / ingen commits funne")
-        data = liste[0]
 
-    commit = data.get("commit", {})
-    committer = commit.get("committer", {}) or {}
-    melding = (commit.get("message") or "").split("\n")[0]
-    return {
-        "sha": data["sha"][:7],
-        "sha_full": data["sha"],
-        "melding": melding,
-        "dato": committer.get("date", ""),
-        "forfattar": committer.get("name", ""),
-    }
-
+# --- Versjon / sjekk / oppdater ---
 
 def les_versjon():
     """Les lagra versjon fraa versjon.json."""
@@ -156,10 +158,62 @@ def les_versjon():
         return {"sha": "ukjend", "melding": "Ikkje sett", "dato": ""}
 
 
-def _tarball_url(p, eigar, repo, branch):
-    if p.hostname and p.hostname.endswith("github.com"):
-        return f"https://api.github.com/repos/{eigar}/{repo}/tarball/{branch}"
-    return f"{p.scheme}://{p.netloc}/api/v1/repos/{eigar}/{repo}/archive/{branch}.tar.gz"
+def sjekk_github():
+    """Sjekk remote for nyaste commit. Namnet er behalde av historiske
+    grunnar - fungerer for GitHub, Gitea OG GitLab."""
+    konfig = hent_oppdater_konfig()
+    repo_url = konfig["repo_url"]
+    branch = konfig["branch"]
+    token = konfig["token"]
+    p, eigar, repo = _eigar_repo(repo_url)
+    forge = _forge(p.hostname)
+
+    if forge == "github":
+        url = f"https://api.github.com/repos/{eigar}/{repo}/commits/{branch}"
+        with urllib.request.urlopen(_req(url, token, forge), timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        commit = data.get("commit", {})
+        committer = commit.get("committer", {}) or {}
+        return {
+            "sha": data["sha"][:7], "sha_full": data["sha"],
+            "melding": (commit.get("message") or "").split("\n")[0],
+            "dato": committer.get("date", ""),
+            "forfattar": committer.get("name", ""),
+        }
+
+    if forge == "gitlab":
+        prosjekt = _gitlab_prosjekt(eigar, repo)
+        base = f"{p.scheme}://{p.netloc}/api/v4/projects/{prosjekt}"
+        url = f"{base}/repository/commits?ref_name={branch}&per_page=1"
+        with urllib.request.urlopen(_req(url, token, forge), timeout=15) as resp:
+            liste = json.loads(resp.read().decode())
+        if not liste:
+            raise RuntimeError("Tomt repo / ingen commits funne")
+        d = liste[0]
+        sha = d["id"]
+        return {
+            "sha": sha[:7], "sha_full": sha,
+            "melding": (d.get("title") or d.get("message") or "").split("\n")[0],
+            "dato": d.get("committed_date", ""),
+            "forfattar": d.get("committer_name") or d.get("author_name", ""),
+        }
+
+    # gitea / forgejo
+    base = f"{p.scheme}://{p.netloc}/api/v1/repos/{eigar}/{repo}"
+    url = f"{base}/commits?sha={branch}&limit=1"
+    with urllib.request.urlopen(_req(url, token, forge), timeout=15) as resp:
+        liste = json.loads(resp.read().decode())
+    if not liste:
+        raise RuntimeError("Tomt repo / ingen commits funne")
+    data = liste[0]
+    commit = data.get("commit", {})
+    committer = commit.get("committer", {}) or {}
+    return {
+        "sha": data["sha"][:7], "sha_full": data["sha"],
+        "melding": (commit.get("message") or "").split("\n")[0],
+        "dato": committer.get("date", ""),
+        "forfattar": committer.get("name", ""),
+    }
 
 
 def last_ned_og_oppdater():
@@ -174,6 +228,7 @@ def last_ned_og_oppdater():
     log.info(f"Nyaste commit: {info['sha']} - {info['melding']}")
 
     p, eigar, repo = _eigar_repo(repo_url)
+    forge = _forge(p.hostname)
     tarball_url = _tarball_url(p, eigar, repo, branch)
 
     tmpdir = tempfile.mkdtemp(prefix="oppdatering_")
@@ -181,7 +236,7 @@ def last_ned_og_oppdater():
 
     try:
         log.info("Lastar ned tarball...")
-        with urllib.request.urlopen(_req(tarball_url, token), timeout=120) as resp:
+        with urllib.request.urlopen(_req(tarball_url, token, forge), timeout=120) as resp:
             with open(tarball_path, "wb") as f:
                 shutil.copyfileobj(resp, f)
 

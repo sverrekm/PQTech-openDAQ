@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { fetchVersjon, sjekkOppdatering, utfoerOppdatering, fetchOppdaterKonfig, lagreOppdaterKonfig } from '../api/system'
-import type { OppdaterKonfig } from '../api/system'
+import { fetchVersjon, sjekkOppdatering, utfoerOppdatering, utfoerOppdateringFloate, fetchOppdaterKonfig, lagreOppdaterKonfig } from '../api/system'
+import type { OppdaterKonfig, FloateResultat } from '../api/system'
 import type { OppdateringSjekk } from '../api/types'
 import InfoGrid from './InfoGrid'
 import { useI18n } from '../i18n'
@@ -21,6 +21,7 @@ export default function UpdateCard() {
   const [token, setToken] = useState('')
   const [tokenSatt, setTokenSatt] = useState(false)
   const [lagrarRepo, setLagrarRepo] = useState(false)
+  const [floate, setFloate] = useState<FloateResultat | null>(null)
 
   const locale = lang === 'nb' ? 'nb-NO' : 'en-US'
 
@@ -83,6 +84,26 @@ export default function UpdateCard() {
       } else {
         setMelding({ text: res.feil || t('Update failed'), ok: false })
       }
+    } catch (e) {
+      setMelding({ text: String(e), ok: false })
+    }
+    setBusy(false)
+  }
+
+  const handleOppdaterFloate = async () => {
+    if (!confirm(t('Update the whole fleet? All nodes update first, then the hub restarts.'))) return
+    setBusy(true)
+    setMelding(null)
+    setFloate(null)
+    try {
+      const res = await utfoerOppdateringFloate()
+      setFloate(res)
+      const okNodar = res.nodar.filter(n => n.suksess).length
+      setMelding({
+        text: `${t('Nodes')}: ${okNodar}/${res.nodar.length} ${t('updated')}. ${t('Hub restarting')}...`,
+        ok: true,
+      })
+      setRestartar(true)
     } catch (e) {
       setMelding({ text: String(e), ok: false })
     }
@@ -212,7 +233,28 @@ export default function UpdateCard() {
             {t('Update now')}
           </button>
         )}
+        <button
+          className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-2 px-4 rounded-lg text-sm transition-colors duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={busy}
+          onClick={handleOppdaterFloate}
+          title={t('Update all nodes, then the hub')}
+        >
+          {t('Update hub + nodes')}
+        </button>
       </div>
+
+      {floate && floate.nodar.length > 0 && (
+        <div className="mt-3 border border-gray-200 rounded-lg divide-y divide-gray-100 text-sm">
+          {floate.nodar.map(n => (
+            <div key={n.id} className="flex items-center justify-between px-3 py-1.5">
+              <span className="truncate">{n.namn || n.id}</span>
+              <span className={n.suksess ? 'text-green-700' : 'text-red-700'}>
+                {n.suksess ? `✓ ${n.melding ?? ''}` : `✗ ${n.feil ?? ''}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {melding && (
         <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${melding.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>

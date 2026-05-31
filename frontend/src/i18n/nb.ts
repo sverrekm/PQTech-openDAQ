@@ -1,5 +1,10 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  'Update hub + nodes': 'Oppdater hub + nodar',
+  'Update all nodes, then the hub': 'Oppdater alle nodar, så hubben',
+  'Update the whole fleet? All nodes update first, then the hub restarts.': 'Oppdatere heile flåten? Alle nodar vert oppdaterte fyrst, så restartar hubben.',
+  'updated': 'oppdaterte',
+  'Hub restarting': 'Hubben restartar',
   'Update source': 'Oppdateringskjelde',
   'Repository URL': 'Repo-URL',
   'Branch': 'Grein',

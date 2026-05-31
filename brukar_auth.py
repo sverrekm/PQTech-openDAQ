@@ -110,5 +110,11 @@ def init_app(app):
         # under /api/ingest/ er admin-only (status, data) -> session-auth.
         if request.path == "/api/ingest" and request.method == "POST":
             return
+        # Unntatt: hub->node oppdaterings-trigger via Bearer flaate-token.
+        # Sjølve token-valideringa skjer i ruta (api_system_oppdater).
+        if (request.path in ("/api/system/oppdater", "/api/system/restart")
+                and request.method == "POST"
+                and request.headers.get("Authorization", "").startswith("Bearer ")):
+            return
         if "brukar" not in session:
             return jsonify({"feil": "Ikkje innlogga"}), 401

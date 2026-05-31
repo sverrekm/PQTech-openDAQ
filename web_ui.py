@@ -1365,9 +1365,43 @@ def api_system_oppdater_konfig_sett():
     return jsonify(oppdatering.lagre_oppdater_konfig(repo_url, branch, token))
 
 
+def _floate_token() -> str:
+    """Delt flaate-token: parent_token (node) eller ingest_token (hub) eller env."""
+    try:
+        pk = les_push_konfig()
+        if pk.parent_token:
+            return pk.parent_token
+        if pk.ingest_token:
+            return pk.ingest_token
+    except Exception:
+        pass
+    return os.environ.get("INGEST_TOKEN", "")
+
+
+def _floate_auth_ok() -> bool:
+    """True viss Authorization: Bearer <token> matchar flaate-token."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return False
+    forventa = _floate_token()
+    return bool(forventa) and auth[7:].strip() == forventa
+
+
 @app.route("/api/system/oppdater", methods=["POST"])
 def api_system_oppdater():
-    """Last ned og installer oppdatering frå GitHub, deretter restart."""
+    """Last ned og installer oppdatering, deretter restart.
+
+    Autorisering: innlogga admin (session) ELLER gyldig flaate-token (hub->node).
+    Hub kan sende {repo_url, branch, token} i body for å propagere
+    oppdaterings-kjelda til heile flåten før nedlasting.
+    """
+    if "brukar" not in session and not _floate_auth_ok():
+        return jsonify({"suksess": False, "feil": "Ikkje autorisert"}), 401
+    data = request.get_json(silent=True) or {}
+    if data.get("repo_url"):
+        oppdatering.lagre_oppdater_konfig(
+            data.get("repo_url", ""), data.get("branch", "main"),
+            data.get("token", None))
     try:
         resultat = oppdatering.last_ned_og_oppdater()
         # Planlegg restart etter at responsen er sendt
@@ -1375,6 +1409,57 @@ def api_system_oppdater():
         return jsonify(resultat)
     except Exception as e:
         return jsonify({"suksess": False, "feil": str(e)}), 500
+
+
+@app.route("/api/system/oppdater-floate", methods=["POST"])
+def api_system_oppdater_floate():
+    """Oppdater heile flåten: trigg alle openDAQ-nodar (dei hentar sjølv frå
+    same repo), deretter oppdater hubben sjølv sist. Admin-only (session)."""
+    resultat = {"nodar": [], "hub": None}
+    konf = oppdatering.hent_oppdater_konfig()
+    body = {"repo_url": konf["repo_url"], "branch": konf["branch"]}
+    if konf.get("token"):
+        body["token"] = konf["token"]
+    tok = _floate_token()
+
+    try:
+        nodar = [n for n in les_hub_konfig().nodar
+                 if (not getattr(n, "type", None) or n.type == "opendaq")]
+    except Exception as e:
+        nodar = []
+        resultat["feil"] = f"Kunne ikkje lese nodar: {e}"
+
+    for n in nodar:
+        host = str(n.adresse).split(":")[0].strip()
+        url = f"http://{host}:{_NODE_PROXY_PORT}/api/system/oppdater"
+        try:
+            r = _http_proxy.post(
+                url, json=body,
+                headers={"Authorization": f"Bearer {tok}"} if tok else {},
+                timeout=60)
+            j = {}
+            try:
+                j = r.json()
+            except Exception:
+                pass
+            ok = (r.status_code == 200) and bool(j.get("suksess", r.status_code == 200))
+            resultat["nodar"].append({
+                "id": n.id, "namn": n.namn, "suksess": ok,
+                "melding": j.get("melding") or j.get("versjon"),
+                "feil": j.get("feil") if not ok else None,
+            })
+        except Exception as e:
+            resultat["nodar"].append({
+                "id": n.id, "namn": n.namn, "suksess": False, "feil": str(e)})
+
+    # Hubben sjølv til slutt (restart kuttar samband — difor sist)
+    try:
+        resultat["hub"] = oppdatering.last_ned_og_oppdater()
+        threading.Timer(3.0, lambda: os._exit(0)).start()
+    except Exception as e:
+        resultat["hub"] = {"suksess": False, "feil": str(e)}
+
+    return jsonify(resultat)
 
 
 @app.route("/api/system/restart", methods=["POST"])
