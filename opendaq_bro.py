@@ -1379,12 +1379,18 @@ class OpenDAQBro:
                 # Waveform er SelectionProperty (int): 0=Sine
                 self._safe_set(ch, "Waveform", 0)
 
+                # SIRIUS modul-spesifikk ADC full-skala (frå sniffer-analyse av
+                # sirius2.pcapng: ch0-2 viste 50Hz 230V tre-fase med 1600V/32768).
+                # Slot 0-3 = Hi-LV (high-voltage isolation), full-skala ±1600V.
+                # Slot 4-7 = Lo-LV (low-voltage, kan ha excitation), full-skala ±10V.
+                SIRIUS_ADC_FULL_SKALA = 1600.0 if i < 4 else 10.0
+
                 # Berekn skalering og CustomRange (med sensor-støtte)
                 if kk.sensor_aktiv and (kk.sensor_inn_2 != kk.sensor_inn_1):
                     # To-punkt sensor: voltage → physical
-                    # voltage = raw_int16 × (amp_range / 32768)
+                    # voltage = raw_int16 × (ADC_full_skala / 32768)
                     # physical = (voltage - inn_1) × slope + ut_1
-                    amp_range = kk.range_max  # Forsterkar-range (t.d. 5V)
+                    amp_range = SIRIUS_ADC_FULL_SKALA  # Hi-LV=1600V, Lo-LV=10V
                     slope = ((kk.sensor_ut_2 - kk.sensor_ut_1) /
                              (kk.sensor_inn_2 - kk.sensor_inn_1))
                     offset = kk.sensor_ut_1 - slope * kk.sensor_inn_1
@@ -1403,10 +1409,12 @@ class OpenDAQBro:
                     except Exception as e_cr:
                         log.warning(f"  {kk.namn}: CustomRange feilet: {e_cr}")
                     log.info(f"  {kk.namn}: aktiv={kk.aktiv}, sensor={kk.sensor_namn}, "
-                             f"skala={skala:.6f}, offset={offset}")
+                             f"adc_full={amp_range}V, skala={skala:.6f}, offset={offset}")
                 else:
-                    # Direkte skalering utan sensor
-                    skala = kk.range_max / 32768.0 if kk.range_max > 0 else 1.0
+                    # Direkte skalering utan sensor: bruk modul-type ADC full-skala
+                    # (FØR: kk.range_max/32768 — det var feil, det blanda display-range
+                    # med ADC hardware-range. Resultat: AI 0 ±8V signal viste 0.02V.)
+                    skala = SIRIUS_ADC_FULL_SKALA / 32768.0
                     self._kanal_skala.append(skala)
                     self._kanal_offset.append(0.0)
 
@@ -1417,7 +1425,8 @@ class OpenDAQBro:
                     except Exception as e_cr:
                         log.warning(f"  {kk.namn}: CustomRange feilet: {e_cr}")
                     log.info(f"  {kk.namn}: aktiv={kk.aktiv}, "
-                             f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}")
+                             f"range=[{kk.range_min}, {kk.range_max}], type={kk.type}, "
+                             f"adc_full={SIRIUS_ADC_FULL_SKALA}V, skala={skala:.6f}")
             except Exception as e:
                 log.warning(f"  Kanal {i} konfig feilet: {e}")
 

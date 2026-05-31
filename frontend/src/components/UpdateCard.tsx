@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { fetchVersjon, sjekkOppdatering, utfoerOppdatering } from '../api/system'
+import { fetchVersjon, sjekkOppdatering, utfoerOppdatering, fetchOppdaterKonfig, lagreOppdaterKonfig } from '../api/system'
+import type { OppdaterKonfig } from '../api/system'
 import type { OppdateringSjekk } from '../api/types'
 import InfoGrid from './InfoGrid'
 import { useI18n } from '../i18n'
@@ -14,7 +15,42 @@ export default function UpdateCard() {
   const [restartar, setRestartar] = useState(false)
   const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
 
+  // Oppdaterings-kjelde (repo)
+  const [repoUrl, setRepoUrl] = useState('')
+  const [branch, setBranch] = useState('main')
+  const [token, setToken] = useState('')
+  const [tokenSatt, setTokenSatt] = useState(false)
+  const [lagrarRepo, setLagrarRepo] = useState(false)
+
   const locale = lang === 'nb' ? 'nb-NO' : 'en-US'
+
+  useEffect(() => {
+    fetchOppdaterKonfig().then((k: OppdaterKonfig) => {
+      setRepoUrl(k.repo_url || '')
+      setBranch(k.branch || 'main')
+      setTokenSatt(!!k.token_satt)
+    }).catch(() => {})
+  }, [])
+
+  const handleLagreRepo = async () => {
+    setLagrarRepo(true)
+    setMelding(null)
+    try {
+      // token: send berre når brukar har skrive noko (elles behald eksisterande)
+      const res = await lagreOppdaterKonfig(repoUrl, branch, token ? token : undefined)
+      if (res.suksess) {
+        setMelding({ text: t('Update source saved.'), ok: true })
+        setTokenSatt(!!res.token_satt)
+        setToken('')
+        setSjekk(null)
+      } else {
+        setMelding({ text: res.feil || t('Could not save update source'), ok: false })
+      }
+    } catch (e) {
+      setMelding({ text: String(e), ok: false })
+    }
+    setLagrarRepo(false)
+  }
 
   const handleSjekk = async () => {
     setBusy(true)
@@ -99,6 +135,53 @@ export default function UpdateCard() {
         { label: t('Latest commit'), value: versjon?.melding || '-' },
         { label: t('Date'), value: versjon?.dato ? new Date(versjon.dato).toLocaleString(locale) : '-' },
       ]} />
+
+      {/* Update source (repository) */}
+      <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+        <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{t('Update source')}</div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">{t('Repository URL')}</label>
+          <input
+            type="text"
+            value={repoUrl}
+            onChange={e => setRepoUrl(e.target.value)}
+            placeholder="http://192.168.1.58/sverre/pq-tech-opendaq"
+            className="w-full text-sm font-mono px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+          />
+        </div>
+        <div className="flex gap-2">
+          <div className="w-28">
+            <label className="block text-xs text-gray-500 mb-1">{t('Branch')}</label>
+            <input
+              type="text"
+              value={branch}
+              onChange={e => setBranch(e.target.value)}
+              placeholder="main"
+              className="w-full text-sm font-mono px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-gray-500 mb-1">
+              {t('Access token')} <span className="text-gray-400">({tokenSatt ? t('set — leave blank to keep') : t('optional — for private repos')})</span>
+            </label>
+            <input
+              type="password"
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              placeholder={tokenSatt ? '••••••••' : ''}
+              autoComplete="new-password"
+              className="w-full text-sm font-mono px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+            />
+          </div>
+        </div>
+        <button
+          className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-1.5 px-3 rounded-lg text-xs transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={lagrarRepo || !repoUrl.trim()}
+          onClick={handleLagreRepo}
+        >
+          {lagrarRepo ? t('Saving...') : t('Save update source')}
+        </button>
+      </div>
 
       {sjekk?.oppdatering_tilgjengeleg && sjekk.github && (
         <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm">

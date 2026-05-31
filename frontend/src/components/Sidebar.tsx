@@ -200,6 +200,7 @@ function HubNodeList({ kollapsa, onToggle }: { kollapsa: boolean, onToggle: () =
   const { data: hub } = usePolling(hubFetcher, 5000)
 
   const readOnlyKanalClass = "flex items-center gap-2 py-1.5 px-4 text-sm border-l-4 border-transparent select-none text-gray-400 cursor-default"
+  const lenkeKanalClass = "group flex items-center gap-2 py-1.5 px-4 text-sm border-l-4 border-transparent select-none text-gray-400 hover:bg-gray-800 hover:text-white cursor-pointer transition-colors duration-150"
 
   if (!hub?.nodar || hub.nodar.length === 0) return null
 
@@ -211,19 +212,47 @@ function HubNodeList({ kollapsa, onToggle }: { kollapsa: boolean, onToggle: () =
         kollapsa={kollapsa}
         onToggle={onToggle}
       />
-      {!kollapsa && hub.nodar.map(node => (
-        <div key={node.id} className={readOnlyKanalClass}>
+      {!kollapsa && hub.nodar.map(node => {
+        const prikk = (
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
             node.tilkobla ? 'bg-green-500' : hub.aktiv === false ? 'bg-gray-500' : 'bg-red-500'
           }`} />
-          <span className="truncate">{node.namn}</span>
-          {node.tilkobla && (
-            <span className="ml-auto text-xs font-mono text-gray-500">
-              {node.antal_kanalar}ch
-            </span>
-          )}
-        </div>
-      ))}
+        )
+        const erOpenDaq = !node.type || node.type === 'opendaq'
+        // Berre openDAQ-nodar har web-UI på :8080 — modbus-nodar er reine register.
+        if (erOpenDaq) {
+          return (
+            <a
+              key={node.id}
+              href={`/node-proxy/${node.id}/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={t('Open UI')}
+              className={lenkeKanalClass}
+            >
+              {prikk}
+              <span className="truncate">{node.namn}</span>
+              <span className="ml-auto flex items-center gap-1 flex-shrink-0">
+                {node.tilkobla && (
+                  <span className="text-xs font-mono text-gray-500">{node.antal_kanalar}ch</span>
+                )}
+                <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[#D76428]">↗</span>
+              </span>
+            </a>
+          )
+        }
+        return (
+          <div key={node.id} className={readOnlyKanalClass}>
+            {prikk}
+            <span className="truncate">{node.namn}</span>
+            {node.tilkobla && (
+              <span className="ml-auto text-xs font-mono text-gray-500">
+                {node.antal_kanalar}ch
+              </span>
+            )}
+          </div>
+        )
+      })}
     </>
   )
 }

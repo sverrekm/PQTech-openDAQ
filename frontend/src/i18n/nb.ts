@@ -1,5 +1,14 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  'Update source': 'Oppdateringskjelde',
+  'Repository URL': 'Repo-URL',
+  'Branch': 'Grein',
+  'Access token': 'Tilgangstoken',
+  'set — leave blank to keep': 'sett — la stå tomt for å behalde',
+  'optional — for private repos': 'valfritt — for private repo',
+  'Save update source': 'Lagre oppdateringskjelde',
+  'Update source saved.': 'Oppdateringskjelde lagra.',
+  'Could not save update source': 'Kunne ikkje lagre oppdateringskjelde',
   // Header / Auth
   'Log out': 'Logg ut',
   'Log in': 'Logg inn',

@@ -97,6 +97,15 @@ if HUB_MODUS:
 app = Flask(__name__)
 brukar_auth.init_app(app)
 
+# Hub og node køyrer same image → begge ville elles brukt Flask sin
+# standard session-cookie "session" på same domene (opendac.pqtech.no).
+# Når hubben reverse-proxyar node si web-UI, set noden sin "session"-cookie
+# som då overskriv hub-sesjonen → neste /node-proxy-kall ser brukar som
+# utlogga og redirectar til "/" (= tilbake til hubben). Gi hubben eit eige
+# cookie-namn så node- og hub-sesjon kan eksistere side om side.
+if HUB_MODUS:
+    app.config["SESSION_COOKIE_NAME"] = "hubsession"
+
 
 # --- Auth API ---
 
@@ -301,22 +310,33 @@ def node_proxy(node_id, sub_path):
 
 @app.before_request
 def _proxy_assets_rewrite():
-    """Frontend laster /assets/foo.js som absolutt path. Når browser er
-    inni node-proxy, peikar Referer på /node-proxy/<id>/ — då redirect
-    /assets/* og andre rot-stiar til riktig proxy-prefiks.
+    """Node sin SPA hentar /assets/*, /api/* og favicon som absolutte
+    rot-stiar. Når browseren er inni ein node-proxy (Referer peikar på
+    /node-proxy/<id>/), redirectar vi desse til riktig /node-proxy/<id>-
+    prefiks slik at dei treffer noden — og IKKJE hubben sin eigen frontend
+    eller API. Utan dette lastar node-sida, men alle data-kall fell tilbake
+    på hubben → brukar ser hub-data inni node-sida.
+
+    307 (ikkje 302) vert brukt slik at HTTP-metode og body held seg, viktig
+    for POST/PUT mot /api/* (t.d. innlogging på noden).
+
+    Server-til-server-kall (node→hub /api/ingest, hub→node buffer-pull) har
+    ingen node-proxy-Referer og blir difor aldri redirecta.
     """
-    if request.method != "GET":
-        return None
     if request.path.startswith("/node-proxy/"):
         return None
     if not (request.path.startswith("/assets/")
+            or request.path.startswith("/api/")
             or request.path in ("/favicon.svg", "/favicon.ico", "/vite.svg")):
         return None
     referer = request.headers.get("Referer", "")
     m = re.search(r"/node-proxy/([A-Za-z0-9_-]+)/", referer)
     if not m:
         return None
-    return redirect(f"/node-proxy/{m.group(1)}{request.path}", code=302)
+    mål = f"/node-proxy/{m.group(1)}{request.path}"
+    if request.query_string:
+        mål += "?" + request.query_string.decode("latin-1")
+    return redirect(mål, code=307)
 
 
 # --- API ---
@@ -1326,6 +1346,23 @@ def api_system_sjekk_oppdatering():
         })
     except Exception as e:
         return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/system/oppdater-konfig")
+def api_system_oppdater_konfig_hent():
+    """Repo-URL/branch for oppdatering. Token vert aldri returnert
+    (berre token_satt: bool)."""
+    return jsonify(oppdatering.hent_oppdater_konfig_offentleg())
+
+
+@app.route("/api/system/oppdater-konfig", methods=["PUT"])
+def api_system_oppdater_konfig_sett():
+    """Lagre repo-URL/branch/token. token utelate => behald; tom => fjern."""
+    data = request.get_json(silent=True) or {}
+    repo_url = data.get("repo_url", "")
+    branch = data.get("branch", "main")
+    token = data.get("token", None)
+    return jsonify(oppdatering.lagre_oppdater_konfig(repo_url, branch, token))
 
 
 @app.route("/api/system/oppdater", methods=["POST"])
