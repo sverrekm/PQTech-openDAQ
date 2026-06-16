@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import shutil
 import urllib.request
+import urllib.error
 import logging
 from urllib.parse import urlparse, quote
 
@@ -98,11 +99,45 @@ def lagre_oppdater_konfig(repo_url: str, branch: str = "main",
 
 # --- Forge-deteksjon + API-hjelparar ---
 
-def _forge(host: str) -> str:
-    """Forge-type ut frå vertsnamn. Kan overstyrast med env OPPDATER_FORGE.
+_forge_cache: dict = {}
 
-    github.com -> github, *gitlab* -> gitlab, elles -> gitea (default).
-    git.pqtech.no er Gitea, difor er gitea standard for ukjende vertar."""
+
+def _probe_forge(host: str) -> str:
+    """Auto-detekter forge ved aa probe API-et (cacha per vert).
+
+    GitLab: /api/v4/version svarar 200/401. Gitea: /api/v1/version svarar 200.
+    Custom-domene (t.d. git.pqtech.no -> GitLab via cloudflared) kan ikkje
+    avgjerast paa namn aaleine, difor probar vi. UA maa vere ikkje-Python,
+    elles blokkerer Cloudflare med 1010."""
+    if host in _forge_cache:
+        return _forge_cache[host]
+    hdr = {"User-Agent": "PQTech-openDAQ-updater", "Accept": "application/json"}
+
+    def status(url):
+        try:
+            with urllib.request.urlopen(
+                    urllib.request.Request(url, headers=hdr), timeout=6) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception:
+            return None
+
+    forge = "gitlab"  # trygg default for ukjende custom-domene
+    if status(f"https://{host}/api/v4/version") in (200, 401):
+        forge = "gitlab"
+    elif status(f"https://{host}/api/v1/version") == 200:
+        forge = "gitea"
+    _forge_cache[host] = forge
+    return forge
+
+
+def _forge(host: str) -> str:
+    """Forge-type for ein vert. Kan overstyrast med env OPPDATER_FORGE.
+
+    github.com -> github, *gitlab* -> gitlab, *gitea*/*forgejo* -> gitea.
+    Elles auto-detekterast via API-probing (git.pqtech.no er GitLab, ikkje
+    Gitea, trass namnet)."""
     overstyr = os.environ.get("OPPDATER_FORGE", "").strip().lower()
     if overstyr in ("github", "gitlab", "gitea"):
         return overstyr
@@ -111,7 +146,9 @@ def _forge(host: str) -> str:
         return "github"
     if "gitlab" in h:
         return "gitlab"
-    return "gitea"
+    if "gitea" in h or "forgejo" in h:
+        return "gitea"
+    return _probe_forge(h)
 
 
 def _eigar_repo(repo_url: str):
