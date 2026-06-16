@@ -270,7 +270,14 @@ def last_ned_og_oppdater():
             if not os.path.isfile(kilde):
                 continue
             if filnavn.endswith(".py") or filnavn == "docker-entrypoint.sh":
-                shutil.copy2(kilde, os.path.join(APP_DIR, filnavn))
+                maal_fil = os.path.join(APP_DIR, filnavn)
+                shutil.copy2(kilde, maal_fil)
+                # Skript-filer i git-tarballen kan mangle exec-bit (644). Utan +x
+                # på docker-entrypoint.sh klarar ikkje containeren restarte etter
+                # os._exit(0), og blir liggjande nede. Sett +x eksplisitt.
+                if filnavn.endswith(".sh"):
+                    gjeldande = os.stat(maal_fil).st_mode
+                    os.chmod(maal_fil, gjeldande | 0o111)
                 oppdaterte.append(filnavn)
                 log.info(f"  Oppdatert: {filnavn}")
 
