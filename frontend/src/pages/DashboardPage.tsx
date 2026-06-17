@@ -16,16 +16,18 @@ interface Props {
   mqttStatus?: MqttStatus | null
   siriusTilkoblet: boolean
   onChannelClick: (index: number) => void
+  onMqttClick?: (topic: string) => void
+  onHubClick?: (nodeId: string, namn: string) => void
   hubKanalar?: HubKanal[]
   isHubMode?: boolean
 }
 
-export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, hubKanalar, isHubMode }: Props) {
+export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, onMqttClick, onHubClick, hubKanalar, isHubMode }: Props) {
   return (
     <>
       {!isHubMode && <SiriusStatusCard />}
       {!isHubMode && <UsbIpCard ip={status?.ip || '-'} />}
-      <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} hubKanalar={hubKanalar} />
+      <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} onMqttClick={onMqttClick} onHubClick={onHubClick} hubKanalar={hubKanalar} />
       {!isHubMode && <OpenDaqBridgeCard />}
       {!isHubMode && <RemoteBufferStatusCard />}
       {!isHubMode && <EventListCard />}

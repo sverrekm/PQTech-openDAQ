@@ -10,11 +10,13 @@ interface Props {
   mqttStatus?: MqttStatus | null
   siriusTilkoblet?: boolean
   onChannelClick: (index: number) => void
+  onMqttClick?: (topic: string) => void
+  onHubClick?: (nodeId: string, namn: string) => void
   loading?: boolean
   hubKanalar?: HubKanal[]
 }
 
-export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, loading = false, hubKanalar }: Props) {
+export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, onMqttClick, onHubClick, loading = false, hubKanalar }: Props) {
   const { t } = useI18n()
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
   const hubSparkRef = useRef<Map<string, number[]>>(new Map())
@@ -116,7 +118,11 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
             const sparkArr = sparkDataRef.current.get(mqttIdx) || []
 
             return (
-              <tr key={mqttKey} className="transition-colors duration-100 ease-in-out bg-purple-50/30">
+              <tr
+                key={mqttKey}
+                className={`transition-colors duration-100 ease-in-out bg-purple-50/30 ${onMqttClick ? 'cursor-pointer hover:bg-purple-100/60' : ''}`}
+                onClick={onMqttClick ? () => onMqttClick(topic) : undefined}
+              >
                 <td className="px-1 py-1 border-b border-gray-100 align-middle text-purple-500 font-semibold">{channelNum}</td>
                 <td className="px-1 py-1 border-b border-gray-100 align-middle">
                   {info.namn || topic}
@@ -157,7 +163,11 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
               }
               const sparkArr = hubSparkRef.current.get(sparkKey) || []
               return (
-                <tr key={sparkKey} className="transition-colors duration-100 ease-in-out bg-teal-50/30">
+                <tr
+                  key={sparkKey}
+                  className={`transition-colors duration-100 ease-in-out bg-teal-50/30 ${onHubClick ? 'cursor-pointer hover:bg-teal-100/60' : ''}`}
+                  onClick={onHubClick ? () => onHubClick(k.node_id, k.namn) : undefined}
+                >
                   <td className="px-1 py-1 border-b border-gray-100 align-middle text-teal-600 font-semibold">{baseNum + i + 1}</td>
                   <td className="px-1 py-1 border-b border-gray-100 align-middle">
                     {k.namn}

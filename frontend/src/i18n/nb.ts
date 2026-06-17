@@ -120,6 +120,13 @@ export const nb: Record<string, string> = {
   'Peak:': 'Topp:',
   'Average:': 'Snitt:',
 
+  // Hub-/MQTT-kanal detaljsider
+  'Source': 'Kjelde',
+  'Last updated': 'Sist oppdatert',
+  'Modbus address': 'Modbus-adresse',
+  'Modbus TCP': 'Modbus TCP',
+  'Overridden': 'Overstyrt',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',

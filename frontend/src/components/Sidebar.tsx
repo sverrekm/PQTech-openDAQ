@@ -9,6 +9,8 @@ export type View =
   | { page: 'dashboard' }
   | { page: 'settings' }
   | { page: 'channel'; index: number }
+  | { page: 'hubChannel'; nodeId: string; namn: string }
+  | { page: 'mqttChannel'; topic: string }
   | { page: 'hub' }
   | { page: 'admin' }
 
@@ -79,7 +81,6 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
   const activeKanalClass = "text-white bg-gray-800 border-l-[#D76428]"
   const inactiveKanalClass = "text-gray-400 hover:bg-gray-800 hover:text-white"
   const baseKanalClass = "flex items-center gap-2 py-1.5 px-4 text-sm cursor-pointer border-l-4 border-transparent transition-colors duration-150 ease-in-out select-none"
-  const readOnlyKanalClass = "flex items-center gap-2 py-1.5 px-4 text-sm border-l-4 border-transparent select-none text-gray-400 cursor-default"
 
   return (
     <nav className="w-56 min-w-56 bg-[#1a1a1a] text-gray-200 flex flex-col border-r border-gray-800 h-full">
@@ -131,7 +132,11 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
               onToggle={() => toggle('mqtt')}
             />
             {!kollapsa.mqtt && mqttTopics.map(([topic, info]) => (
-              <div key={topic} className={readOnlyKanalClass}>
+              <div
+                key={topic}
+                className={`${baseKanalClass} ${view.page === 'mqttChannel' && view.topic === topic ? activeKanalClass : inactiveKanalClass}`}
+                onClick={() => onNavigate({ page: 'mqttChannel', topic })}
+              >
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${info.verdi !== null ? 'bg-green-500' : 'bg-yellow-500'}`} />
                 <span className="truncate">{info.namn || topic}</span>
                 {info.verdi !== null && (
@@ -155,7 +160,8 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
             {!kollapsa.hubKanalar && synlegeHubKanalar.map(k => (
               <div
                 key={`${k.node_id}:${k.namn}`}
-                className={readOnlyKanalClass}
+                className={`${baseKanalClass} ${view.page === 'hubChannel' && view.nodeId === k.node_id && view.namn === k.namn ? activeKanalClass : inactiveKanalClass}`}
+                onClick={() => onNavigate({ page: 'hubChannel', nodeId: k.node_id, namn: k.namn })}
               >
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${k.verdi !== null ? 'bg-green-500' : 'bg-gray-500'}`} />
                 <span className="truncate">{k.namn}</span>

@@ -13,6 +13,8 @@ import type { View } from './components/Sidebar'
 import DashboardPage from './pages/DashboardPage'
 import SettingsPage from './pages/SettingsPage'
 import ChannelPage from './pages/ChannelPage'
+import HubChannelPage from './pages/HubChannelPage'
+import MqttChannelPage from './pages/MqttChannelPage'
 import HubPage from './pages/HubPage'
 import AdminPage from './pages/AdminPage'
 import LoginPage from './pages/LoginPage'
@@ -79,6 +81,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const handleChannelClick = (index: number) => {
     setView({ page: 'channel', index })
   }
+  const handleMqttClick = (topic: string) => {
+    setView({ page: 'mqttChannel', topic })
+  }
+  const handleHubClick = (nodeId: string, namn: string) => {
+    setView({ page: 'hubChannel', nodeId, namn })
+  }
 
   let content: React.ReactNode
   const isLoading = statusLoading || liveDataLoading || kanalarLoading
@@ -98,11 +106,15 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   } else if (view.page === 'hub') {
     content = <HubPage />
   } else if (view.page === 'dashboard') {
-    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} hubKanalar={hubKanalar} isHubMode={isHubMode} />
+    content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} onMqttClick={handleMqttClick} onHubClick={handleHubClick} hubKanalar={hubKanalar} isHubMode={isHubMode} />
   } else if (view.page === 'settings') {
     content = <SettingsPage />
   } else if (view.page === 'admin') {
     content = <AdminPage />
+  } else if (view.page === 'mqttChannel') {
+    content = <MqttChannelPage topic={view.topic} mqttStatus={mqttStatus ?? null} onBack={() => setView({ page: 'dashboard' })} />
+  } else if (view.page === 'hubChannel') {
+    content = <HubChannelPage nodeId={view.nodeId} namn={view.namn} hubKanalar={hubKanalar} onBack={() => setView({ page: 'dashboard' })} />
   } else {
     content = <ChannelPage index={view.index} kanalar={kanalar ?? []} liveData={liveData} onBack={() => setView({ page: 'dashboard' })} />
   }
