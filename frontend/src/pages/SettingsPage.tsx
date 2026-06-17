@@ -3,6 +3,7 @@ import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
 import TailscaleCard from '../components/TailscaleCard'
 import HubNodeConfigCard from '../components/HubNodeConfigCard'
+import InfluxShareCard from '../components/InfluxShareCard'
 import DeviceConnectionCard from '../components/DeviceConnectionCard'
 import DebugConsoleCard from '../components/DebugConsoleCard'
 import ProbeAnalysisCard from '../components/ProbeAnalysisCard'
@@ -16,6 +17,7 @@ export default function SettingsPage() {
       <ChannelConfigCard />
       <BufferConfigCard />
       <MqttSettingsCard />
+      <InfluxShareCard />
       <TailscaleCard />
       <HubNodeConfigCard />
       <DeviceConnectionCard />

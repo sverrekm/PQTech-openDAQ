@@ -157,6 +157,20 @@ export const nb: Record<string, string> = {
   'Last seen': 'Sist sett',
   'No nodes configured yet': 'Ingen nodar konfigurert enno',
 
+  // InfluxDB-deling til Grafana
+  'Share to Grafana (InfluxDB)': 'Del til Grafana (InfluxDB)',
+  'Write channel values to InfluxDB so they can be graphed in Grafana.': 'Skriv kanalverdiane til InfluxDB så dei kan grafast i Grafana.',
+  'Enabled': 'Aktivert',
+  'InfluxDB URL': 'InfluxDB-URL',
+  'Organization': 'Organisasjon',
+  'Bucket': 'Bucket',
+  'Interval (s)': 'Intervall (s)',
+  'Write token': 'Skrive-token',
+  'required': 'påkravd',
+  'Test write': 'Test skriving',
+  'Saved.': 'Lagra.',
+  'Failed': 'Feila',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',

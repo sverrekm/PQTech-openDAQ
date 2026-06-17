@@ -22,6 +22,7 @@ from flask import Flask, jsonify, request, session, send_file, redirect, Respons
 import usbip_manager
 import tailscale_manager
 import oppdatering
+import influx_pusher
 import brukar_auth
 
 # Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
@@ -1259,6 +1260,16 @@ def api_hub_kanalar():
     return jsonify({"kanalar": []})
 
 
+def _hent_kanalar_for_eksport():
+    """Kanal-liste for eksport (Prometheus/Influx): hub-modus aggregerer alle
+    nodar, direkte-modus gir modbus-kanalane."""
+    if HUB_MODUS:
+        return hent_hub_kanalar()
+    if SIRIUS_DIREKTE:
+        return _sirius_hent_modbus_kanalar()
+    return []
+
+
 @app.route("/api/metrics")
 def api_metrics():
     """Prometheus-eksponering av kanalverdiane for Grafana-deling.
@@ -1281,12 +1292,7 @@ def api_metrics():
                         status=401, mimetype="text/plain")
 
     try:
-        if HUB_MODUS:
-            kanalar = hent_hub_kanalar()
-        elif SIRIUS_DIREKTE:
-            kanalar = _sirius_hent_modbus_kanalar()
-        else:
-            kanalar = []
+        kanalar = _hent_kanalar_for_eksport()
     except Exception as e:
         return Response(f"# feil ved henting: {e}\n", status=500, mimetype="text/plain")
 
@@ -1325,6 +1331,27 @@ def api_metrics():
 
     return Response("\n".join(linjer) + "\n",
                     mimetype="text/plain; version=0.0.4; charset=utf-8")
+
+
+@app.route("/api/influx/konfig")
+def api_influx_konfig_hent():
+    """InfluxDB-deling konfig (token maska til token_satt)."""
+    return jsonify(influx_pusher.konfig_offentleg())
+
+
+@app.route("/api/influx/konfig", methods=["PUT"])
+def api_influx_konfig_sett():
+    """Lagre InfluxDB-konfig. token utelate => behald, tom => fjern."""
+    data = request.get_json(silent=True) or {}
+    influx_pusher.lagre_konfig(data)
+    return jsonify({"suksess": True, **influx_pusher.konfig_offentleg()})
+
+
+@app.route("/api/influx/test", methods=["POST"])
+def api_influx_test():
+    """Skriv kanalverdiane til Influx no (for å teste oppsettet)."""
+    ok, melding = influx_pusher.skriv_ein_gong(_hent_kanalar_for_eksport)
+    return jsonify({"suksess": ok, "melding": melding})
 
 
 @app.route("/api/hub/kanal-ranges")
@@ -1980,6 +2007,14 @@ def catch_all(path):
 
 
 # --- Legacy HTML removed (migrated to React in frontend/) ---
+
+
+# Start Influx-skrivar (deler kanalverdiar til Grafana via InfluxDB v2).
+# Køyrer berre når den er konfigurert/aktivert (sjå influx_pusher.les_konfig).
+try:
+    influx_pusher.start(_hent_kanalar_for_eksport)
+except Exception as _e:  # noqa: BLE001
+    print(f"Influx-skrivar starta ikkje: {_e}")
 
 
 if __name__ == "__main__":
