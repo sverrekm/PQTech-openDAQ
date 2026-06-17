@@ -7,9 +7,10 @@ interface Props {
   loading: boolean
   onLogout?: () => void
   disconnected?: boolean
+  onMenu?: () => void
 }
 
-export default function Header({ serverOk, loading, onLogout, disconnected }: Props) {
+export default function Header({ serverOk, loading, onLogout, disconnected, onMenu }: Props) {
   const { t } = useI18n()
 
   const handleLogout = async () => {
@@ -20,9 +21,22 @@ export default function Header({ serverOk, loading, onLogout, disconnected }: Pr
   return (
     <>
       <div className="bg-[#1a1a1a] border-b-[3px] border-b-[#D76428] p-4 md:px-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-white">
-          <span className="text-[#D76428]">PQTech</span>-openDAQ
-        </h1>
+        <div className="flex items-center gap-3">
+          {onMenu && (
+            <button
+              onClick={onMenu}
+              aria-label="Meny"
+              className="md:hidden text-gray-300 hover:text-white p-1 -ml-1"
+            >
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          )}
+          <h1 className="text-xl font-semibold text-white">
+            <span className="text-[#D76428]">PQTech</span>-openDAQ
+          </h1>
+        </div>
         <div className="flex items-center gap-3">
           <StatusBadge ok={serverOk} loading={loading} />
           {onLogout && (

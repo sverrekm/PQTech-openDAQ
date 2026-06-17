@@ -51,6 +51,7 @@ export default function App() {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const { t } = useI18n()
   const [view, setView] = useState<View>({ page: 'dashboard' })
+  const [menyOpen, setMenyOpen] = useState(false)
 
   const statusFetcher = useCallback(() => fetchStatus(), [])
   const { data: status, loading: statusLoading, stale: statusStale } = usePolling(statusFetcher, 5000)
@@ -121,10 +122,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} />
+      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} onMenu={() => setMenyOpen(true)} />
       <Layout>
-        <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} />
-        <div className="flex-1 overflow-y-auto p-6">
+        <Sidebar view={view} onNavigate={(v) => { setView(v); setMenyOpen(false) }} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} open={menyOpen} onClose={() => setMenyOpen(false)} />
+        <div className="flex-1 overflow-y-auto p-3 md:p-6">
           <div className={`max-w-4xl mx-auto transition-opacity duration-300 ${statusStale ? 'opacity-40' : ''}`}>
             {content}
           </div>

@@ -21,6 +21,8 @@ interface Props {
   liveData: KanalLive | null
   mqttStatus?: MqttStatus | null
   hubKanalar?: HubKanal[]
+  open?: boolean
+  onClose?: () => void
 }
 
 const COLLAPSE_KEY = 'sidebar_collapsed'
@@ -50,7 +52,7 @@ function SeksjonHeader({ tittel, antal, kollapsa, onToggle }: SeksjonHeaderProps
   )
 }
 
-export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus, hubKanalar }: Props) {
+export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatus, hubKanalar, open = false, onClose }: Props) {
   const { t } = useI18n()
   const [kollapsa, setKollapsa] = useState<Record<string, boolean>>(() => hentKollapstilstand())
 
@@ -83,7 +85,12 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
   const baseKanalClass = "flex items-center gap-2 py-1.5 px-4 text-sm cursor-pointer border-l-4 border-transparent transition-colors duration-150 ease-in-out select-none"
 
   return (
-    <nav className="w-56 min-w-56 bg-[#1a1a1a] text-gray-200 flex flex-col border-r border-gray-800 h-full">
+    <>
+      {/* Mørk bakgrunn bak skuffen på mobil */}
+      {open && <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={onClose} />}
+    <nav className={`w-56 min-w-56 bg-[#1a1a1a] text-gray-200 flex flex-col border-r border-gray-800 h-full
+      fixed inset-y-0 left-0 z-40 transform transition-transform duration-200 md:static md:z-auto md:translate-x-0
+      ${open ? 'translate-x-0' : '-translate-x-full'}`}>
       {/* Toppnavigasjon (alltid synleg) */}
       <div className="py-2 flex-shrink-0">
         <div
@@ -197,6 +204,7 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
         </div>
       </div>
     </nav>
+    </>
   )
 }
 
