@@ -149,6 +149,14 @@ export const nb: Record<string, string> = {
   'Advanced: send raw USB commands to SIRIUS for troubleshooting. Not needed in normal use.': 'Avansert: send rå USB-kommandoar til SIRIUS for feilsøking. Ikkje nødvendig i vanleg bruk.',
   'Measurement boxes this hub collects data from. Add, test and manage them here.': 'Måleboksar denne hubben samlar data frå. Legg til, test og administrer dei her.',
 
+  // Node-oversikt (hub-dashboard)
+  'Measurement boxes this hub collects data from, with live status for each.': 'Måleboksar denne hubben samlar data frå, med sanntidsstatus for kvar.',
+  'connected': 'tilkobla',
+  'OK': 'OK',
+  'Missing': 'Manglar',
+  'Last seen': 'Sist sett',
+  'No nodes configured yet': 'Ingen nodar konfigurert enno',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',

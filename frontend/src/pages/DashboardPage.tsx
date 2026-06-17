@@ -8,6 +8,7 @@ import LogViewer from '../components/LogViewer'
 import { RemoteBufferStatusCard } from '../components/BufferStatusCard'
 import EventListCard from '../components/EventListCard'
 import MqttLogCard from '../components/MqttLogCard'
+import NodeOverviewCard from '../components/NodeOverviewCard'
 
 interface Props {
   status: ServerStatus | null
@@ -23,15 +24,41 @@ interface Props {
 }
 
 export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, onMqttClick, onHubClick, hubKanalar, isHubMode }: Props) {
+  const channelCard = (
+    <ChannelLiveCard
+      kanalar={kanalar}
+      liveData={liveData}
+      mqttStatus={mqttStatus}
+      siriusTilkoblet={siriusTilkoblet}
+      onChannelClick={onChannelClick}
+      onMqttClick={onMqttClick}
+      onHubClick={onHubClick}
+      hubKanalar={hubKanalar}
+    />
+  )
+
+  // Hub-modus: fokus på node-oversikt (status per måleboks) + mottatte kanalar.
+  if (isHubMode) {
+    return (
+      <>
+        <NodeOverviewCard />
+        {channelCard}
+        <ServerStatusCard status={status} />
+        <LogViewer />
+      </>
+    )
+  }
+
+  // Direkte-modus: fokus på SIRIUS-maskinvare, USB og lokale ADC-kanalar.
   return (
     <>
-      {!isHubMode && <SiriusStatusCard />}
-      {!isHubMode && <UsbIpCard ip={status?.ip || '-'} />}
-      <ChannelLiveCard kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusTilkoblet} onChannelClick={onChannelClick} onMqttClick={onMqttClick} onHubClick={onHubClick} hubKanalar={hubKanalar} />
-      {!isHubMode && <OpenDaqBridgeCard />}
-      {!isHubMode && <RemoteBufferStatusCard />}
-      {!isHubMode && <EventListCard />}
-      {!isHubMode && <MqttLogCard />}
+      <SiriusStatusCard />
+      <UsbIpCard ip={status?.ip || '-'} />
+      {channelCard}
+      <OpenDaqBridgeCard />
+      <RemoteBufferStatusCard />
+      <EventListCard />
+      <MqttLogCard />
       <ServerStatusCard status={status} />
       <LogViewer />
     </>
