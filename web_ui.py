@@ -1260,13 +1260,47 @@ def api_hub_kanalar():
     return jsonify({"kanalar": []})
 
 
+def _lokale_kanalar_for_eksport():
+    """Lokale SIRIUS/openDAQ-kanalar (direkte-modus) som HubKanal-liknande
+    dicts, slik at dei kan delast til Influx/Prometheus saman med modbus."""
+    ut = []
+    try:
+        kfg = les_konfig()
+    except Exception:
+        return ut
+    try:
+        odaq = _opendaq_hent_verdiar()
+    except Exception:
+        odaq = {}
+    try:
+        drv = _sirius_hent_data()
+    except Exception:
+        drv = {}
+    nodenamn = socket.gethostname()
+    for k in kfg:
+        if not getattr(k, "aktiv", True):
+            continue
+        key = f"kanal_{k.indeks}"
+        o = odaq.get(key) or {}
+        d = drv.get(key) or {}
+        verdi = o.get("siste")
+        if verdi is None:
+            verdi = d.get("siste")
+        ut.append({
+            "node_namn": nodenamn, "node_id": nodenamn,
+            "namn": k.namn, "verdi": verdi, "eining": getattr(k, "enhet", ""),
+            "kanal_type": "opendaq", "tilkobla": True,
+        })
+    return ut
+
+
 def _hent_kanalar_for_eksport():
     """Kanal-liste for eksport (Prometheus/Influx): hub-modus aggregerer alle
-    nodar, direkte-modus gir modbus-kanalane."""
+    nodar; direkte-modus gir lokale SIRIUS-kanalar + modbus-kanalar."""
     if HUB_MODUS:
         return hent_hub_kanalar()
     if SIRIUS_DIREKTE:
-        return _sirius_hent_modbus_kanalar()
+        return _lokale_kanalar_for_eksport() + _sirius_hent_modbus_kanalar()
     return []
 
 
