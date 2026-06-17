@@ -1,9 +1,19 @@
 const BASE = ''
 
 function handle401(res: Response) {
-  if (res.status === 401) {
-    window.location.reload()
+  if (res.status !== 401) return
+  // Loop-vakt: ikkje reload oftare enn éin gong per 8 s. Hindrar tett
+  // reload-loop dersom eit endepunkt held fram med å svare 401 rett etter
+  // sidelasting (t.d. utgått sesjon bak ein proxy).
+  try {
+    const no = Date.now()
+    const sist = Number(sessionStorage.getItem('siste_401_reload') || '0')
+    if (no - sist < 8000) return
+    sessionStorage.setItem('siste_401_reload', String(no))
+  } catch {
+    /* sessionStorage utilgjengeleg — reload likevel */
   }
+  window.location.reload()
 }
 
 // Surface backend-feilmelding (JSON {feil}|{melding}) i staden for berre

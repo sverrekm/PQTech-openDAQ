@@ -72,6 +72,25 @@ def _hent_eller_opprett_secret_key() -> str:
     return key
 
 
+def _delte_token() -> set:
+    """Dei delte flåte-nøklane noden stolar på frå hubben (parent_token /
+    ingest_token / env INGEST_TOKEN). Hub-proxyen signerer kall med ein av
+    desse i X-Hub-Auth → single sign-on."""
+    ut = set()
+    try:
+        import push_konfig
+        k = push_konfig.les_push_konfig()
+        for v in (k.parent_token, k.ingest_token):
+            if v and v.strip():
+                ut.add(v.strip())
+    except Exception:
+        pass
+    env = os.environ.get("INGEST_TOKEN", "").strip()
+    if env:
+        ut.add(env)
+    return ut
+
+
 def sjekk_passord(brukarnavn: str, passord: str) -> bool:
     """Sjekk om brukarnavn og passord er korrekt."""
     data = les_brukar()
@@ -102,6 +121,17 @@ def init_app(app):
 
     @app.before_request
     def sjekk_auth():
+        # Single sign-on: kall proxya frå hubben ber X-Hub-Auth med ein delt
+        # flåte-nøkkel. Er den gyldig, er brukaren alt autentisert på hubben →
+        # autentiser denne node-sesjonen så ein slepp eige node-login. Køyrer
+        # FØR unntaka under, slik at /api/auth/status òg ser sesjonen.
+        if "brukar" not in session:
+            hub_auth = request.headers.get("X-Hub-Auth", "").strip()
+            if hub_auth:
+                for tk in _delte_token():
+                    if secrets.compare_digest(hub_auth, tk):
+                        session["brukar"] = "hub-sso"
+                        break
         # Unntatt: auth-endepunkt og ikkje-API-ruter (frontend, statiske filer)
         if request.path.startswith("/api/auth/") or not request.path.startswith("/api/"):
             return

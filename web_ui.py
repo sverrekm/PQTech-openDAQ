@@ -284,6 +284,13 @@ def node_proxy(node_id, sub_path):
     fwd_headers["X-Forwarded-Host"] = request.host
     fwd_headers["X-Forwarded-Proto"] = request.scheme
     fwd_headers["X-Forwarded-Prefix"] = f"/node-proxy/{node_id}"
+    # Single sign-on: brukaren er alt autentisert på hubben (sjekka over).
+    # Signer kallet med delt flåte-token så noden stolar på det og slepp
+    # brukaren rett inn utan eige node-login. Token blir aldri sendt til
+    # browseren — berre hub→node over Tailscale.
+    _sso_tok = _floate_token()
+    if _sso_tok:
+        fwd_headers["X-Hub-Auth"] = _sso_tok
 
     try:
         upstream = _http_proxy.request(
