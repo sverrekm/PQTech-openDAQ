@@ -68,6 +68,7 @@ export default function ChannelConfigCard() {
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Channel configuration')}</h2>
+      <p className="text-sm text-gray-500 -mt-3 mb-4 leading-snug">{t('Name, unit, type and measuring range for each SIRIUS measurement channel.')}</p>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">

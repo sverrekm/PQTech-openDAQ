@@ -56,6 +56,7 @@ export default function BufferConfigCard() {
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">
         {t('Measurement buffer')}
       </h2>
+      <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Stores measurements locally and forwards them to the hub, so no data is lost if the network drops.')}</p>
 
       <div className="grid grid-cols-2 gap-4 mb-3">
         {/* Aktivert toggle */}

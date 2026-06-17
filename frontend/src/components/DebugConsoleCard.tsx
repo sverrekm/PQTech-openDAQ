@@ -34,7 +34,7 @@ export default function DebugConsoleCard() {
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Debug console')}</h2>
       <p className="text-gray-500 text-xs mb-2">
-        {t('Send raw USB hex commands to SIRIUS.')}
+        {t('Advanced: send raw USB commands to SIRIUS for troubleshooting. Not needed in normal use.')}
       </p>
       <div className="flex gap-2">
         <input

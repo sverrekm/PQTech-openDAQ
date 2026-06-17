@@ -156,6 +156,7 @@ export default function HubNodeConfigCard() {
           {leggTilOpen ? t('Cancel') : t('+ Add node')}
         </button>
       </div>
+      <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Measurement boxes this hub collects data from. Add, test and manage them here.')}</p>
 
       {/* Pending-changes banner (berre hub-modus) */}
       {hub?.pending_changes && (

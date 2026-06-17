@@ -28,6 +28,7 @@ export default function DeviceSettingsCard() {
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('Device')}</h2>
+      <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Basic info about this box: model, location and how many ADC channels it has.')}</p>
 
       <div className="grid grid-cols-2 gap-4 mb-3">
         <div>

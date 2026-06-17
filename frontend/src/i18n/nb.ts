@@ -140,6 +140,15 @@ export const nb: Record<string, string> = {
   'The box did not come back. Check it manually.': 'Boksen kom ikkje opp att i tide. Sjekk han manuelt.',
   'Reload now': 'Last inn på nytt',
 
+  // Settings — forklarande hjelpetekst per kort
+  'Basic info about this box: model, location and how many ADC channels it has.': 'Grunninfo om denne boksen: modell, plassering og kor mange ADC-kanalar han har.',
+  'Name, unit, type and measuring range for each SIRIUS measurement channel.': 'Namn, eining, type og måleområde for kvar SIRIUS-målekanal.',
+  'Stores measurements locally and forwards them to the hub, so no data is lost if the network drops.': 'Lagrar målingar lokalt og sender dei vidare til hubben, slik at ingen data går tapt om nettet fell ut.',
+  'Find and connect to the SIRIUS hardware over USB.': 'Finn og koble til SIRIUS-maskinvara over USB.',
+  'Advanced diagnostics: capture and inspect USB traffic from the SIRIUS.': 'Avansert diagnose: fang opp og analyser USB-trafikk frå SIRIUS.',
+  'Advanced: send raw USB commands to SIRIUS for troubleshooting. Not needed in normal use.': 'Avansert: send rå USB-kommandoar til SIRIUS for feilsøking. Ikkje nødvendig i vanleg bruk.',
+  'Measurement boxes this hub collects data from. Add, test and manage them here.': 'Måleboksar denne hubben samlar data frå. Legg til, test og administrer dei her.',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',
