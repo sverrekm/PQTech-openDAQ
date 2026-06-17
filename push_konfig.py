@@ -14,6 +14,7 @@ Bruk:
 
 import json
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -21,6 +22,12 @@ from pathlib import Path
 log = logging.getLogger('push_konfig')
 
 PUSH_KONFIG_STI = Path("/data/konfig/push.json")
+
+# mtime-basert cache: les_push_konfig blir kalla på kvar /api/ingest (10+ Hz),
+# so vi unngår disk-lesing + logg-spam ved å berre re-lese når fila endrar seg.
+_cache_lock = threading.Lock()
+_cache_konfig = None
+_cache_mtime = None
 
 
 @dataclass
@@ -49,7 +56,19 @@ class PushKonfig:
 
 
 def les_push_konfig() -> PushKonfig:
-    """Les push-konfig frå JSON-fil. Returnerer standard viss fila ikkje finst."""
+    """Les push-konfig frå JSON-fil. Returnerer standard viss fila ikkje finst.
+
+    Resultatet er cacha på fila sin mtime: ved gjentekne kall (t.d. på kvar
+    /api/ingest) blir fila berre re-lese og logga når den faktisk endrar seg.
+    """
+    global _cache_konfig, _cache_mtime
+    try:
+        mtime = PUSH_KONFIG_STI.stat().st_mtime if PUSH_KONFIG_STI.exists() else None
+    except OSError:
+        mtime = None
+    with _cache_lock:
+        if _cache_konfig is not None and mtime == _cache_mtime:
+            return _cache_konfig
     try:
         if PUSH_KONFIG_STI.exists():
             data = json.loads(PUSH_KONFIG_STI.read_text(encoding='utf-8'))
@@ -71,6 +90,7 @@ def les_push_konfig() -> PushKonfig:
             # Lagre tilbake hvis node_id vart auto-generert
             if not data.get("node_id"):
                 lagre_push_konfig(konfig)
+            _oppdater_cache(konfig)
             return konfig
     except Exception as e:
         log.warning(f"Kunne ikkje lese push-konfig: {e}")
@@ -80,7 +100,20 @@ def les_push_konfig() -> PushKonfig:
         lagre_push_konfig(konfig)
     except Exception:
         pass
+    _oppdater_cache(konfig)
     return konfig
+
+
+def _oppdater_cache(konfig: "PushKonfig") -> None:
+    """Lagre konfig i cache med fila sin gjeldande mtime (etter evt. skriving)."""
+    global _cache_konfig, _cache_mtime
+    try:
+        mtime = PUSH_KONFIG_STI.stat().st_mtime if PUSH_KONFIG_STI.exists() else None
+    except OSError:
+        mtime = None
+    with _cache_lock:
+        _cache_konfig = konfig
+        _cache_mtime = mtime
 
 
 def lagre_push_konfig(konfig: PushKonfig) -> bool:
