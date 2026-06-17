@@ -127,6 +127,12 @@ export const nb: Record<string, string> = {
   'Modbus TCP': 'Modbus TCP',
   'Overridden': 'Overstyrt',
 
+  // UX quick wins (stale-vakt + support-pakke)
+  'Lost contact with the measurement box — trying to reconnect...': 'Mista kontakt med måleboksen — prøver å kople til att …',
+  'Support': 'Support',
+  'Download support bundle': 'Last ned feilsøkingspakke',
+  'Download logs and config to send to PQ Tech support. Secrets are removed.': 'Last ned loggar og konfig for å sende til PQ Tech support. Hemmelege felt er fjerna.',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',

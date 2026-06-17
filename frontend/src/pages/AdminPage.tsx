@@ -113,6 +113,18 @@ export default function AdminPage() {
         </select>
       </div>
 
+      {/* Support bundle */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('Support')}</h2>
+        <p className="text-sm text-gray-500 mb-3">{t('Download logs and config to send to PQ Tech support. Secrets are removed.')}</p>
+        <a
+          href="/api/system/support-bundle"
+          className="inline-block px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-medium rounded-md transition-colors"
+        >
+          {t('Download support bundle')}
+        </a>
+      </div>
+
       {/* Restart */}
       <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
         <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('System')}</h2>

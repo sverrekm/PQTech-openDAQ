@@ -179,6 +179,30 @@ def _req(url: str, token: str, forge: str = "gitea"):
     return urllib.request.Request(url, headers=headers)
 
 
+def _opna_json(req):
+    """Opna ein førespurnad og returner parsa JSON, med vennlege feilmeldingar.
+
+    Mappar dei vanlege HTTP-feila til forklarande tekst i staden for rå
+    'HTTP Error 403' / 500 i GUI-et."""
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise RuntimeError("Access-token er ugyldig eller utløpt (401).") from e
+        if e.code == 403:
+            raise RuntimeError(
+                "Token manglar tilgang (403). GitLab-token må ha scope "
+                "'read_api' (eller 'api') — ikkje berre 'read_repository'.") from e
+        if e.code == 404:
+            raise RuntimeError(
+                "Repo eller branch ikkje funnen (404). Sjekk repo-URL og branch, "
+                "og at tokenet har tilgang til prosjektet.") from e
+        raise RuntimeError(f"Feil frå git-tenaren: HTTP {e.code}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Når ikkje git-tenaren: {e.reason}") from e
+
+
 def _tarball_url(p, eigar, repo, branch):
     forge = _forge(p.hostname)
     if forge == "github":
@@ -213,8 +237,7 @@ def sjekk_github():
 
     if forge == "github":
         url = f"https://api.github.com/repos/{eigar}/{repo}/commits/{branch}"
-        with urllib.request.urlopen(_req(url, token, forge), timeout=15) as resp:
-            data = json.loads(resp.read().decode())
+        data = _opna_json(_req(url, token, forge))
         commit = data.get("commit", {})
         committer = commit.get("committer", {}) or {}
         return {
@@ -228,8 +251,7 @@ def sjekk_github():
         prosjekt = _gitlab_prosjekt(eigar, repo)
         base = f"{p.scheme}://{p.netloc}/api/v4/projects/{prosjekt}"
         url = f"{base}/repository/commits?ref_name={branch}&per_page=1"
-        with urllib.request.urlopen(_req(url, token, forge), timeout=15) as resp:
-            liste = json.loads(resp.read().decode())
+        liste = _opna_json(_req(url, token, forge))
         if not liste:
             raise RuntimeError("Tomt repo / ingen commits funne")
         d = liste[0]
@@ -244,8 +266,7 @@ def sjekk_github():
     # gitea / forgejo
     base = f"{p.scheme}://{p.netloc}/api/v1/repos/{eigar}/{repo}"
     url = f"{base}/commits?sha={branch}&limit=1"
-    with urllib.request.urlopen(_req(url, token, forge), timeout=15) as resp:
-        liste = json.loads(resp.read().decode())
+    liste = _opna_json(_req(url, token, forge))
     if not liste:
         raise RuntimeError("Tomt repo / ingen commits funne")
     data = liste[0]

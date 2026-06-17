@@ -1348,6 +1348,93 @@ def api_system_sjekk_oppdatering():
         return jsonify({"feil": str(e)}), 500
 
 
+@app.route("/api/system/support-bundle")
+def api_system_support_bundle():
+    """Lag ein ZIP med (redigert) konfig, systeminfo og logg for support.
+
+    Hemmelege felt (token/passord/secret) vert redigerte bort før zipping,
+    slik at pakken trygt kan sendast til PQ Tech support."""
+    if "brukar" not in session:
+        return jsonify({"feil": "Ikkje innlogga"}), 401
+
+    import io
+    import zipfile
+    import json as _json
+    import platform
+    import time as _time
+
+    HEMMELEG = ("token", "passord", "password", "secret")
+
+    def reduser(obj):
+        if isinstance(obj, dict):
+            ut = {}
+            for k, v in obj.items():
+                if any(h in k.lower() for h in HEMMELEG) and v:
+                    ut[k] = "***REDIGERT***"
+                else:
+                    ut[k] = reduser(v)
+            return ut
+        if isinstance(obj, list):
+            return [reduser(x) for x in obj]
+        return obj
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        # 1) Systeminfo
+        info = [
+            f"Generert: {_time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Hostname: {socket.gethostname()}",
+            f"Modus: {'hub' if HUB_MODUS else 'node/direkte'}",
+            f"Platform: {platform.platform()}",
+            f"Python: {platform.python_version()}",
+        ]
+        try:
+            info.append(f"Versjon: {_json.dumps(oppdatering.les_versjon())}")
+        except Exception as e:
+            info.append(f"Versjon: (ukjend: {e})")
+        for k in sorted(os.environ):
+            if any(h in k.lower() for h in HEMMELEG):
+                continue
+            if k.startswith(("OPENDAQ", "OPPDATER", "INGEST", "TZ", "HOSTNAME", "PARENT")):
+                info.append(f"env {k}={os.environ[k]}")
+        z.writestr("system_info.txt", "\n".join(info))
+
+        # 2) Konfig (redigert)
+        for sti in sorted(glob_mod.glob("/data/konfig/*.json")):
+            namn = os.path.basename(sti)
+            try:
+                with open(sti, encoding="utf-8") as f:
+                    data = _json.load(f)
+                z.writestr(f"konfig/{namn}",
+                           _json.dumps(reduser(data), indent=2, ensure_ascii=False))
+            except Exception as e:
+                z.writestr(f"konfig/{namn}.FEIL.txt", str(e))
+
+        # 3) Logg (intern ring-buffer om tilgjengeleg)
+        try:
+            if SIRIUS_DIREKTE:
+                z.writestr("logg/sirius.log", "\n".join(_sirius_hent_logg(500)))
+            else:
+                z.writestr("logg/README.txt",
+                           "Ingen lokal SIRIUS-logg (hub-modus).\n"
+                           "Full logg: 'sudo docker logs pqtech-opendaq' på verten.")
+        except Exception as e:
+            z.writestr("logg/FEIL.txt", str(e))
+
+        # 4) Ingest-statistikk (hub)
+        try:
+            with _ingest_lock:
+                stats = dict(_ingest_stats)
+            z.writestr("ingest_stats.json", _json.dumps(stats, indent=2, default=str))
+        except Exception:
+            pass
+
+    buf.seek(0)
+    fnamn = f"support-{socket.gethostname()}-{_time.strftime('%Y%m%d-%H%M%S')}.zip"
+    return Response(buf.getvalue(), mimetype="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename={fnamn}"})
+
+
 @app.route("/api/system/oppdater-konfig")
 def api_system_oppdater_konfig_hent():
     """Repo-URL/branch for oppdatering. Token vert aldri returnert

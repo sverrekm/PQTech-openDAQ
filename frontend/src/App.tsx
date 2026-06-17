@@ -53,7 +53,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>({ page: 'dashboard' })
 
   const statusFetcher = useCallback(() => fetchStatus(), [])
-  const { data: status, loading: statusLoading } = usePolling(statusFetcher, 5000)
+  const { data: status, loading: statusLoading, stale: statusStale } = usePolling(statusFetcher, 5000)
 
   const liveFetcher = useCallback(() => fetchKanalLive(), [])
   const { data: liveData, loading: liveDataLoading } = usePolling(liveFetcher, 2000)
@@ -121,11 +121,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} />
+      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} />
       <Layout>
         <Sidebar view={view} onNavigate={setView} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} />
         <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto">
+          <div className={`max-w-4xl mx-auto transition-opacity duration-300 ${statusStale ? 'opacity-40' : ''}`}>
             {content}
           </div>
         </div>
