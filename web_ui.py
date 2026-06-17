@@ -1862,9 +1862,21 @@ def api_hub_buffer_status():
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
 
 
+def _send_index():
+    """Server index.html med no-cache. Asset-filene er innhalds-hasha (kan
+    cachast evig), men index.html MÅ hentast fersk — elles peikar ein cacha
+    index på gamle/borte asset-hashar etter ei oppdatering (blank side / 404),
+    spesielt gjennom node-proxyen."""
+    resp = send_file(os.path.join(FRONTEND_DIR, "index.html"))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 @app.route("/")
 def index():
-    return send_file(os.path.join(FRONTEND_DIR, "index.html"))
+    return _send_index()
 
 
 @app.route("/assets/<path:filename>")
@@ -1879,7 +1891,7 @@ def catch_all(path):
     file_path = os.path.join(FRONTEND_DIR, path)
     if os.path.isfile(file_path):
         return send_file(file_path)
-    return send_file(os.path.join(FRONTEND_DIR, "index.html"))
+    return _send_index()
 
 
 # --- Legacy HTML removed (migrated to React in frontend/) ---
