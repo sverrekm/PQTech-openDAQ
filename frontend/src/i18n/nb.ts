@@ -133,6 +133,13 @@ export const nb: Record<string, string> = {
   'Download support bundle': 'Last ned feilsøkingspakke',
   'Download logs and config to send to PQ Tech support. Secrets are removed.': 'Last ned loggar og konfig for å sende til PQ Tech support. Hemmelege felt er fjerna.',
 
+  // Oppdateringsstatus (live restart)
+  'Update applied — restarting the box...': 'Oppdatering lasta ned og lagt inn — startar boksen på nytt …',
+  'Waiting for the box to come back...': 'Ventar på at boksen kjem opp att …',
+  'Updated — reloading...': 'Oppdatert — lastar sida på nytt …',
+  'The box did not come back. Check it manually.': 'Boksen kom ikkje opp att i tide. Sjekk han manuelt.',
+  'Reload now': 'Last inn på nytt',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',
