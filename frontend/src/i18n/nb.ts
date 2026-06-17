@@ -178,6 +178,12 @@ export const nb: Record<string, string> = {
   'Harmonics': 'Harmoniske',
   'Spectrum max (Hz)': 'Spektrum maks (Hz)',
 
+  // Settings-undergrupper
+  'Device & measurement': 'Enhet & måling',
+  'Sharing & integrations': 'Deling & integrasjon',
+  'Network & nodes': 'Nettverk & nodar',
+  'Diagnostics (advanced)': 'Diagnose (avansert)',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',
