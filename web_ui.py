@@ -256,7 +256,13 @@ def node_proxy(node_id, sub_path):
     http://<node-adresse>:8080/<sub_path> via Tailscale.
     """
     if "brukar" not in session:
-        # Send tilbake til hub-login (med return-URL)
+        # API/XHR-kall (og alt som ikkje er GET) toler ikkje ein HTML-redirect
+        # til "/": fetch følgjer den og endar i 405/HTML → frontenden viser
+        # "Could not contact the server" ved t.d. innlogging på noden. Svar
+        # heller 401 JSON så frontenden handterer det (re-login på hubben).
+        # Topp-nivå GET-navigasjon (sidelasting) får framleis redirect til login.
+        if "/api/" in request.path or request.method != "GET":
+            return jsonify({"feil": "Hub-session utløpt — logg inn på hubben på nytt."}), 401
         return redirect("/")
 
     node = _hent_node_for_proxy(node_id)
