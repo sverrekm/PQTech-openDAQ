@@ -1259,6 +1259,74 @@ def api_hub_kanalar():
     return jsonify({"kanalar": []})
 
 
+@app.route("/api/metrics")
+def api_metrics():
+    """Prometheus-eksponering av kanalverdiane for Grafana-deling.
+
+    Token-verna (hubben er offentleg eksponert): send token som
+    `?token=<TOKEN>` eller `Authorization: Bearer <TOKEN>`. TOKEN = env
+    METRICS_TOKEN viss sett, elles den delte flåte-nøkkelen (_floate_token).
+    Grafana → Prometheus skrapar dette, og du grafar pqtech_channel_value.
+    """
+    tok = os.environ.get("METRICS_TOKEN", "").strip() or _floate_token()
+    gitt = request.args.get("token", "").strip()
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        gitt = auth[7:].strip()
+    if not tok:
+        return Response("# metrics ikkje konfigurert (manglar token)\n",
+                        status=503, mimetype="text/plain")
+    if gitt != tok:
+        return Response("# ugyldig eller manglande token\n",
+                        status=401, mimetype="text/plain")
+
+    try:
+        if HUB_MODUS:
+            kanalar = hent_hub_kanalar()
+        elif SIRIUS_DIREKTE:
+            kanalar = _sirius_hent_modbus_kanalar()
+        else:
+            kanalar = []
+    except Exception as e:
+        return Response(f"# feil ved henting: {e}\n", status=500, mimetype="text/plain")
+
+    def esc(s):
+        return str(s).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+    linjer = [
+        "# HELP pqtech_channel_value Kanalverdi frå PQTech openDAQ",
+        "# TYPE pqtech_channel_value gauge",
+    ]
+    node_tilstand = {}
+    for k in kanalar:
+        node = k.get("node_namn") or k.get("node_id") or ""
+        node_id = k.get("node_id") or ""
+        if node_id:
+            cur = node_tilstand.get((node_id, node), 0)
+            node_tilstand[(node_id, node)] = max(cur, 1 if k.get("tilkobla") else 0)
+        verdi = k.get("verdi")
+        if verdi is None:
+            continue
+        try:
+            v = float(verdi)
+        except (TypeError, ValueError):
+            continue
+        labels = (f'node="{esc(node)}",node_id="{esc(node_id)}",'
+                  f'channel="{esc(k.get("namn") or "")}",'
+                  f'unit="{esc(k.get("eining") or "")}",'
+                  f'type="{esc(k.get("kanal_type") or "opendaq")}"')
+        linjer.append(f"pqtech_channel_value{{{labels}}} {v}")
+
+    if node_tilstand:
+        linjer.append("# HELP pqtech_node_connected Node tilkobla (1=ja, 0=nei)")
+        linjer.append("# TYPE pqtech_node_connected gauge")
+        for (nid, nn), st in node_tilstand.items():
+            linjer.append(f'pqtech_node_connected{{node="{esc(nn)}",node_id="{esc(nid)}"}} {st}')
+
+    return Response("\n".join(linjer) + "\n",
+                    mimetype="text/plain; version=0.0.4; charset=utf-8")
+
+
 @app.route("/api/hub/kanal-ranges")
 def api_hub_kanal_ranges_hent():
     """Hent kanal-range overstyringer."""

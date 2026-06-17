@@ -135,6 +135,10 @@ def init_app(app):
         # Unntatt: auth-endepunkt og ikkje-API-ruter (frontend, statiske filer)
         if request.path.startswith("/api/auth/") or not request.path.startswith("/api/"):
             return
+        # Unntatt: Prometheus-metrics har eigen token-auth i ruta (Grafana/
+        # Prometheus kan ikkje session-cookies).
+        if request.path == "/api/metrics":
+            return
         # Unntatt: POST /api/ingest har eigen Bearer-token-auth (kallast frå
         # node-konteinarar bak CGNAT, kan ikkje session-cookies). GET-endepunkt
         # under /api/ingest/ er admin-only (status, data) -> session-auth.
