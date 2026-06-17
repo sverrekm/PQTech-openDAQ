@@ -916,6 +916,22 @@ def hent_buffer_status():
     return _buffer_skrivar.hent_status()
 
 
+def hent_raw_vindu(n: int):
+    """Hent dei siste n rå (fysisk skalerte) ADC-samplane for FFT/EMC-analyse.
+
+    Returnerer (samples (n,8) float64, sample_rate, skalering_klar) eller None
+    viss buffer ikkje er aktiv. Trådsikkert (ringbuffer-lås)."""
+    if _buffer_skrivar is None or _buffer_skrivar._ring is None:
+        return None
+    try:
+        samples = _buffer_skrivar._ring.hent_siste(int(n))
+        sr = float(_buffer_skrivar._konfig.sample_rate)
+        klar = bool(getattr(_buffer_skrivar, "_skalering_klar", False))
+        return samples, sr, klar
+    except Exception:
+        return None
+
+
 def hent_buffer_data(etter_id=0, limit=10000):
     """Hent usynkroniserte buffer-rader for hub-synkronisering."""
     if _buffer_skrivar is None:

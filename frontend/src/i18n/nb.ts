@@ -171,6 +171,13 @@ export const nb: Record<string, string> = {
   'Saved.': 'Lagra.',
   'Failed': 'Feila',
 
+  // EMC / spektral-analyse
+  'EMC / spectral analysis': 'EMC / spektral-analyse',
+  'Compute harmonics, THD and spectrum from the raw SIRIUS waveform and send to InfluxDB/Grafana. Requires Share to Grafana to be set up.': 'Rekn harmoniske, THD og spektrum frå den rå SIRIUS-bølgjeforma og send til InfluxDB/Grafana. Krev at «Del til Grafana» er sett opp.',
+  'Mains freq (Hz)': 'Nettfrekvens (Hz)',
+  'Harmonics': 'Harmoniske',
+  'Spectrum max (Hz)': 'Spektrum maks (Hz)',
+
   // ChannelConfigCard
   'Channel configuration': 'Kanal-konfigurasjon',
   'Min': 'Min',

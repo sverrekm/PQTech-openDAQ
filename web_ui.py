@@ -23,6 +23,7 @@ import usbip_manager
 import tailscale_manager
 import oppdatering
 import influx_pusher
+import emc_pusher
 import brukar_auth
 
 # Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
@@ -57,6 +58,7 @@ try:
         oppdater_modbus_konfig_og_restart as _modbus_restart_etter_konfig,
         hent_modbus_nodar as _sirius_hent_modbus_nodar,
         hent_modbus_kanalar as _sirius_hent_modbus_kanalar,
+        hent_raw_vindu as _sirius_hent_raw_vindu,
     )
     SIRIUS_DIREKTE = True
 except ImportError:
@@ -1388,6 +1390,50 @@ def api_influx_test():
     return jsonify({"suksess": ok, "melding": melding})
 
 
+def _emc_hent_vindu():
+    """(samples (N,8), sample_rate, klar, {idx:(namn,eining)}) for EMC-FFT,
+    eller None. Berre i SIRIUS-direkte-modus (rå ADC-bølgjeform)."""
+    if not SIRIUS_DIREKTE:
+        return None
+    konf = emc_pusher.les_konfig()
+    f0 = float(konf.get("nettfrekvens", 50)) or 50.0
+    syk = int(konf.get("syklusar", 10))
+    n = int(syk * 20000 / f0) + 256
+    res = _sirius_hent_raw_vindu(n)
+    if not res:
+        return None
+    samples, sr, klar = res
+    kanalar = {}
+    try:
+        for k in les_konfig():
+            if getattr(k, "aktiv", True):
+                kanalar[k.indeks] = (k.namn, k.enhet)
+    except Exception:
+        pass
+    return samples, sr, klar, kanalar
+
+
+@app.route("/api/emc/konfig")
+def api_emc_konfig_hent():
+    """EMC/FFT-analyse konfig."""
+    return jsonify(emc_pusher.konfig_offentleg())
+
+
+@app.route("/api/emc/konfig", methods=["PUT"])
+def api_emc_konfig_sett():
+    """Lagre EMC-konfig (nettfrekvens, harmoniske, syklusar, fft-bins, intervall)."""
+    data = request.get_json(silent=True) or {}
+    emc_pusher.lagre_konfig(data)
+    return jsonify({"suksess": True, **emc_pusher.konfig_offentleg()})
+
+
+@app.route("/api/emc/test", methods=["POST"])
+def api_emc_test():
+    """Rekn + skriv EMC-data no (for å teste oppsettet)."""
+    ok, melding = emc_pusher.skriv_ein_gong(_emc_hent_vindu)
+    return jsonify({"suksess": ok, "melding": melding})
+
+
 @app.route("/api/hub/kanal-ranges")
 def api_hub_kanal_ranges_hent():
     """Hent kanal-range overstyringer."""
@@ -2049,6 +2095,13 @@ try:
     influx_pusher.start(_hent_kanalar_for_eksport)
 except Exception as _e:  # noqa: BLE001
     print(f"Influx-skrivar starta ikkje: {_e}")
+
+# Start EMC/FFT-skrivar (harmoniske, THD, spektrum → InfluxDB). Berre nyttig
+# i SIRIUS-direkte-modus (rå bølgjeform), og berre når aktivert i emc.json.
+try:
+    emc_pusher.start(_emc_hent_vindu)
+except Exception as _e:  # noqa: BLE001
+    print(f"EMC-skrivar starta ikkje: {_e}")
 
 
 if __name__ == "__main__":
