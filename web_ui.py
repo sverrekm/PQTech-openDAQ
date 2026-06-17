@@ -1863,11 +1863,28 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fronten
 
 
 def _send_index():
-    """Server index.html med no-cache. Asset-filene er innhalds-hasha (kan
-    cachast evig), men index.html MÅ hentast fersk — elles peikar ein cacha
-    index på gamle/borte asset-hashar etter ei oppdatering (blank side / 404),
-    spesielt gjennom node-proxyen."""
-    resp = send_file(os.path.join(FRONTEND_DIR, "index.html"))
+    """Server index.html med no-cache, og injiser <base href> når vi er bak
+    node-proxyen.
+
+    Asset-filene er innhalds-hasha (kan cachast evig), men index.html MÅ
+    hentast fersk — elles peikar ein cacha index på gamle/borte asset-hashar
+    etter ei oppdatering (blank side / 404).
+
+    SPA-en brukar relative asset-stiar (./assets/...). Bak node-proxyen sender
+    hubben X-Forwarded-Prefix=/node-proxy/<id>. Vi injiserer <base href=
+    "<prefix>/"> slik at relative stiar ALLTID løyser mot proxy-prefikset —
+    sjølv om dokument-URL-en er ukanonisk (t.d. dobbel-prefiks). Det fjernar
+    avhengigheita av 307-redirect-omskriving og hindrar dobbel-prefiks-404."""
+    prefix = request.headers.get("X-Forwarded-Prefix", "").rstrip("/")
+    sti = os.path.join(FRONTEND_DIR, "index.html")
+    if prefix:
+        with open(sti, encoding="utf-8") as f:
+            html = f.read()
+        if "<base " not in html:
+            html = html.replace("<head>", f'<head>\n    <base href="{prefix}/">', 1)
+        resp = Response(html, mimetype="text/html")
+    else:
+        resp = send_file(sti)
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
