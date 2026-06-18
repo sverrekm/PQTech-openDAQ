@@ -2484,6 +2484,14 @@ def start_hub():
     relay_traad.start()
     log.info("Helsesjekk- og relay-trådar starta")
 
+    # Start hub-side EMC (harmoniske/THD/spektrum frå bridga bølgjeformer).
+    # Passiv til EMC er aktivert i emc.json + Share to Grafana er sett opp.
+    try:
+        import hub_emc
+        hub_emc.start()
+    except Exception as e:
+        log.warning(f"Kunne ikkje starte hub-EMC: {e}")
+
     # Start hub-buffer sync
     global _hub_buffer
     try:

@@ -167,6 +167,17 @@ def skriv_ein_gong(hent_vindu) -> tuple:
 
     if not linjer:
         return True, "Ingen kanalar å analysere"
+    return skriv_linjer(linjer)
+
+
+def skriv_linjer(linjer: list) -> tuple:
+    """Skriv ferdige line-protocol-linjer til InfluxDB. Delt av node- og
+    hub-side EMC (hub_emc). Returnerer (ok, melding)."""
+    if not linjer:
+        return True, "Ingen punkt å skrive"
+    inf = influx_pusher.les_konfig()
+    if not (inf.get("url") and inf.get("token")):
+        return False, "InfluxDB ikkje konfigurert (sjå Share to Grafana)"
     body = "\n".join(linjer).encode("utf-8")
     qs = urllib.parse.urlencode({"org": inf.get("org", ""),
                                  "bucket": inf.get("bucket", ""), "precision": "s"})

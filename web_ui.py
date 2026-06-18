@@ -1430,8 +1430,18 @@ def api_emc_konfig_sett():
 
 @app.route("/api/emc/test", methods=["POST"])
 def api_emc_test():
-    """Rekn + skriv EMC-data no (for å teste oppsettet)."""
-    ok, melding = emc_pusher.skriv_ein_gong(_emc_hent_vindu)
+    """Rekn + skriv EMC-data no (for å teste oppsettet).
+
+    Hub-modus: analyser dei bridga kanalane (hub_emc). Node-modus: analyser
+    den lokale SIRIUS-bølgjeforma (emc_pusher)."""
+    if HUB_MODUS:
+        try:
+            import hub_emc
+            ok, melding = hub_emc.samle_og_skriv()
+        except Exception as e:  # noqa: BLE001
+            ok, melding = False, str(e)
+    else:
+        ok, melding = emc_pusher.skriv_ein_gong(_emc_hent_vindu)
     return jsonify({"suksess": ok, "melding": melding})
 
 
