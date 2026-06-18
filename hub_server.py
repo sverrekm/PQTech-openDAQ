@@ -96,6 +96,17 @@ _ACQLOOP_TOGGLE = "/tmp/opendaq_disable_acq"
 _fjern_kanal_info = []   # Info om fjern-kanalar for descriptor-bygging
 _kanal_range_overstyringer = {}  # "node_id:kanal_namn" -> (low, high)
 
+# --- Auto-rebuild ved endra kanal-topologi ---
+# RefDevice har låst NumberOfChannels (bygd ved oppstart). Når ein tilkopla
+# node endrar kanaltal (t.d. SIRIUS flytta mellom nodar) må hubben byggje
+# strukturen på nytt via restart. Helsesjekk-loopen oppdagar dette og
+# auto-restartar når kanaltalet har vore stabilt eit lite vindauge (debounce
+# hindrar rebuild medan ein node bootar). Skru av med HUB_AUTO_REBUILD=0.
+_AUTO_REBUILD = os.environ.get("HUB_AUTO_REBUILD", "1") != "0"
+_AUTO_REBUILD_STABIL_S = 30.0    # kanaltal må vere uendra så lenge før rebuild
+_bygd_node_kanaltal = {}         # node_id -> openDAQ-kanaltal bakt inn i RefDevice
+_endring_obs = {"signatur": None, "sidan": 0.0}
+
 # --- Modbus TCP-nodar (via ModbusManager) ---
 def _modbus_status_cb(node_id: str, status: dict):
     """Propager modbus-status til _node_status så hent_hub_status ser den."""
@@ -382,6 +393,16 @@ def _oppdater_root_kanalar():
 
     # Lagre globalt for descriptor-bygging etter server-start
     _fjern_kanal_info = fjern_kanalar
+
+    # Record kanaltal per openDAQ-node som er bakt inn i denne RefDevice-
+    # strukturen — helsesjekk-loopen samanliknar live-tal mot dette for
+    # auto-rebuild når topologien endrar seg (sjå _sjekk_auto_rebuild).
+    global _bygd_node_kanaltal
+    _bygd_node_kanaltal = {}
+    for fk in fjern_kanalar:
+        if fk.get("kanal_type") == "opendaq" and fk.get("node_id"):
+            _bygd_node_kanaltal[fk["node_id"]] = \
+                _bygd_node_kanaltal.get(fk["node_id"], 0) + 1
 
     # --- Set NumberOfChannels ---
     try:
@@ -2107,6 +2128,57 @@ def _helsesjekk_loop():
                     _siste_rekobling[node.id] = time.time()
                     log.info(f"Prøver rekobling til '{node.namn}'...")
                     _koble_til_node(node)
+
+        # Etter at alle nodar er sjekka: vurder auto-rebuild av kanalstruktur
+        try:
+            _sjekk_auto_rebuild()
+        except Exception as e:
+            log.debug(f"_sjekk_auto_rebuild feil: {e}")
+
+
+def _sjekk_auto_rebuild():
+    """Auto-restart hubben når ein tilkopla openDAQ-node sitt kanaltal har
+    endra seg frå det som er bakt inn i RefDevice (t.d. SIRIUS flytta mellom
+    nodar). Debounce: kanaltalet må vere stabilt i _AUTO_REBUILD_STABIL_S før
+    restart, så vi ikkje byggjer på nytt medan ein node framleis bootar.
+
+    Trigger berre på tilkopla nodar som vi har lese kanaltal frå minst éin
+    gong — fråkopla nodar held kanalane sine (transient nedetid skal ikkje
+    fjerne kanalar frå DewesoftX).
+    """
+    if not _AUTO_REBUILD:
+        return
+
+    live = {}
+    with _hub_lock:
+        for node in _hub_konfig.nodar:
+            if node.type == NODE_TYPE_MODBUS_TCP or not node.aktivert:
+                continue
+            st = _node_status.get(node.id, {})
+            if st.get("tilkobla") and "antal_kanalar" in st:
+                live[node.id] = int(st.get("antal_kanalar") or 0)
+
+    # Mismatch: tilkopla node med kanaltal != bakt-inn (ny node = ikkje i bakt)
+    mismatch = any(live[nid] != _bygd_node_kanaltal.get(nid) for nid in live)
+    if not mismatch:
+        _endring_obs["signatur"] = None
+        return
+
+    sig = tuple(sorted(live.items()))
+    no = time.time()
+    if _endring_obs["signatur"] != sig:
+        # Ny/endra signatur — (re)start debounce-klokka
+        _endring_obs["signatur"] = sig
+        _endring_obs["sidan"] = no
+        log.info(f"Auto-rebuild: kanal-topologi endra {dict(_bygd_node_kanaltal)} "
+                 f"-> {dict(live)} — ventar {_AUTO_REBUILD_STABIL_S:.0f}s på stabilitet")
+        return
+
+    if no - _endring_obs["sidan"] >= _AUTO_REBUILD_STABIL_S:
+        log.warning(f"Auto-rebuild: stabil kanal-topologi-endring "
+                    f"{dict(_bygd_node_kanaltal)} -> {dict(live)} — restartar hub")
+        _endring_obs["signatur"] = None
+        restart_hub()
 
 
 # --- API-funksjonar for web_ui ---
