@@ -148,6 +148,15 @@ def skriv_ein_gong(hent_vindu) -> tuple:
         nodenamn = socket.gethostname()
     except Exception:
         pass
+    # Føretrekk display-namnet frå push-konfig (t.d. "Sundet") så node-taggen
+    # er konsistent med kanal-pushen og med hub-forwarda EMC.
+    try:
+        from push_konfig import les_push_konfig
+        _pk = les_push_konfig()
+        if _pk.node_namn:
+            nodenamn = _pk.node_namn
+    except Exception:
+        pass
 
     linjer = []
     for idx, (namn, eining) in kanalar.items():
@@ -167,7 +176,41 @@ def skriv_ein_gong(hent_vindu) -> tuple:
 
     if not linjer:
         return True, "Ingen kanalar å analysere"
-    return skriv_linjer(linjer)
+    ok, melding = skriv_linjer(linjer)          # lokal InfluxDB (t.d. heime .22)
+    fwd = _forward_til_hub(linjer)              # vidaresend til hub (→ office .122)
+    if fwd is not None:
+        melding = f"{melding}; hub→{fwd}"
+    return ok, melding
+
+
+def _forward_til_hub(linjer: list):
+    """Stream dei ferdige EMC-linjene til hubben (→ hubben sin InfluxDB).
+
+    Lèt EMC reknast lokalt der den rå bølgjeforma bur (billig), og berre dei
+    små resultata gå over brua — i staden for å streame rå 20kHz-waveform til
+    hubben (som er WAN-tungt). Brukar parent_url/parent_token frå push-konfig.
+    Returnerer HTTP-kode (int), eller None viss ikkje konfigurert/feila.
+    """
+    try:
+        from push_konfig import les_push_konfig
+        pk = les_push_konfig()
+        url = (pk.parent_url or "").strip()
+        tok = (pk.parent_token or "").strip()
+    except Exception:
+        return None
+    if not url or not tok:
+        return None
+    try:
+        body = json.dumps({"linjer": linjer}).encode("utf-8")
+        req = urllib.request.Request(
+            url.rstrip("/") + "/api/emc-ingest", data=body, method="POST",
+            headers={"Authorization": f"Bearer {tok}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.status
+    except Exception as e:
+        log.warning(f"EMC-forward til hub feila: {e}")
+        return None
 
 
 def skriv_linjer(linjer: list) -> tuple:

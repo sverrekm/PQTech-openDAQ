@@ -1446,6 +1446,38 @@ def api_emc_test():
     return jsonify({"suksess": ok, "melding": melding})
 
 
+@app.route("/api/emc-ingest", methods=["POST"])
+def api_emc_ingest():
+    """Mottak: nodar streamar ferdig-rekna EMC-linjer hit (line-protocol).
+
+    Noden reknar EMC lokalt frå rå bølgjeform og sender berre dei små
+    resultata over brua; hubben skriv dei til SIN InfluxDB (Share to Grafana).
+    Validerer Bearer-token som /api/ingest.
+    """
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+    forventa = ""
+    try:
+        forventa = les_push_konfig().ingest_token
+    except Exception:
+        pass
+    if not forventa:
+        forventa = os.environ.get("INGEST_TOKEN", "")
+    if not forventa:
+        return jsonify({"suksess": False, "melding": "Ingest ikkje konfigurert"}), 503
+    if token != forventa:
+        return jsonify({"suksess": False, "melding": "Ugyldig token"}), 401
+
+    data = request.get_json(silent=True) or {}
+    linjer = data.get("linjer", [])
+    if not isinstance(linjer, list) or not linjer:
+        return jsonify({"suksess": True, "melding": "ingen linjer"})
+    # Berre pqtech_* measurements (unngå at nokon skriv vilkårleg)
+    linjer = [str(l) for l in linjer if str(l).startswith("pqtech_")]
+    ok, melding = emc_pusher.skriv_linjer(linjer)
+    return jsonify({"suksess": ok, "melding": melding, "mottatt": len(linjer)})
+
+
 # --- Hub-lager: persistent lagring av kanaldata på hubben ---
 
 @app.route("/api/hub-lager/konfig")

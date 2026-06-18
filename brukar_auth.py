@@ -144,6 +144,10 @@ def init_app(app):
         # under /api/ingest/ er admin-only (status, data) -> session-auth.
         if request.path == "/api/ingest" and request.method == "POST":
             return
+        # Unntatt: POST /api/emc-ingest har eigen Bearer-token-auth (nodar
+        # streamar ferdig-rekna EMC-resultat hit, server-til-server).
+        if request.path == "/api/emc-ingest" and request.method == "POST":
+            return
         # Unntatt: hub->node oppdaterings-trigger via Bearer flaate-token.
         # Sjølve token-valideringa skjer i ruta (api_system_oppdater).
         if (request.path in ("/api/system/oppdater", "/api/system/restart")
