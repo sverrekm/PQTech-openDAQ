@@ -31,6 +31,9 @@ log = logging.getLogger("hub_emc")
 # Dedikerte EMC-lesarar (uavhengige av relay-lesarane i hub_server)
 _emc_readers = {}      # (node_id, sig_id) -> daq.StreamReader
 _MAKS_BACKLOG = 500_000  # drop lesar viss backlog renn over (treg DERP e.l.)
+# Lås: hindrar at bakgrunns-loopen og /api/emc/test les same StreamReader
+# samtidig (openDAQ-lesarane er ikkje trådsikre → kan henge).
+_lock = threading.Lock()
 
 
 def _node_namn_map() -> dict:
@@ -51,6 +54,18 @@ def samle_og_skriv() -> tuple:
     import hub_server
     import opendaq as daq
 
+    # Hindra samtidig lesing (bakgrunns-loop vs Test-knapp). Ikkje-blokkerande
+    # så Test-kallet returnerer kjapt i staden for å henge (524) viss loopen
+    # alt køyrer.
+    if not _lock.acquire(blocking=False):
+        return True, "Hub-EMC køyrer allereie — hoppar over denne runda"
+    try:
+        return _samle_og_skriv_intern(daq, hub_server)
+    finally:
+        _lock.release()
+
+
+def _samle_og_skriv_intern(daq, hub_server):
     konf = emc_pusher.les_konfig()
     f0 = float(konf.get("nettfrekvens", 50)) or 50.0
     syk = max(1, int(konf.get("syklusar", 10)))
@@ -103,13 +118,12 @@ def samle_og_skriv() -> tuple:
                 continue
             if count < N:
                 continue   # ikkje nok samples til eit vindauge enno
-            if count > N:
-                reader.skip(count - N)   # behald berre dei nyaste N
-            window = reader.read(N)
-            if window is None or len(window) < N:
+            # Les alle tilgjengelege samples (ikkje-blokkerande — dei finst
+            # alt) og bruk dei nyaste N. Unngår read(N) som kan blokkere.
+            data = reader.read(count)
+            if data is None or len(data) < N:
                 continue
-
-            arr = np.asarray(window, dtype=np.float64)
+            arr = np.asarray(data[-N:], dtype=np.float64)
             r = emc_pusher.analyser_kanal(arr, sr, {**konf})
             if not r:
                 continue
