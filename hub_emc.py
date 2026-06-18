@@ -57,8 +57,8 @@ def samle_og_skriv() -> tuple:
     # Hindra samtidig lesing (bakgrunns-loop vs Test-knapp). Ikkje-blokkerande
     # så Test-kallet returnerer kjapt i staden for å henge (524) viss loopen
     # alt køyrer.
-    if not _lock.acquire(blocking=False):
-        return True, "Hub-EMC køyrer allereie — hoppar over denne runda"
+    if not _lock.acquire(timeout=30):
+        return True, "Hub-EMC oppteken (timeout) — prøv igjen"
     try:
         return _samle_og_skriv_intern(daq, hub_server)
     finally:
@@ -91,23 +91,20 @@ def _samle_og_skriv_intern(daq, hub_server):
         dev = devices.get(nid)
         if not dev:
             continue
-        key = None
+        key = (nid, ridx)
         try:
-            channels = dev.channels
-            if ridx >= len(channels):
-                continue
-            sigs = channels[ridx].signals
-            if not sigs or len(sigs) == 0:
-                continue
-            sig = sigs[0]
-            try:
-                sig_id = sig.global_id
-            except Exception:
-                sig_id = f"{nid}_{ridx}"
-            key = (nid, sig_id)
-
             if key not in _emc_readers:
-                _emc_readers[key] = daq.StreamReader(sig)
+                # Fyrste gong: hent remote-signalet og opprett StreamReader.
+                # Denne remote-OPC-UA-tilgangen skjer berre éin gong per kanal
+                # — seinare rundar les berre frå den lokale lesar-bufferen
+                # (elles vert kvar skann full av treige remote-oppslag).
+                channels = dev.channels
+                if ridx >= len(channels):
+                    continue
+                sigs = channels[ridx].signals
+                if not sigs or len(sigs) == 0:
+                    continue
+                _emc_readers[key] = daq.StreamReader(sigs[0])
                 continue   # nyoppretta — vent til neste runde på samples
 
             reader = _emc_readers[key]
