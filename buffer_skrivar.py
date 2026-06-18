@@ -597,32 +597,42 @@ class BufferSkrivar:
             return False
 
     def tom_alt(self) -> dict:
-        """Tøm heile målebufferen: måledata, hendingar og MQTT-logg.
+        """Tøm heile målebufferen: lukk DB, slett filene og opprett på nytt.
 
-        Brukt av GUI-knappen «Tøm buffer». Returnerer tal sletta rader per
-        tabell. AUTOINCREMENT-id nullstillast IKKJE (held hub-synk konsistent).
+        Brukt av GUI-knappen «Tøm buffer». Fil-sletting er minne-trygt for
+        ALLE storleikar — i motsetnad til VACUUM, som byggjer om heile fila
+        og kan sprenge minnet (container med 1 GB grense krasja på 13 GB
+        buffer). Frigjer all diskplass momentant.
         """
         if self._db is None:
             return {"suksess": False, "melding": "Buffer ikkje aktiv"}
         try:
             with self._lock:
-                n_md = self._db.execute("SELECT COUNT(*) FROM maaledata").fetchone()[0]
-                n_h = self._db.execute("SELECT COUNT(*) FROM hendingar").fetchone()[0]
-                n_m = self._db.execute("SELECT COUNT(*) FROM mqtt_logg").fetchone()[0]
-                self._db.execute("DELETE FROM maaledata")
-                self._db.execute("DELETE FROM hendingar")
-                self._db.execute("DELETE FROM mqtt_logg")
-                self._db.commit()
+                sti = self._db_sti
                 try:
-                    self._db.execute("VACUUM")  # frigjer diskplass
+                    self._db.close()
                 except Exception:
                     pass
-            log.info(f"Buffer tømt: {n_md} måledata, {n_h} hendingar, "
-                     f"{n_m} MQTT-logg rader sletta")
-            return {"suksess": True, "maaledata": n_md,
-                    "hendingar": n_h, "mqtt_logg": n_m}
+                self._db = None
+                if sti is not None:
+                    for suf in ("", "-wal", "-shm"):
+                        try:
+                            Path(str(sti) + suf).unlink()
+                        except FileNotFoundError:
+                            pass
+                        except Exception as e:
+                            log.warning(f"Kunne ikkje slette {sti}{suf}: {e}")
+                # Opprett tom DB på nytt (set self._db + self._db_sti)
+                self._init_db()
+            log.info("Buffer tømt (DB-filer sletta + oppretta på nytt)")
+            return {"suksess": True, "melding": "Buffer tømt"}
         except Exception as e:
             log.error(f"Feil ved tømming av buffer: {e}")
+            try:
+                if self._db is None:
+                    self._init_db()  # ikkje la noden stå utan buffer-DB
+            except Exception:
+                pass
             return {"suksess": False, "melding": str(e)}
 
     # --- Nye API-funksjonar ---
