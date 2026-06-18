@@ -43,7 +43,8 @@ class BufferKonfig:
     dvdt_terskel: float = 500.0          # dV/dt terskel (V/ms). Over normal
                                          # nett-dV/dt (~100) for å unngå
                                          # kontinuerleg trigging på sinus/støy.
-    mqtt_endring_terskel: float = 5.0    # MQTT verdi-endring som triggar
+    mqtt_endring_terskel: float = 100.0  # MQTT verdi-endring som triggar (høg nok
+                                         # til å unngå flaum på normalt varierande verdiar)
     pre_trigger_ms: int = 1000           # Rå data FØR hending
     post_trigger_ms: int = 2000          # Rå data ETTER hending
 
@@ -70,7 +71,7 @@ def les_buffer_konfig() -> BufferKonfig:
                 hendingar_aktivert=bool(data.get("hendingar_aktivert", True)),
                 rms_terskel_prosent=float(data.get("rms_terskel_prosent", 150.0)),
                 dvdt_terskel=float(data.get("dvdt_terskel", 500.0)),
-                mqtt_endring_terskel=float(data.get("mqtt_endring_terskel", 5.0)),
+                mqtt_endring_terskel=float(data.get("mqtt_endring_terskel", 100.0)),
                 pre_trigger_ms=int(data.get("pre_trigger_ms", 1000)),
                 post_trigger_ms=int(data.get("post_trigger_ms", 2000)),
                 mqtt_logg_aktivert=bool(data.get("mqtt_logg_aktivert", True)),
@@ -177,7 +178,7 @@ def valider_buffer_konfig(data: dict) -> tuple:
         return None, f"dvdt_terskel {dvdt_terskel} utanfor gyldig omraade (0.001-1000000)"
 
     try:
-        mqtt_endring = float(data.get("mqtt_endring_terskel", 5.0))
+        mqtt_endring = float(data.get("mqtt_endring_terskel", 100.0))
     except (TypeError, ValueError):
         return None, "mqtt_endring_terskel maa vere eit tal"
 
