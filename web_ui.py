@@ -56,6 +56,7 @@ try:
         hent_buffer_hendingar as _buffer_hent_hendingar,
         hent_buffer_mqtt_logg as _buffer_hent_mqtt_logg,
         hent_buffer_lagringsinfo as _buffer_hent_lagring,
+        tom_buffer as _buffer_tom,
         oppdater_modbus_konfig_og_restart as _modbus_restart_etter_konfig,
         hent_modbus_nodar as _sirius_hent_modbus_nodar,
         hent_modbus_kanalar as _sirius_hent_modbus_kanalar,
@@ -2011,6 +2012,16 @@ def api_buffer_status():
     if SIRIUS_DIREKTE:
         return jsonify(_buffer_hent_status())
     return jsonify({"aktivert": False, "totalt_rader": 0})
+
+
+@app.route("/api/buffer/tom", methods=["POST"])
+def api_buffer_tom():
+    """Tøm målebufferen på noden (måledata, hendingar, MQTT-logg)."""
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False,
+                        "melding": "Buffer berre tilgjengeleg i SIRIUS-direkte-modus"}), 400
+    res = _buffer_tom()
+    return jsonify(res)
 
 
 @app.route("/api/buffer/data")

@@ -1,8 +1,11 @@
-import { apiGet, apiPut } from './client'
+import { apiGet, apiPut, apiPost } from './client'
 import type { BufferStatus, BufferKonfig, HubBufferStatus, ActionResult, BufferHending, MqttLoggRad, LagringsInfo } from './types'
 
 export const fetchBufferStatus = () =>
   apiGet<BufferStatus>('/api/buffer/status')
+
+export const tomBuffer = () =>
+  apiPost<{ suksess: boolean; melding?: string; maaledata?: number; hendingar?: number; mqtt_logg?: number }>('/api/buffer/tom')
 
 export const fetchBufferKonfig = () =>
   apiGet<BufferKonfig>('/api/buffer/konfig')

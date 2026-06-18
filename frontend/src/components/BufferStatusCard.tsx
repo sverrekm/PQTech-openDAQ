@@ -1,6 +1,6 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import type { BufferStatus, HubBufferStatus } from '../api/types'
-import { fetchBufferStatus, fetchHubBufferStatus } from '../api/buffer'
+import { fetchBufferStatus, fetchHubBufferStatus, tomBuffer } from '../api/buffer'
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
 
@@ -14,6 +14,22 @@ export function RemoteBufferStatusCard() {
   const { t } = useI18n()
   const fetcher = useCallback(() => fetchBufferStatus(), [])
   const { data: status } = usePolling(fetcher, 5000)
+  const [busy, setBusy] = useState(false)
+  const [melding, setMelding] = useState<{ text: string; ok: boolean } | null>(null)
+
+  const handterTom = async () => {
+    if (!window.confirm(t('Clear the entire measurement buffer on this node? Measurement data, events and the MQTT log will be permanently deleted.'))) return
+    setBusy(true); setMelding(null)
+    try {
+      const r = await tomBuffer()
+      setMelding(r.suksess
+        ? { text: t('Buffer cleared.'), ok: true }
+        : { text: r.melding || t('Failed'), ok: false })
+    } catch (e) {
+      setMelding({ text: String(e), ok: false })
+    }
+    setBusy(false)
+  }
 
   if (!status || !status.aktivert) return null
 
@@ -68,6 +84,21 @@ export function RemoteBufferStatusCard() {
           {t('Calibrating — raw values until ADC nullpoint calibration completes')}
         </div>
       )}
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={handterTom}
+          disabled={busy}
+          className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-medium py-1.5 px-3 rounded-lg text-sm disabled:opacity-50"
+        >
+          {busy ? t('Clearing...') : t('Clear buffer')}
+        </button>
+        {melding && (
+          <span className={`text-sm ${melding.ok ? 'text-green-700' : 'text-red-700'}`}>
+            {melding.text}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

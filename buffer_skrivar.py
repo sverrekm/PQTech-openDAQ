@@ -596,6 +596,35 @@ class BufferSkrivar:
             log.error(f"Feil ved synkroniserings-markering: {e}")
             return False
 
+    def tom_alt(self) -> dict:
+        """Tøm heile målebufferen: måledata, hendingar og MQTT-logg.
+
+        Brukt av GUI-knappen «Tøm buffer». Returnerer tal sletta rader per
+        tabell. AUTOINCREMENT-id nullstillast IKKJE (held hub-synk konsistent).
+        """
+        if self._db is None:
+            return {"suksess": False, "melding": "Buffer ikkje aktiv"}
+        try:
+            with self._lock:
+                n_md = self._db.execute("SELECT COUNT(*) FROM maaledata").fetchone()[0]
+                n_h = self._db.execute("SELECT COUNT(*) FROM hendingar").fetchone()[0]
+                n_m = self._db.execute("SELECT COUNT(*) FROM mqtt_logg").fetchone()[0]
+                self._db.execute("DELETE FROM maaledata")
+                self._db.execute("DELETE FROM hendingar")
+                self._db.execute("DELETE FROM mqtt_logg")
+                self._db.commit()
+                try:
+                    self._db.execute("VACUUM")  # frigjer diskplass
+                except Exception:
+                    pass
+            log.info(f"Buffer tømt: {n_md} måledata, {n_h} hendingar, "
+                     f"{n_m} MQTT-logg rader sletta")
+            return {"suksess": True, "maaledata": n_md,
+                    "hendingar": n_h, "mqtt_logg": n_m}
+        except Exception as e:
+            log.error(f"Feil ved tømming av buffer: {e}")
+            return {"suksess": False, "melding": str(e)}
+
     # --- Nye API-funksjonar ---
 
     def hent_hendingar(self, limit: int = 50, etter_id: int = 0) -> list:

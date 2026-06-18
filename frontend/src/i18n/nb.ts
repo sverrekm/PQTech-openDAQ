@@ -395,6 +395,10 @@ export const nb: Record<string, string> = {
 
   // BufferConfigCard / BufferStatusCard
   'Measurement buffer': 'Målebuffer',
+  'Clear buffer': 'Tøm buffer',
+  'Clearing...': 'Tømmer...',
+  'Buffer cleared.': 'Buffer tømt.',
+  'Clear the entire measurement buffer on this node? Measurement data, events and the MQTT log will be permanently deleted.': 'Tøm heile målebufferen på denne noden? Måledata, hendingar og MQTT-loggen vert sletta permanent.',
   'Buffer active': 'Buffer aktiv',
   'Aggregation interval (ms)': 'Aggregeringsintervall (ms)',
   'Max storage (MB)': 'Maks lagring (MB)',

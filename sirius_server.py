@@ -939,6 +939,13 @@ def hent_buffer_data(etter_id=0, limit=10000):
     return _buffer_skrivar.hent_usynkronisert(limit=limit, etter_id=etter_id)
 
 
+def tom_buffer():
+    """Tøm heile målebufferen (for web API / GUI-knapp)."""
+    if _buffer_skrivar is None:
+        return {"suksess": False, "melding": "Buffer ikkje aktiv"}
+    return _buffer_skrivar.tom_alt()
+
+
 def marker_buffer_synkronisert(opp_til_id):
     """Marker buffer-rader som synkroniserte (etter hub ACK)."""
     if _buffer_skrivar is None:
