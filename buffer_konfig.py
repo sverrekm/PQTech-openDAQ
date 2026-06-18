@@ -168,8 +168,11 @@ def valider_buffer_konfig(data: dict) -> tuple:
         dvdt_terskel = float(data.get("dvdt_terskel", 0.1))
     except (TypeError, ValueError):
         return None, "dvdt_terskel maa vere eit tal"
-    if dvdt_terskel < 0.001 or dvdt_terskel > 100.0:
-        return None, f"dvdt_terskel {dvdt_terskel} utanfor gyldig omraade (0.001-100)"
+    # Øvre grense høg nok for transient-/overspenningsdeteksjon: normal
+    # nett-dV/dt toppar rundt ~100 V/ms (230 V/50 Hz), så terskelen må kunne
+    # setjast godt over det for å unngå kontinuerleg trigging på rein sinus.
+    if dvdt_terskel < 0.001 or dvdt_terskel > 1_000_000.0:
+        return None, f"dvdt_terskel {dvdt_terskel} utanfor gyldig omraade (0.001-1000000)"
 
     try:
         mqtt_endring = float(data.get("mqtt_endring_terskel", 5.0))

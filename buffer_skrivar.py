@@ -31,6 +31,11 @@ import numpy as np
 
 from buffer_konfig import BufferKonfig, les_buffer_konfig
 
+try:
+    from kanal_konfig import les_konfig as _les_kanal_konfig
+except Exception:  # pragma: no cover
+    _les_kanal_konfig = None
+
 log = logging.getLogger('buffer_skrivar')
 
 ANTAL_KANALAR = 8
@@ -436,15 +441,41 @@ class BufferSkrivar:
             except Exception as e:
                 log.debug(f"Hendingsdeteksjon feil: {e}")
 
+    def _aktive_kanalar(self) -> set:
+        """Set av aktive kanal-indeksar (cacha ~5s).
+
+        Hendingsdeteksjon (RMS/dV/dt) skal berre køyre på kanalar som er
+        aktiverte i kanal-konfigen — elles triggar floating/usette inngangar
+        (t.d. straum-kanalar utan sensor) kontinuerleg på støy. Tomt set =>
+        ingen kanalar => ingen RMS/dV/dt-hendingar.
+        """
+        no = time.time()
+        if (getattr(self, "_aktive_cache", None) is not None
+                and no - getattr(self, "_aktive_cache_ts", 0.0) < 5.0):
+            return self._aktive_cache
+        aktive = set(range(ANTAL_KANALAR))  # fallback: gamal åtferd (alle)
+        if _les_kanal_konfig is not None:
+            try:
+                aktive = {int(k.indeks) for k in _les_kanal_konfig()
+                          if getattr(k, "aktiv", True)}
+            except Exception:
+                pass
+        self._aktive_cache = aktive
+        self._aktive_cache_ts = no
+        return aktive
+
     def _sjekk_hendingar(self):
         """Sjekk alle trigger-typar."""
         sr = self._konfig.sample_rate
+        aktive = self._aktive_kanalar()
 
         # 1. RMS-terskel: samanlikn siste 100ms RMS med glidande snitt
         siste_n = int(sr * 0.1)  # 100ms
         if siste_n > 0 and self._ring.tilgjengeleg >= siste_n:
             siste_data = self._ring.hent_siste(siste_n)
             for i in range(ANTAL_KANALAR):
+                if i not in aktive:
+                    continue
                 if self._glidande_rms[i] <= 0:
                     continue
                 kanal_rms = float(np.sqrt(np.mean(siste_data[:, i] ** 2)))
@@ -462,6 +493,8 @@ class BufferSkrivar:
         if dvdt_n > 0 and self._ring.tilgjengeleg >= dvdt_n * 2:
             siste_data = self._ring.hent_siste(dvdt_n * 2)
             for i in range(ANTAL_KANALAR):
+                if i not in aktive:
+                    continue
                 diff = np.diff(siste_data[-dvdt_n:, i])
                 if len(diff) > 0:
                     max_dvdt = float(np.max(np.abs(diff))) * (sr / 1000.0)  # V/ms
