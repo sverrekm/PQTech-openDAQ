@@ -178,6 +178,17 @@ export const nb: Record<string, string> = {
   'Harmonics': 'Harmoniske',
   'Spectrum max (Hz)': 'Spektrum maks (Hz)',
 
+  // Hub-lager (persistent kanaldata på hubben)
+  'Hub data storage': 'Hub-lagring',
+  'Persist channel data pushed from nodes to a database on the hub. Survives restarts; export to CSV.': 'Lagre kanaldata som nodane pushar til ein database på hubben. Overlever omstart; eksporter til CSV.',
+  'Database path': 'Database-sti',
+  'Retention (days)': 'Retensjon (dagar)',
+  'Min interval (s)': 'Min intervall (s)',
+  'Max size (MB)': 'Maks storleik (MB)',
+  'Download CSV': 'Last ned CSV',
+  'Queue': 'Kø',
+  'Last': 'Siste',
+
   // Settings-undergrupper
   'Device & measurement': 'Enhet & måling',
   'Sharing & integrations': 'Deling & integrasjon',

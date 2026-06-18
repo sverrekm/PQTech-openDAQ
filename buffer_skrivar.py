@@ -114,7 +114,7 @@ def _finn_lagringssti(konfig: BufferKonfig) -> Path:
     ssd = Path("/data/ssd")
     if ssd.exists() and ssd.is_dir():
         return ssd / "buffer.db"
-    return Path("/data/maalingar/buffer.db")
+    return Path("/data/maalinger/buffer.db")
 
 
 class BufferSkrivar:

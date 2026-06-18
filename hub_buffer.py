@@ -29,7 +29,7 @@ from buffer_konfig import BufferKonfig, les_buffer_konfig
 
 log = logging.getLogger('hub_buffer')
 
-HUB_BUFFER_DB_STI = Path("/data/maalingar/hub_buffer.db")
+HUB_BUFFER_DB_STI = Path("/data/maalinger/hub_buffer.db")
 
 
 class HubBuffer:

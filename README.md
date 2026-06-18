@@ -49,7 +49,18 @@ sudo bash setup_host.sh
 Installerer kernel-moduler (usbip, usbmon), udev-reglar for Dewesoft USB
 (VID `0x1CED`), og legg brukar til `plugdev`-gruppa.
 
-### 3. Bygg og start
+### 3. Konfigurer containeren (valfritt, anbefalt)
+
+```bash
+sudo bash pqtech-config.sh
+```
+
+Terminal-meny (liknar `raspi-config`) for å setje opp IP-adresse (fast eller
+auto-finn ledig), nettverksgrensesnitt, driftsmodus (node/hub), kor måledata
+vert lagra (`DATA_DIR`), ingest-token og web-port. Skriv til `.env` og
+`konfig/modus.json`, og kan byggje/starte containeren på nytt frå menyen.
+
+### 4. Bygg og start
 
 ```bash
 docker compose up -d --build

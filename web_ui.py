@@ -24,6 +24,7 @@ import tailscale_manager
 import oppdatering
 import influx_pusher
 import emc_pusher
+import hub_lager
 import brukar_auth
 
 # Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
@@ -1434,6 +1435,55 @@ def api_emc_test():
     return jsonify({"suksess": ok, "melding": melding})
 
 
+# --- Hub-lager: persistent lagring av kanaldata på hubben ---
+
+@app.route("/api/hub-lager/konfig")
+def api_hub_lager_konfig_hent():
+    """Hub-lager konfig + køyrestatus."""
+    return jsonify(hub_lager.konfig_offentleg())
+
+
+@app.route("/api/hub-lager/konfig", methods=["PUT"])
+def api_hub_lager_konfig_sett():
+    """Lagre hub-lager-konfig (aktivert, db_sti, retensjon, intervall, maks_mb)."""
+    data = request.get_json(silent=True) or {}
+    hub_lager.lagre_konfig(data)
+    return jsonify({"suksess": True, **hub_lager.konfig_offentleg()})
+
+
+@app.route("/api/hub-lager/status")
+def api_hub_lager_status():
+    """Køyrestatus for hub-lageret (rader, storleik, per-node)."""
+    return jsonify(hub_lager.status())
+
+
+@app.route("/api/hub-lager/data")
+def api_hub_lager_data():
+    """Hent lagra punkt. Query: node_id, kanal, fra_ms, til_ms, limit."""
+    rader = hub_lager.hent_data(
+        node_id=request.args.get("node_id", ""),
+        kanal=request.args.get("kanal", ""),
+        frå_ms=request.args.get("fra_ms", 0, type=int),
+        til_ms=request.args.get("til_ms", 0, type=int),
+        limit=request.args.get("limit", 1000, type=int),
+    )
+    return jsonify({"rader": rader})
+
+
+@app.route("/api/hub-lager/eksport.csv")
+def api_hub_lager_eksport():
+    """Streame lagra kanaldata som CSV-nedlasting."""
+    gen = hub_lager.eksport_csv(
+        node_id=request.args.get("node_id", ""),
+        kanal=request.args.get("kanal", ""),
+        frå_ms=request.args.get("fra_ms", 0, type=int),
+        til_ms=request.args.get("til_ms", 0, type=int),
+        limit=request.args.get("limit", 100000, type=int),
+    )
+    return Response(gen, mimetype="text/csv", headers={
+        "Content-Disposition": "attachment; filename=hub_kanaldata.csv"})
+
+
 @app.route("/api/hub/kanal-ranges")
 def api_hub_kanal_ranges_hent():
     """Hent kanal-range overstyringer."""
@@ -1856,6 +1906,12 @@ def api_ingest():
         _ingest_stats["totalt"] += 1
         _ingest_stats["siste_ts"] = batch["mottatt_ts"]
 
+    # Persistent lagring på hubben (ikkje-blokkerande kø; no-op når deaktivert).
+    try:
+        hub_lager.lagre(node_id, node_namn, ts, kanalar)
+    except Exception:
+        pass
+
     # Injiser verdiar i hub si openDAQ-pipeline (DC-relay for skalarar,
     # DataPacket.send_packet for sample-arrays). node_namn er primær
     # matche-nøkkel sidan push-konfig.node_id ofte avvikar frå hub-id.
@@ -2102,6 +2158,13 @@ try:
     emc_pusher.start(_emc_hent_vindu)
 except Exception as _e:  # noqa: BLE001
     print(f"EMC-skrivar starta ikkje: {_e}")
+
+# Start hub-lager (persistent lagring av push-kanaldata på hubben).
+# Skrivartråden er passiv til den vert aktivert i GUI (hub_lager.json).
+try:
+    hub_lager.start()
+except Exception as _e:  # noqa: BLE001
+    print(f"Hub-lager starta ikkje: {_e}")
 
 
 if __name__ == "__main__":

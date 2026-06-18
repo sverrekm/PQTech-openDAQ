@@ -33,8 +33,9 @@ services:
       - /sys:/sys
       # debugfs - usbmon for passiv USB-trafikkfangst
       - /sys/kernel/debug:/sys/kernel/debug
-      # Maalingar (persistente)
-      - ./maalinger:/data/maalinger
+      # Maalingar + databasar (persistente). Host-katalog styrt av DATA_DIR
+      # i .env (sett via pqtech-config.sh). Standard: ./maalinger
+      - ${DATA_DIR:-./maalinger}:/data/maalinger
       # Konfigurasjon (lagres mellom omstarter)
       - ./konfig:/data/konfig
       # Tailscale VPN state (persistent)

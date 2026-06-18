@@ -412,6 +412,9 @@ fi
 
 # Skriv versjonsinfo ved oppstart (viss ikkje allereie sett)
 mkdir -p /data/konfig
+# Sørg for at måledata-/database-katalogen finst (buffer.db, hub_buffer.db,
+# hub_kanaldata.db). Montert frå host via DATA_DIR i docker-compose.
+mkdir -p /data/maalinger
 if [ ! -f /data/konfig/versjon.json ]; then
     echo '{"sha": "ukjend", "melding": "Ikkje sett", "dato": ""}' > /data/konfig/versjon.json
 fi
