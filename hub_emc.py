@@ -118,12 +118,15 @@ def _samle_og_skriv_intern(daq, hub_server):
                 continue
             if count < N:
                 continue   # ikkje nok samples til eit vindauge enno
-            # Les alle tilgjengelege samples (ikkje-blokkerande — dei finst
-            # alt) og bruk dei nyaste N. Unngår read(N) som kan blokkere.
-            data = reader.read(count)
-            if data is None or len(data) < N:
+            # Dropp backlog, les berre dei nyaste N (effektivt). Trygt no som
+            # låsen hindrar samtidige lesarar — read(N<=available) blokkerer
+            # ikkje (same som relay-loopen).
+            if count > N:
+                reader.skip(count - N)
+            window = reader.read(N)
+            if window is None or len(window) < N:
                 continue
-            arr = np.asarray(data[-N:], dtype=np.float64)
+            arr = np.asarray(window, dtype=np.float64)
             r = emc_pusher.analyser_kanal(arr, sr, {**konf})
             if not r:
                 continue
