@@ -109,7 +109,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   } else if (view.page === 'dashboard') {
     content = <DashboardPage status={status} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} siriusTilkoblet={siriusStatus?.tilkoblet ?? false} onChannelClick={handleChannelClick} onMqttClick={handleMqttClick} onHubClick={handleHubClick} hubKanalar={hubKanalar} isHubMode={isHubMode} />
   } else if (view.page === 'settings') {
-    content = <SettingsPage />
+    content = <SettingsPage isHubMode={isHubMode} />
   } else if (view.page === 'admin') {
     content = <AdminPage />
   } else if (view.page === 'mqttChannel') {

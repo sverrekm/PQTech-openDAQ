@@ -14,7 +14,11 @@ import HubStorageCard from '../components/HubStorageCard'
 import SettingsSection from '../components/SettingsSection'
 import { useI18n } from '../i18n'
 
-export default function SettingsPage() {
+interface Props {
+  isHubMode?: boolean
+}
+
+export default function SettingsPage({ isHubMode = false }: Props) {
   const { t } = useI18n()
   return (
     <>
@@ -28,7 +32,9 @@ export default function SettingsPage() {
       <SettingsSection id="deling" tittel={t('Sharing & integrations')}>
         <MqttSettingsCard />
         <InfluxShareCard />
-        <EmcCard />
+        {/* EMC krev rå ADC-bølgjeform — berre tilgjengeleg på SIRIUS-direkte
+            node, ikkje på hubben (som berre får relaerte verdiar over brua). */}
+        {!isHubMode && <EmcCard />}
         <HubStorageCard />
       </SettingsSection>
 
