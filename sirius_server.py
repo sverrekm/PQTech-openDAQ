@@ -1206,6 +1206,71 @@ def restart_opendaq_bro(force_adc=None):
 
 _callback_feil_teller = 0
 
+# --- Dynamisk auto-rebuild av openDAQ-bridge ---
+# Når kanaltalet endrar seg (SIRIUS koplar til seint, Modbus-eining/PQube
+# dukkar opp, MQTT-kanalar kjem til) er openDAQ-serveren bygd med gammalt
+# NumberOfChannels. Denne vakta oppdagar avviket og restartar bridge
+# automatisk — slik slepp ein manuell node-restart. Av med NODE_AUTO_REBUILD=0.
+_NODE_AUTO_REBUILD = os.environ.get("NODE_AUTO_REBUILD", "1") != "0"
+_AUTO_REBUILD_STABIL_S = 20.0
+_auto_rebuild_obs = {"ynskt": None, "sidan": 0.0}
+
+
+def _ynskt_kanaltal():
+    """Kanaltal bridge VILLE bygd no (same logikk som restart_opendaq_bro)."""
+    try:
+        sirius_aktiv = (server_status.get("tilkoblet", False)
+                        and server_status.get("streamer", False))
+        n_adc = les_enhet_konfig().antal_adc_kanalar if sirius_aktiv else 0
+        mk = les_mqtt_konfig()
+        n_mqtt = len(mk.kanalar) if mk.broker.aktivert else 0
+        hk = les_hub_konfig()
+        n_modbus = sum(len(n.modbus_registers) for n in hk.nodar
+                       if n.type == NODE_TYPE_MODBUS_TCP and n.aktivert)
+        return n_adc + n_mqtt + n_modbus
+    except Exception:
+        return None
+
+
+def _auto_rebuild_loop():
+    """Vakt: restart bridge når kanaltalet er stabilt endra frå det bygde."""
+    while True:
+        time.sleep(15)
+        if not _NODE_AUTO_REBUILD:
+            continue
+        try:
+            bro = _opendaq_bro
+            if bro is None or not getattr(bro, "tilgjengelig", False):
+                _auto_rebuild_obs["ynskt"] = None
+                continue
+            bygd = (getattr(bro, "_antal_adc", 0)
+                    + len(getattr(bro, "_mqtt_kanalar", []))
+                    + len(getattr(bro, "_modbus_kanalar", [])))
+            ynskt = _ynskt_kanaltal()
+            if ynskt is None or ynskt == bygd:
+                _auto_rebuild_obs["ynskt"] = None
+                continue
+            no = time.time()
+            if _auto_rebuild_obs["ynskt"] != ynskt:
+                _auto_rebuild_obs["ynskt"] = ynskt
+                _auto_rebuild_obs["sidan"] = no
+                log.info(f"Auto-rebuild (node): kanaltal {bygd} → {ynskt} — "
+                         f"ventar {_AUTO_REBUILD_STABIL_S:.0f}s på stabilitet")
+                continue
+            if no - _auto_rebuild_obs["sidan"] >= _AUTO_REBUILD_STABIL_S:
+                log.warning(f"Auto-rebuild (node): stabil endring {bygd} → {ynskt} "
+                            f"— restartar openDAQ-bridge")
+                _auto_rebuild_obs["ynskt"] = None
+                restart_opendaq_bro()
+        except Exception as e:
+            log.debug(f"Node auto-rebuild feil: {e}")
+
+
+def _start_auto_rebuild_vakt():
+    threading.Thread(target=_auto_rebuild_loop, daemon=True,
+                     name="node_auto_rebuild").start()
+    log.info("Node auto-rebuild-vakt starta")
+
 
 def _global_data_callback(kanal_data):
     """Global callback for kontinuerleg streaming.
@@ -1741,6 +1806,9 @@ def start_server(args):
 
     # Start hub-pusher (utgåande push til parent hvis konfigurert)
     _start_hub_pusher()
+
+    # Start auto-rebuild-vakt (restart bridge når kanaltalet endrar seg)
+    _start_auto_rebuild_vakt()
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet and _driver.ep2_ok:
