@@ -67,6 +67,10 @@ class OpenDAQBro:
         self._modbus_kanalar = []
         for node in self._modbus_einingar:
             for reg in node.modbus_registers:
+                # forward_berre-register går ikkje gjennom openDAQ-strøymen
+                # (sparer WAN-bandbreidd) — dei vert sende via lett forwarder.
+                if getattr(reg, "forward_berre", False):
+                    continue
                 self._modbus_kanalar.append({
                     "node_id": node.id,
                     "node_namn": node.namn,

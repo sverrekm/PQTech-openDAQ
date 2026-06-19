@@ -46,6 +46,11 @@ class ModbusRegister:
     eining: str = ""
     range_low: float = -1000.0
     range_high: float = 1000.0
+    # Når True: registeret vert IKKJE bygd som openDAQ-kanal (sparer den tunge
+    # 20kHz-strøymen over WAN), men modbus_manager les det og ein lett
+    # forwarder sender verdien som line-protocol til hubben (→ InfluxDB).
+    # Brukt for mange skalar-verdiar som harmoniske.
+    forward_berre: bool = False
 
     def til_dict(self) -> dict:
         return asdict(self)
@@ -63,6 +68,7 @@ class ModbusRegister:
             eining=str(d.get("eining", "")),
             range_low=float(d.get("range_low", -1000.0)),
             range_high=float(d.get("range_high", 1000.0)),
+            forward_berre=bool(d.get("forward_berre", False)),
         )
 
 

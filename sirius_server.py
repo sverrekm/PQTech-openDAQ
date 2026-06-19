@@ -1272,6 +1272,48 @@ def _start_auto_rebuild_vakt():
     log.info("Node auto-rebuild-vakt starta")
 
 
+def _harmonic_forward_loop():
+    """Send forward_berre modbus-register (t.d. harmoniske) som lette
+    line-protocol-punkt til hubben (→ InfluxDB), utan å gå gjennom den tunge
+    20kHz openDAQ-strøymen over WAN. Krev push parent_url/token."""
+    import emc_pusher
+    from push_konfig import les_push_konfig
+    time.sleep(12)  # vent på modbus + push-oppsett
+    while True:
+        try:
+            pk = les_push_konfig()
+            if pk.parent_url and pk.parent_token and _modbus_manager is not None:
+                nodenamn = pk.node_namn or "node"
+                verdiar = _modbus_manager.hent_verdiar()
+                konfig = les_hub_konfig()
+                linjer = []
+                for node in konfig.nodar:
+                    if node.type != NODE_TYPE_MODBUS_TCP:
+                        continue
+                    for reg in node.modbus_registers:
+                        if not getattr(reg, "forward_berre", False):
+                            continue
+                        v = verdiar.get((node.id, reg.adresse))
+                        if v is None:
+                            continue
+                        nm = emc_pusher._esc_tag(reg.namn)
+                        un = emc_pusher._esc_tag(reg.eining or "")
+                        nd = emc_pusher._esc_tag(nodenamn)
+                        linjer.append(
+                            f"pqtech_channel,node={nd},channel={nm},unit={un} value={float(v)}")
+                if linjer:
+                    emc_pusher._forward_til_hub(linjer)
+        except Exception as e:
+            log.debug(f"Harmonisk-forward feil: {e}")
+        time.sleep(5)  # harmoniske er trege — 5s er rikeleg
+
+
+def _start_harmonic_forwarder():
+    threading.Thread(target=_harmonic_forward_loop, daemon=True,
+                     name="harmonic_forward").start()
+    log.info("Harmonisk-forwarder starta")
+
+
 def _global_data_callback(kanal_data):
     """Global callback for kontinuerleg streaming.
 
@@ -1809,6 +1851,9 @@ def start_server(args):
 
     # Start auto-rebuild-vakt (restart bridge når kanaltalet endrar seg)
     _start_auto_rebuild_vakt()
+
+    # Start harmonisk-forwarder (lette forward_berre-register → hub → InfluxDB)
+    _start_harmonic_forwarder()
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet and _driver.ep2_ok:
