@@ -205,7 +205,10 @@ def _forward_til_hub(linjer: list):
         req = urllib.request.Request(
             url.rstrip("/") + "/api/emc-ingest", data=body, method="POST",
             headers={"Authorization": f"Bearer {tok}",
-                     "Content-Type": "application/json"})
+                     "Content-Type": "application/json",
+                     # Cloudflare blokkerer "Python-urllib"-UA (403) — bruk
+                     # ein nøytral UA (som hub_pusher sin requests-klient).
+                     "User-Agent": "Mozilla/5.0 (PQTech-openDAQ)"})
         with urllib.request.urlopen(req, timeout=20) as resp:
             return resp.status
     except Exception as e:
