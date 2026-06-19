@@ -1225,8 +1225,12 @@ def _ynskt_kanaltal():
         mk = les_mqtt_konfig()
         n_mqtt = len(mk.kanalar) if mk.broker.aktivert else 0
         hk = les_hub_konfig()
-        n_modbus = sum(len(n.modbus_registers) for n in hk.nodar
-                       if n.type == NODE_TYPE_MODBUS_TCP and n.aktivert)
+        # Tel berre register som faktisk vert openDAQ-kanalar (forward_berre
+        # går via lett forwarder, ikkje brua — må matche opendaq_bro-skippen).
+        n_modbus = sum(1 for n in hk.nodar
+                       if n.type == NODE_TYPE_MODBUS_TCP and n.aktivert
+                       for r in n.modbus_registers
+                       if not getattr(r, "forward_berre", False))
         return n_adc + n_mqtt + n_modbus
     except Exception:
         return None
