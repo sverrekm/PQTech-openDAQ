@@ -1856,8 +1856,20 @@ def start_server(args):
     # Start auto-rebuild-vakt (restart bridge når kanaltalet endrar seg)
     _start_auto_rebuild_vakt()
 
-    # Start harmonisk-forwarder (lette forward_berre-register → hub → InfluxDB)
-    _start_harmonic_forwarder()
+    # Datainnsamling: modbus_lager (store-and-forward med tidsstempel + backfill)
+    # er den robuste vegen for rapport-kritisk PQube-data. Når den er aktivert
+    # tek den over ALL Modbus→hub-forwarding; då skal IKKJE den lette
+    # fire-and-forget harmonic-forwarderen køyre (ville dobbelt-sende).
+    try:
+        import modbus_lager
+        if modbus_lager.les_konfig().get("aktivert"):
+            modbus_lager.start()
+            log.info("modbus_lager aktiv — harmonic-forwarder hoppa over")
+        else:
+            _start_harmonic_forwarder()
+    except Exception as e:
+        log.warning(f"modbus_lager start feila: {e} — fell tilbake til harmonic-forwarder")
+        _start_harmonic_forwarder()
 
     # Start kontinuerleg streaming + autonom snapshot-lagring
     if enhet_tilkoblet and _driver.ep2_ok:

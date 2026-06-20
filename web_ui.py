@@ -1500,6 +1500,42 @@ def api_hub_lager_status():
     return jsonify(hub_lager.status())
 
 
+# --- Modbus-lager: store-and-forward av PQube/Modbus-data til hub ---
+
+@app.route("/api/modbus-lager/konfig")
+def api_modbus_lager_konfig_hent():
+    """Modbus-lager konfig + køyrestatus (usendte, storleik, backfill)."""
+    try:
+        import modbus_lager
+        return jsonify(modbus_lager.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"aktivert": False, "feil": str(e)})
+
+
+@app.route("/api/modbus-lager/konfig", methods=["PUT"])
+def api_modbus_lager_konfig_sett():
+    """Lagre modbus-lager-konfig (aktivert, intervall, retensjon, batch)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import modbus_lager
+        modbus_lager.lagre_konfig(data)
+        if modbus_lager.les_konfig().get("aktivert"):
+            modbus_lager.start()  # idempotent — start trådar viss nyleg aktivert
+        return jsonify({"suksess": True, **modbus_lager.konfig_offentleg()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/modbus-lager/status")
+def api_modbus_lager_status():
+    """Køyrestatus for modbus-lageret."""
+    try:
+        import modbus_lager
+        return jsonify(modbus_lager.status())
+    except Exception as e:
+        return jsonify({"feil": str(e)})
+
+
 @app.route("/api/hub-lager/data")
 def api_hub_lager_data():
     """Hent lagra punkt. Query: node_id, kanal, fra_ms, til_ms, limit."""
