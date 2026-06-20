@@ -47,6 +47,15 @@ if ! command -v sshd &>/dev/null; then
     rm -rf /var/lib/apt/lists/*
 fi
 
+# NAS-stotte: cifs-utils + smbclient (for GUI NAS-oppdaging/montering).
+# Runtime-install viss imaget ikkje er bygd med dei enno (rask deploy utan
+# full rebuild). Permanent i Dockerfile.
+if ! command -v mount.cifs &>/dev/null || ! command -v smbclient &>/dev/null; then
+    echo "[NAS] Installerer cifs-utils + smbclient (foerste oppstart)..."
+    apt-get update -qq && apt-get install -y -qq --no-install-recommends cifs-utils smbclient >/dev/null 2>&1
+    rm -rf /var/lib/apt/lists/*
+fi
+
 # Opprett DewesoftRT stub-skript viss dei manglar (rask deploy utan rebuild)
 if [ ! -f /opt/dewesoft/scripts/platform_control.sh ]; then
     echo "[SSH] Opprettar DewesoftRT stub-skript..."
