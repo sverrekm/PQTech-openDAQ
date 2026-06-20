@@ -1554,6 +1554,53 @@ def api_raa_fil_konfig_hent():
         return jsonify({"aktivert": False, "feil": str(e)})
 
 
+@app.route("/api/nas/oppdag", methods=["POST"])
+def api_nas_oppdag():
+    """Skann LAN for SMB-delingar. Valfrie creds for å liste verna delingar."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import nas_manager
+        return jsonify({"suksess": True, **nas_manager.oppdag(
+            brukar=data.get("brukar", ""), passord=data.get("passord", ""))})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/nas/monter", methods=["POST"])
+def api_nas_monter():
+    """Monter ei valt CIFS-deling (//server/share) i containeren."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import nas_manager
+        ok, melding = nas_manager.monter(
+            server=data.get("server", ""), share=data.get("share", ""),
+            brukar=data.get("brukar", ""), passord=data.get("passord", ""),
+            mountpunkt=data.get("mountpunkt", nas_manager.STANDARD_MNT),
+            domene=data.get("domene", ""))
+        return jsonify({"suksess": ok, "melding": melding, **nas_manager.konfig_offentleg()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/nas/avmonter", methods=["POST"])
+def api_nas_avmonter():
+    try:
+        import nas_manager
+        ok, melding = nas_manager.avmonter()
+        return jsonify({"suksess": ok, "melding": melding, **nas_manager.konfig_offentleg()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/nas/status")
+def api_nas_status():
+    try:
+        import nas_manager
+        return jsonify(nas_manager.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"montert": False, "feil": str(e)})
+
+
 @app.route("/api/raa-fil/konfig", methods=["PUT"])
 def api_raa_fil_konfig_sett():
     """Lagre rå-fil-konfig (aktivert, katalog). Katalog kan vere ein
@@ -2302,6 +2349,13 @@ try:
     modbus_lager.start()
 except Exception as _e:  # noqa: BLE001
     print(f"Modbus-lager starta ikkje: {_e}")
+
+# Remount NAS frå konfig (om automonter er sett). Bakgrunn — blokkerer ikkje.
+try:
+    import nas_manager
+    nas_manager.start()
+except Exception as _e:  # noqa: BLE001
+    print(f"NAS-remount starta ikkje: {_e}")
 
 
 if __name__ == "__main__":

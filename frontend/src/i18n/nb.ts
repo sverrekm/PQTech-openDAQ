@@ -198,6 +198,24 @@ export const nb: Record<string, string> = {
   'Writable': 'Skrivbar',
   'Last write': 'Siste skriv',
 
+  // NAS-oppdaging
+  'Network storage (NAS)': 'Nettverkslagring (NAS)',
+  'Discover SMB/CIFS shares on the network and mount one as the storage location for raw measurement files.': 'Oppdag SMB/CIFS-delingar på nettet og monter ei som lagringsplass for rå målefiler.',
+  'Mounted': 'Montert',
+  'free': 'ledig',
+  'Unmount': 'Avmonter',
+  'No NAS mounted.': 'Ingen NAS montert.',
+  'Username (optional)': 'Brukarnamn (valfri)',
+  'Scan for NAS': 'Søk etter NAS',
+  'Scanning...': 'Søkjer...',
+  'No SMB shares found.': 'Fann ingen SMB-delingar.',
+  'Found shares': 'Funne delingar',
+  '— select —': '— vel —',
+  'Mount selected': 'Monter vald',
+  'Mounting...': 'Monterer...',
+  'Select a share first.': 'Vel ei deling først.',
+  'Set the raw file archive folder to': 'Set arkiv-katalogen for rå filer til',
+
   // Settings-undergrupper
   'Device & measurement': 'Enhet & måling',
   'Sharing & integrations': 'Deling & integrasjon',
