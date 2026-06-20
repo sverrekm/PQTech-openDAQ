@@ -394,7 +394,10 @@ if [ "${OPENDAQ_MODUS}" = "hub" ]; then
     for MODUL in libsimulator_device_module libref_fb_module; do
         MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
         if [ -n "$MODULFIL" ]; then
-            mv "$MODULFIL" "${MODULFIL}.disabled"
+            # Tolerant: mv kan feile med "are the same file" (hardlink til
+            # .disabled frå før). Med set -e ville det drepe entrypoint →
+            # restart-loop. Fall tilbake til rm (modulen skal uansett vekk).
+            mv "$MODULFIL" "${MODULFIL}.disabled" 2>/dev/null || rm -f "$MODULFIL"
             echo "  $(basename "$MODULFIL") deaktivert"
         fi
     done
@@ -404,7 +407,8 @@ else
     for MODUL in libref_fb_module libopcua_client_module libnative_stream_cl_module libsimulator_device_module; do
         MODULFIL=$(find /usr/local/lib -maxdepth 1 -name "${MODUL}*.module.so" 2>/dev/null | head -1)
         if [ -n "$MODULFIL" ]; then
-            mv "$MODULFIL" "${MODULFIL}.disabled"
+            # Tolerant (sjå hub-branch): unngå set -e-drepen restart-loop.
+            mv "$MODULFIL" "${MODULFIL}.disabled" 2>/dev/null || rm -f "$MODULFIL"
             echo "  $(basename "$MODULFIL") deaktivert"
         fi
     done
