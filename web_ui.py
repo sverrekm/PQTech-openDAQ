@@ -1475,6 +1475,12 @@ def api_emc_ingest():
     # Berre pqtech_* measurements (unngå at nokon skriv vilkårleg)
     linjer = [str(l) for l in linjer if str(l).startswith("pqtech_")]
     ok, melding = emc_pusher.skriv_linjer(linjer)
+    # Arkiver rå CSV til NAS (no-op når deaktivert; ikkje-blokkerande kø)
+    try:
+        import raa_fil_skrivar
+        raa_fil_skrivar.skriv_punkt(raa_fil_skrivar.parse_line_protocol(linjer))
+    except Exception:
+        pass
     return jsonify({"suksess": ok, "melding": melding, "mottatt": len(linjer)})
 
 
@@ -1534,6 +1540,32 @@ def api_modbus_lager_status():
         return jsonify(modbus_lager.status())
     except Exception as e:
         return jsonify({"feil": str(e)})
+
+
+# --- Rå-fil-arkiv (CSV til NAS/CIFS) ---
+
+@app.route("/api/raa-fil/konfig")
+def api_raa_fil_konfig_hent():
+    """Rå-fil-arkiv konfig + status (katalog skrivbar, kø, tal skrive)."""
+    try:
+        import raa_fil_skrivar
+        return jsonify(raa_fil_skrivar.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"aktivert": False, "feil": str(e)})
+
+
+@app.route("/api/raa-fil/konfig", methods=["PUT"])
+def api_raa_fil_konfig_sett():
+    """Lagre rå-fil-konfig (aktivert, katalog). Katalog kan vere ein
+    CIFS/NAS-mount inne i containeren (t.d. /data/nas/maalingar)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import raa_fil_skrivar
+        raa_fil_skrivar.lagre_konfig(data)
+        raa_fil_skrivar.start()
+        return jsonify({"suksess": True, **raa_fil_skrivar.konfig_offentleg()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
 @app.route("/api/hub-lager/data")
@@ -2254,6 +2286,22 @@ try:
     hub_lager.start()
 except Exception as _e:  # noqa: BLE001
     print(f"Hub-lager starta ikkje: {_e}")
+
+# Start rå-fil-skrivar (arkiverer måledata som CSV til NAS/CIFS).
+# Passiv til aktivert i GUI (raa_fil.json).
+try:
+    import raa_fil_skrivar
+    raa_fil_skrivar.start()
+except Exception as _e:  # noqa: BLE001
+    print(f"Rå-fil-skrivar starta ikkje: {_e}")
+
+# Start modbus-lager (node-side store-and-forward; passiv til aktivert).
+# Idempotent — har eigen aktivert-gate. Trygt å kalle i alle modus.
+try:
+    import modbus_lager
+    modbus_lager.start()
+except Exception as _e:  # noqa: BLE001
+    print(f"Modbus-lager starta ikkje: {_e}")
 
 
 if __name__ == "__main__":

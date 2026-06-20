@@ -270,6 +270,65 @@ handter_datalagring() {
     fi
 }
 
+handter_nas() {
+    # NAS for rå-fil-arkiv (CIFS/SMB). Set NAS_DIR (host-mountpunkt som vert
+    # montert til /data/nas i containeren) og hjelp med å CIFS-mounte.
+    local nas mp
+    nas="$(les_env NAS_DIR ./nas)"
+    local val
+    val="$(ui_meny "NAS (rå-fil-arkiv)" \
+        "Host-mountpunkt for NAS: ${nas}\n(vert montert til /data/nas i containeren)" \
+        sti     "Set NAS-mountpunkt (NAS_DIR)" \
+        cifs    "Monter CIFS/SMB-deling no (+ fstab)" \
+        status  "Vis mount-status" \
+        attende "Tilbake")" || return
+    case "$val" in
+        sti)
+            local ny
+            ny="$(ui_input "NAS-mountpunkt" "Host-sti der NAS er/vert montert (t.d. /mnt/nas/pqtech):" "$nas")" || return
+            [ -z "$ny" ] && return
+            mkdir -p "$ny" 2>/dev/null
+            sett_env NAS_DIR "$ny"
+            ui_msg "NAS" "NAS_DIR sett: $ny\n\nI GUI: Settings → Rå-fil-arkiv → katalog = /data/nas/maalingar\nBruk «Bruk endringar» (recreate) for å aktivere volumet."
+            ;;
+        cifs)
+            local server share mp bruk passord
+            server="$(ui_input "CIFS-server" "NAS UNC-sti (//server/share):" "//nas/pqtech")" || return
+            mp="$(ui_input "Mountpunkt" "Lokal mappe å montere på:" "$(les_env NAS_DIR /mnt/nas/pqtech)")" || return
+            bruk="$(ui_input "Brukarnamn" "SMB-brukar:" "")" || return
+            passord="$(ui_input "Passord" "SMB-passord:" "")" || return
+            if [ "$(id -u)" != 0 ]; then
+                ui_msg "Feil" "CIFS-mount krev root. Køyr: sudo bash pqtech-config.sh"
+                return
+            fi
+            # Installer cifs-utils ved behov
+            command -v mount.cifs >/dev/null 2>&1 || apt-get install -y --no-install-recommends cifs-utils >/dev/null 2>&1
+            mkdir -p "$mp"
+            # Lagre legitimasjon i root-berre fil (ikkje i fstab)
+            local cred="/etc/pqtech-nas.cred"
+            printf 'username=%s\npassword=%s\n' "$bruk" "$passord" > "$cred"
+            chmod 600 "$cred"
+            # uid/gid 0 så containeren (root) kan skrive
+            if mount -t cifs "$server" "$mp" -o "credentials=$cred,uid=0,gid=0,iocharset=utf8,vers=3.0" 2>/tmp/cifserr; then
+                # Persister i fstab (idempotent)
+                local fstab_l="$server $mp cifs credentials=$cred,uid=0,gid=0,iocharset=utf8,vers=3.0,_netdev,nofail 0 0"
+                grep -qF "$mp cifs" /etc/fstab 2>/dev/null || echo "$fstab_l" >> /etc/fstab
+                sett_env NAS_DIR "$mp"
+                ui_msg "NAS" "CIFS montert: $server → $mp\nLagt i /etc/fstab (auto ved oppstart).\nNAS_DIR sett.\n\nBruk «Bruk endringar» for å montere volumet inn i containeren."
+            else
+                ui_msg "Feil" "CIFS-mount feila:\n$(cat /tmp/cifserr 2>/dev/null | head -3)"
+            fi
+            ;;
+        status)
+            local ut
+            ut="NAS_DIR: $(les_env NAS_DIR ./nas)\n\n--- mount ---\n"
+            ut+="$(mount | grep -iE 'cifs|/mnt/nas|$(les_env NAS_DIR x)' 2>/dev/null | head -5)"
+            ut+="\n\n--- df ---\n$(df -h "$(les_env NAS_DIR ./nas)" 2>/dev/null | tail -2)"
+            ui_msg "NAS-status" "$ut"
+            ;;
+    esac
+}
+
 handter_token() {
     local t
     t="$(les_env INGEST_TOKEN "")"
@@ -397,6 +456,7 @@ while true; do
         nettverk "Nettverk — IP og grensesnitt" \
         modus    "Driftsmodus — node eller hub" \
         lagring  "Datalagring — kor måledata vert lagra" \
+        nas      "NAS — rå-fil-arkiv (CIFS/SMB)" \
         token    "Ingest-token — node↔hub-autentisering" \
         avansert "Avansert — web-port, device-indeks" \
         status   "Vis status" \
@@ -408,6 +468,7 @@ while true; do
         nettverk) handter_nettverk ;;
         modus)    handter_modus ;;
         lagring)  handter_datalagring ;;
+        nas)      handter_nas ;;
         token)    handter_token ;;
         avansert) handter_avansert ;;
         status)   vis_status ;;

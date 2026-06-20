@@ -11,6 +11,7 @@ import BufferConfigCard from '../components/BufferConfigCard'
 import InfluxShareCard from '../components/InfluxShareCard'
 import EmcCard from '../components/EmcCard'
 import HubStorageCard from '../components/HubStorageCard'
+import RawArchiveCard from '../components/RawArchiveCard'
 import SettingsSection from '../components/SettingsSection'
 import { useI18n } from '../i18n'
 
@@ -32,6 +33,7 @@ export default function SettingsPage() {
             bridga bølgjeformene (hub_emc). Synleg i begge modus. */}
         <EmcCard />
         <HubStorageCard />
+        <RawArchiveCard />
       </SettingsSection>
 
       <SettingsSection id="nettverk" tittel={t('Network & nodes')}>

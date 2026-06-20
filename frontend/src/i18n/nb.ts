@@ -189,6 +189,15 @@ export const nb: Record<string, string> = {
   'Queue': 'Kø',
   'Last': 'Siste',
 
+  // Rå-fil-arkiv (NAS)
+  'Raw file archive (NAS)': 'Rå-fil-arkiv (NAS)',
+  'Archive measurement data as CSV files to a folder — typically a NAS mounted via CIFS/SMB. Long-term storage alongside InfluxDB.': 'Arkiver måledata som CSV-filer til ein katalog — typisk ein NAS montert via CIFS/SMB. Langtidslagring ved sida av InfluxDB.',
+  'Archive folder (in container)': 'Arkiv-katalog (i containeren)',
+  'Mount the NAS on the host and set NAS_DIR via pqtech-config.sh; it appears at /data/nas in the container.': 'Monter NAS-en på verten og set NAS_DIR via pqtech-config.sh; den dukkar opp på /data/nas i containeren.',
+  'Rows written': 'Rader skrive',
+  'Writable': 'Skrivbar',
+  'Last write': 'Siste skriv',
+
   // Settings-undergrupper
   'Device & measurement': 'Enhet & måling',
   'Sharing & integrations': 'Deling & integrasjon',

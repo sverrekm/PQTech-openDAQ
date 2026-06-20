@@ -36,6 +36,10 @@ services:
       # Maalingar + databasar (persistente). Host-katalog styrt av DATA_DIR
       # i .env (sett via pqtech-config.sh). Standard: ./maalinger
       - ${DATA_DIR:-./maalinger}:/data/maalinger
+      # NAS for rå-fil-arkiv (CIFS/SMB). Host mountar NAS og set NAS_DIR i
+      # .env til mount-punktet (t.d. /mnt/nas/pqtech). Standard ./nas (lokal)
+      # når ingen NAS. Sjå raa_fil_skrivar + pqtech-config.sh.
+      - ${NAS_DIR:-./nas}:/data/nas
       # Konfigurasjon (lagres mellom omstarter)
       - ./konfig:/data/konfig
       # Tailscale VPN state (persistent)
