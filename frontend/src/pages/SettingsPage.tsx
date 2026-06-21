@@ -11,9 +11,7 @@ import Ep2RecoveryCard from '../components/Ep2RecoveryCard'
 import BufferConfigCard from '../components/BufferConfigCard'
 import InfluxShareCard from '../components/InfluxShareCard'
 import EmcCard from '../components/EmcCard'
-import HubStorageCard from '../components/HubStorageCard'
-import NasCard from '../components/NasCard'
-import RawArchiveCard from '../components/RawArchiveCard'
+import StorageCard from '../components/StorageCard'
 import SettingsSection from '../components/SettingsSection'
 import { useI18n } from '../i18n'
 
@@ -35,9 +33,11 @@ export default function SettingsPage() {
         {/* EMC: på SIRIUS-direkte node frå lokal ADC; på hubben frå dei
             bridga bølgjeformene (hub_emc). Synleg i begge modus. */}
         <EmcCard />
-        <HubStorageCard />
-        <NasCard />
-        <RawArchiveCard />
+      </SettingsSection>
+
+      <SettingsSection id="lagring" tittel={t('Storage')}>
+        {/* Samla: NAS-montering → rå-fil-arkiv → hub-database */}
+        <StorageCard />
       </SettingsSection>
 
       <SettingsSection id="nettverk" tittel={t('Network & nodes')}>

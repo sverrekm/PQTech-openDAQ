@@ -203,6 +203,13 @@ export const nb: Record<string, string> = {
   'A clear name for this box (node or hub). It tags all measurements from here, so you can see the source in Grafana, the hub and reports.': 'Eit tydeleg namn for denne boksen (node eller hub). Det taggar alle målingane herfrå, så du ser kjelda i Grafana, hubben og rapportane.',
   'e.g. Sundet, Tavle 3, Kunde A – hovudtavle': 't.d. Sundet, Tavle 3, Kunde A – hovudtavle',
 
+  // Samla lagrings-kort ('Storage' finst alt over)
+  'Where measurement data is stored. Mount a NAS for capacity, archive raw files to it, and optionally keep a queryable database on the hub.': 'Kvar måledata vert lagra. Monter ein NAS for kapasitet, arkiver rå filer dit, og hald eventuelt ein søkbar database på hubben.',
+  'Raw file archive': 'Rå-fil-arkiv',
+  'Bulk measurement files as CSV — point this at the NAS folder so the container does not fill up.': 'Store målefiler som CSV — peik denne mot NAS-mappa så containeren ikkje fyllest opp.',
+  'Hub database (channel data)': 'Hub-database (kanaldata)',
+  'Optional queryable copy on the hub. Keep on local disk (not NAS — SQLite corrupts over network). Bounded by max size.': 'Valfri søkbar kopi på hubben. Hald på lokal disk (ikkje NAS — SQLite korrumperer over nettverk). Avgrensa av maks storleik.',
+
   // NAS-oppdaging
   'Network storage (NAS)': 'Nettverkslagring (NAS)',
   'Discover SMB/CIFS shares on the network and mount one as the storage location for raw measurement files.': 'Oppdag SMB/CIFS-delingar på nettet og monter ei som lagringsplass for rå målefiler.',
