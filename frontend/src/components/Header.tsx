@@ -8,9 +8,10 @@ interface Props {
   onLogout?: () => void
   disconnected?: boolean
   onMenu?: () => void
+  enhetsnamn?: string
 }
 
-export default function Header({ serverOk, loading, onLogout, disconnected, onMenu }: Props) {
+export default function Header({ serverOk, loading, onLogout, disconnected, onMenu, enhetsnamn }: Props) {
   const { t } = useI18n()
 
   const handleLogout = async () => {
@@ -36,6 +37,12 @@ export default function Header({ serverOk, loading, onLogout, disconnected, onMe
           <h1 className="text-xl font-semibold text-white">
             <span className="text-[#D76428]">PQTech</span>-openDAQ
           </h1>
+          {enhetsnamn && (
+            <span className="hidden sm:inline-block text-sm font-medium text-white/90 bg-white/10 rounded px-2 py-0.5 ml-1"
+                  title="Enhetsnamn">
+              {enhetsnamn}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge ok={serverOk} loading={loading} />

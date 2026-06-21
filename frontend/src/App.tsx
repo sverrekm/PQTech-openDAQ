@@ -4,6 +4,7 @@ import { fetchKanalar, fetchKanalLive } from './api/kanalar'
 import { fetchMqttStatus } from './api/mqtt'
 import { fetchSiriusStatus } from './api/sirius'
 import { fetchHubKanalar, fetchHubStatus } from './api/hub'
+import { fetchPushKonfig } from './api/push'
 import { sjekkAuth } from './api/auth'
 import { usePolling } from './hooks/usePolling'
 import { useI18n } from './i18n'
@@ -72,6 +73,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const { data: hubKanalData } = usePolling(hubKanalFetcher, 3000)
   const hubKanalar = hubKanalData?.kanalar ?? []
 
+  // Enhetsnamn (push-konfig node_namn) — vist i header
+  const pushFetcher = useCallback(() => fetchPushKonfig(), [])
+  const { data: pushKonfig } = usePolling(pushFetcher, 30000)
+  const enhetsnamn = pushKonfig?.node_namn || ''
+
   // Hub-mode detection
   const hubStatusFetcher = useCallback(() => fetchHubStatus(), [])
   const { data: hubStatusData } = usePolling(hubStatusFetcher, 5000)
@@ -122,7 +128,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} onMenu={() => setMenyOpen(true)} />
+      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} onMenu={() => setMenyOpen(true)} enhetsnamn={enhetsnamn} />
       <Layout>
         <Sidebar view={view} onNavigate={(v) => { setView(v); setMenyOpen(false) }} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} open={menyOpen} onClose={() => setMenyOpen(false)} />
         <div className="flex-1 overflow-y-auto p-3 md:p-6">

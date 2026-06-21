@@ -198,6 +198,11 @@ export const nb: Record<string, string> = {
   'Writable': 'Skrivbar',
   'Last write': 'Siste skriv',
 
+  // Enhetsnamn
+  'Device name': 'Enhetsnamn',
+  'A clear name for this box (node or hub). It tags all measurements from here, so you can see the source in Grafana, the hub and reports.': 'Eit tydeleg namn for denne boksen (node eller hub). Det taggar alle målingane herfrå, så du ser kjelda i Grafana, hubben og rapportane.',
+  'e.g. Sundet, Tavle 3, Kunde A – hovudtavle': 't.d. Sundet, Tavle 3, Kunde A – hovudtavle',
+
   // NAS-oppdaging
   'Network storage (NAS)': 'Nettverkslagring (NAS)',
   'Discover SMB/CIFS shares on the network and mount one as the storage location for raw measurement files.': 'Oppdag SMB/CIFS-delingar på nettet og monter ei som lagringsplass for rå målefiler.',

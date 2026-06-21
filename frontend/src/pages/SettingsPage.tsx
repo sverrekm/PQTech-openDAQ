@@ -1,3 +1,4 @@
+import DeviceNameCard from '../components/DeviceNameCard'
 import DeviceSettingsCard from '../components/DeviceSettingsCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   return (
     <>
       <SettingsSection id="enhet" tittel={t('Device & measurement')} defaultOpen>
+        <DeviceNameCard />
         <DeviceSettingsCard />
         <DeviceConnectionCard />
         <ChannelConfigCard />
