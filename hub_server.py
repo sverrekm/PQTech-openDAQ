@@ -19,6 +19,7 @@ if __name__ == '__main__':
     sys.modules.setdefault('hub_server', sys.modules[__name__])
 
 import os
+import json
 import time
 import logging
 import threading
@@ -2134,6 +2135,65 @@ def _helsesjekk_loop():
             _sjekk_auto_rebuild()
         except Exception as e:
             log.debug(f"_sjekk_auto_rebuild feil: {e}")
+
+        # Synkroniser node-namn frå kvar node sitt eige «Enhetsnamn»
+        try:
+            _sync_nodenamn()
+        except Exception as e:
+            log.debug(f"_sync_nodenamn feil: {e}")
+
+
+_siste_namnsync = 0.0
+
+
+def _sync_nodenamn():
+    """Hald hubben sin FjernNode.namn i synk med kvar node sitt sjølv-valde
+    «Enhetsnamn» (push_konfig.node_namn). Les node sitt /api/push/konfig over
+    HTTP med fleet-token og oppdaterer namnet om det skil seg. Throttla til
+    kvar 120. sekund. Slik matchar hub-UI + openDAQ-pull-taggar det noden
+    kallar seg."""
+    global _siste_namnsync
+    if time.time() - _siste_namnsync < 120:
+        return
+    _siste_namnsync = time.time()
+
+    import urllib.request
+    # Fleet-token: hubben sitt ingest_token (= det nodane brukar som parent_token)
+    try:
+        from push_konfig import les_push_konfig
+        tok = (les_push_konfig().ingest_token or
+               os.environ.get("INGEST_TOKEN", "")).strip()
+    except Exception:
+        tok = os.environ.get("INGEST_TOKEN", "").strip()
+
+    with _hub_lock:
+        nodar = [n for n in _hub_konfig.nodar if n.type != NODE_TYPE_MODBUS_TCP]
+
+    endra = False
+    for node in nodar:
+        adr = (node.adresse or "").strip()
+        if not adr:
+            continue
+        url = f"http://{adr}:8080/api/push/konfig"
+        try:
+            req = urllib.request.Request(url, headers={
+                "X-Hub-Auth": tok, "User-Agent": "Mozilla/5.0 (PQTech-hub)"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read() or b"{}")
+        except Exception:
+            continue  # node ikkje nåbar — hopp over
+        sjolv_namn = str(data.get("node_namn", "")).strip()
+        if sjolv_namn and sjolv_namn != node.namn:
+            log.info(f"Node-namn synk: '{node.namn}' → '{sjolv_namn}' "
+                     f"({adr})")
+            with _hub_lock:
+                node.namn = sjolv_namn
+            endra = True
+    if endra:
+        try:
+            lagre_hub_konfig(_hub_konfig)
+        except Exception as e:
+            log.warning(f"Kunne ikkje lagre hub-konfig etter namnsynk: {e}")
 
 
 def _sjekk_auto_rebuild():
