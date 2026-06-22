@@ -3,6 +3,7 @@ import { apiGet, apiPut } from './client'
 export interface RaaFilKonfig {
   aktivert: boolean
   katalog: string
+  maks_fil_mb?: number
   // status
   skrive_totalt?: number
   droppa?: number

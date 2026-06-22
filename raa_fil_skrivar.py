@@ -40,6 +40,10 @@ _STANDARD = {
     # Standard /data/nas (mount NAS hit via docker-compose NAS_DIR). Kan vere
     # kva sti som helst inne i containeren (t.d. /data/maalinger/arkiv).
     "katalog": "/data/nas/maalingar",
+    # Maks storleik per CSV-fil (MB). Når ei fil når dette, rullar arkivet til
+    # ein ny del-fil (..._2.csv, _3.csv). 0 = inga storleiks-rotasjon (berre
+    # dagleg). Standard 1024 MB (1 GB) — innanfor 500 MB–2 GB.
+    "maks_fil_mb": 1024,
 }
 
 _konfig_cache = None
@@ -62,6 +66,10 @@ def les_konfig() -> dict:
         log.warning(f"Kunne ikkje lese raa_fil-konfig: {e}")
     if not d.get("katalog"):
         d["katalog"] = _STANDARD["katalog"]
+    try:
+        d["maks_fil_mb"] = max(0, int(d.get("maks_fil_mb", 1024)))
+    except (TypeError, ValueError):
+        d["maks_fil_mb"] = 1024
     _konfig_cache = dict(d)
     _konfig_mtime = mtime
     return d
@@ -73,6 +81,8 @@ def lagre_konfig(data: dict) -> dict:
         d["aktivert"] = bool(data["aktivert"])
     if data.get("katalog"):
         d["katalog"] = str(data["katalog"]).strip()
+    if "maks_fil_mb" in data:
+        d["maks_fil_mb"] = data["maks_fil_mb"]
     KONFIG_STI.parent.mkdir(parents=True, exist_ok=True)
     KONFIG_STI.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
     global _konfig_cache, _konfig_mtime
@@ -157,6 +167,37 @@ def parse_line_protocol(linjer: list) -> list:
     return punkt
 
 
+# Gjeldande del-fil-nummer per (node, dato) — unngår å skanne ved kvart skriv.
+_part_cache: dict = {}
+
+
+def _filnamn(node: str, dato: str, part: int) -> str:
+    """Filnamn med node + dato. Del 1 utan suffiks, del >1 med _N."""
+    return f"{node}_{dato}.csv" if part <= 1 else f"{node}_{dato}_{part}.csv"
+
+
+def _finn_part(mappe: Path, node: str, dato: str, maks_bytes: int) -> Path:
+    """Finn fila å appende til for (node, dato), med storleiks-rotasjon.
+    Rullar til neste del-fil når gjeldande har nådd maks_bytes."""
+    key = (node, dato)
+    part = _part_cache.get(key)
+    if part is None:
+        # Oppdag høgaste eksisterande del-fil (etter restart)
+        part = 1
+        p = 1
+        while (mappe / _filnamn(node, dato, p)).exists():
+            part = p
+            p += 1
+    if maks_bytes > 0:
+        try:
+            if (mappe / _filnamn(node, dato, part)).stat().st_size >= maks_bytes:
+                part += 1
+        except OSError:
+            pass
+    _part_cache[key] = part
+    return mappe / _filnamn(node, dato, part)
+
+
 def _skriv_loop():
     while True:
         try:
@@ -183,9 +224,11 @@ def _skriv_loop():
                 except queue.Empty:
                     break
 
-            # Grupper per (node, dato) → append til riktig fil
+            # Grupper per (node, dato). Filnamnet inneheld node + dato, og
+            # arkivet rullar til ny del-fil når makstorleiken er nådd.
             rot = Path(d["katalog"])
-            per_fil = {}
+            maks_bytes = int(d.get("maks_fil_mb", 1024)) * 1024 * 1024
+            per_grp = {}   # (node_trygt, node_orig, dato) -> [rader]
             for p in batch:
                 try:
                     dt = datetime.fromtimestamp(p["ts_ms"] / 1000.0)
@@ -194,15 +237,17 @@ def _skriv_loop():
                 except (OSError, OverflowError, ValueError):
                     iso = ""
                     dato = "ukjend"
-                node = _trygt(p.get("node"))
-                fil = rot / node / f"{dato}.csv"
-                per_fil.setdefault(fil, []).append(
-                    (iso, p["ts_ms"], p.get("node", ""), p.get("channel", ""),
+                node_orig = p.get("node", "")
+                nt = _trygt(node_orig)
+                per_grp.setdefault((nt, dato), []).append(
+                    (iso, p["ts_ms"], node_orig, p.get("channel", ""),
                      p.get("unit", ""), p.get("value")))
 
-            for fil, rader in per_fil.items():
+            for (nt, dato), rader in per_grp.items():
                 try:
-                    fil.parent.mkdir(parents=True, exist_ok=True)
+                    mappe = rot / nt
+                    mappe.mkdir(parents=True, exist_ok=True)
+                    fil = _finn_part(mappe, nt, dato, maks_bytes)
                     ny = not fil.exists()
                     with open(fil, "a", newline="", encoding="utf-8") as f:
                         w = csv.writer(f)
@@ -212,10 +257,17 @@ def _skriv_loop():
                     _stats["skrive"] += len(rader)
                     _stats["siste_skriv_ts"] = time.time()
                     _stats["siste_feil"] = ""
+                    # Rull til ny del-fil ved neste skriv viss denne er full
+                    if maks_bytes > 0:
+                        try:
+                            if fil.stat().st_size >= maks_bytes:
+                                _part_cache[(nt, dato)] = _part_cache.get((nt, dato), 1) + 1
+                        except OSError:
+                            pass
                 except Exception as e:
                     _stats["siste_feil"] = str(e)
-                    log.warning(f"Rå-fil skriv feila ({fil}): {e}")
-                    # NAS nede? Legg rader tilbake i kø (avgrensa) og vent
+                    log.warning(f"Rå-fil skriv feila ({nt}/{dato}): {e}")
+                    # NAS nede? Vent litt; rader er alt tatt frå køen (tapt) —
                     time.sleep(5)
         except Exception as e:
             _stats["siste_feil"] = f"loop: {e}"

@@ -207,6 +207,8 @@ export const nb: Record<string, string> = {
   'Where measurement data is stored. Mount a NAS for capacity, archive raw files to it, and optionally keep a queryable database on the hub.': 'Kvar måledata vert lagra. Monter ein NAS for kapasitet, arkiver rå filer dit, og hald eventuelt ein søkbar database på hubben.',
   'Raw file archive': 'Rå-fil-arkiv',
   'Bulk measurement files as CSV — point this at the NAS folder so the container does not fill up.': 'Store målefiler som CSV — peik denne mot NAS-mappa så containeren ikkje fyllest opp.',
+  'Max file size (MB)': 'Maks filstorleik (MB)',
+  'Files are split per node and date; a new part (_2, _3 …) starts when the size limit is reached. 0 = no size split.': 'Filene vert delte per node og dato; ein ny del (_2, _3 …) startar når storleiksgrensa er nådd. 0 = inga storleiks-deling.',
   'Hub database (channel data)': 'Hub-database (kanaldata)',
   'Optional queryable copy on the hub. Keep on local disk (not NAS — SQLite corrupts over network). Bounded by max size.': 'Valfri søkbar kopi på hubben. Hald på lokal disk (ikkje NAS — SQLite korrumperer over nettverk). Avgrensa av maks storleik.',
 

@@ -23,7 +23,7 @@ export default function StorageCard() {
   const [nasMsg, setNasMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   // ---- Rå-fil-arkiv ----
-  const [raa, setRaa] = useState<RaaFilKonfig>({ aktivert: false, katalog: '/data/nas/maalingar' })
+  const [raa, setRaa] = useState<RaaFilKonfig>({ aktivert: false, katalog: '/data/nas/maalingar', maks_fil_mb: 1024 })
   const [raaMsg, setRaaMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [raaBusy, setRaaBusy] = useState(false)
 
@@ -80,7 +80,7 @@ export default function StorageCard() {
   // ---- Rå-arkiv lagre ----
   const lagreRaa = async () => {
     setRaaBusy(true); setRaaMsg(null)
-    try { await lagreRaaFilKonfig({ aktivert: raa.aktivert, katalog: raa.katalog }); setRaaMsg({ text: t('Saved.'), ok: true }); last() }
+    try { await lagreRaaFilKonfig({ aktivert: raa.aktivert, katalog: raa.katalog, maks_fil_mb: raa.maks_fil_mb }); setRaaMsg({ text: t('Saved.'), ok: true }); last() }
     catch (e) { setRaaMsg({ text: String(e), ok: false }) }
     setRaaBusy(false)
   }
@@ -157,7 +157,18 @@ export default function StorageCard() {
             </span>
           )}
         </label>
-        <input className={felt} value={raa.katalog} onChange={e => setRaa(p => ({ ...p, katalog: e.target.value }))} placeholder="/data/nas/maalingar" />
+        <div className="flex flex-wrap gap-2 items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs text-gray-500 mb-1">{t('Archive folder (in container)')}</label>
+            <input className={felt} value={raa.katalog} onChange={e => setRaa(p => ({ ...p, katalog: e.target.value }))} placeholder="/data/nas/maalingar" />
+          </div>
+          <div className="w-40">
+            <label className="block text-xs text-gray-500 mb-1">{t('Max file size (MB)')}</label>
+            <input className={felt} type="number" min={0} step={100} value={raa.maks_fil_mb ?? 1024}
+                   onChange={e => setRaa(p => ({ ...p, maks_fil_mb: Number(e.target.value) }))} />
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-1">{t('Files are split per node and date; a new part (_2, _3 …) starts when the size limit is reached. 0 = no size split.')}</p>
         <div className="flex items-center gap-3 mt-2">
           <button onClick={lagreRaa} disabled={raaBusy} className="bg-[#D76428] hover:bg-[#B85420] text-white font-medium py-1.5 px-3 rounded-lg text-sm disabled:opacity-50">
             {raaBusy ? t('Saving...') : t('Save')}
