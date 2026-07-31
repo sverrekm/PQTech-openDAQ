@@ -329,6 +329,75 @@ handter_nas() {
     esac
 }
 
+handter_wifi() {
+    # Konfigurer trådlaust nett på verten via NetworkManager (nmcli).
+    # Same som web-GUI-et, men her direkte på host (ingen nsenter).
+    if ! command -v nmcli >/dev/null 2>&1; then
+        ui_msg "WiFi" "nmcli (NetworkManager) ikkje funne.\nKrev Raspberry Pi OS Bookworm eller nyare."
+        return
+    fi
+    local val
+    val="$(ui_meny "WiFi" \
+        "Status: $(nmcli -t -f GENERAL.CONNECTION device show "$(nmcli -t -f DEVICE,TYPE device status | awk -F: '$2=="wifi"{print $1; exit}')" 2>/dev/null | cut -d: -f2)" \
+        skann   "Skann og kople til nett" \
+        skjult  "Kople til skjult nett (skriv SSID)" \
+        status  "Vis WiFi-status" \
+        attende "Tilbake")" || return
+    local dev; dev="$(nmcli -t -f DEVICE,TYPE device status | awk -F: '$2=="wifi"{print $1; exit}')"
+    [ -z "$dev" ] && dev="wlan0"
+    case "$val" in
+        skann)
+            nmcli radio wifi on >/dev/null 2>&1
+            # Bygg meny av tilgjengelege SSID (unike, med signal)
+            local -a args=()
+            while IFS=: read -r ssid signal; do
+                [ -z "$ssid" ] && continue
+                args+=("$ssid" "signal ${signal}%")
+            done < <(nmcli -t -f SSID,SIGNAL device wifi list --rescan yes 2>/dev/null \
+                     | awk -F: '!seen[$1]++ && $1!=""')
+            if [ "${#args[@]}" -eq 0 ]; then
+                ui_msg "WiFi" "Fann ingen nett. Prøv igjen."
+                return
+            fi
+            local ssid
+            ssid="$(ui_meny "Vel nett" "Tilgjengelege nett:" "${args[@]}")" || return
+            local pass
+            pass="$(ui_input "Passord" "WiFi-passord for «$ssid» (blank = ope nett):" "")" || return
+            clear; echo "== Koplar til $ssid =="
+            if [ -n "$pass" ]; then
+                nmcli device wifi connect "$ssid" password "$pass" ifname "$dev"
+            else
+                nmcli device wifi connect "$ssid" ifname "$dev"
+            fi
+            if [ $? -eq 0 ]; then
+                ui_msg "WiFi" "Kopla til «$ssid».\nProfilen er lagra og overlever reboot."
+            else
+                ui_msg "Feil" "Tilkopling feila. Sjekk passord/rekkevidde."
+            fi
+            ;;
+        skjult)
+            local ssid pass
+            ssid="$(ui_input "Skjult nett" "SSID:" "")" || return
+            [ -z "$ssid" ] && return
+            pass="$(ui_input "Passord" "WiFi-passord (blank = ope):" "")" || return
+            nmcli radio wifi on >/dev/null 2>&1
+            clear; echo "== Koplar til skjult nett $ssid =="
+            if [ -n "$pass" ]; then
+                nmcli device wifi connect "$ssid" password "$pass" hidden yes ifname "$dev"
+            else
+                nmcli device wifi connect "$ssid" hidden yes ifname "$dev"
+            fi
+            [ $? -eq 0 ] && ui_msg "WiFi" "Kopla til «$ssid»." || ui_msg "Feil" "Tilkopling feila."
+            ;;
+        status)
+            local ut
+            ut="Grensesnitt: $dev\n\n"
+            ut+="$(nmcli -f GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS device show "$dev" 2>/dev/null)"
+            ui_msg "WiFi-status" "$ut"
+            ;;
+    esac
+}
+
 handter_token() {
     local t
     t="$(les_env INGEST_TOKEN "")"
@@ -454,6 +523,7 @@ fi
 while true; do
     val="$(ui_meny "$APP" "Vel kva du vil setje opp:" \
         nettverk "Nettverk — IP og grensesnitt" \
+        wifi     "WiFi — trådlaust nett på verten" \
         modus    "Driftsmodus — node eller hub" \
         lagring  "Datalagring — kor måledata vert lagra" \
         nas      "NAS — rå-fil-arkiv (CIFS/SMB)" \
@@ -466,6 +536,7 @@ while true; do
 
     case "$val" in
         nettverk) handter_nettverk ;;
+        wifi)     handter_wifi ;;
         modus)    handter_modus ;;
         lagring)  handter_datalagring ;;
         nas)      handter_nas ;;

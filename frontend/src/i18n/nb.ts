@@ -14,6 +14,26 @@ export const nb: Record<string, string> = {
   'Save update source': 'Lagre oppdateringskjelde',
   'Update source saved.': 'Oppdateringskjelde lagra.',
   'Could not save update source': 'Kunne ikkje lagre oppdateringskjelde',
+
+  // WiFi
+  'WiFi': 'WiFi',
+  'Connect the device to a wireless network': 'Kople eininga til eit trådlaust nett',
+  'Not available': 'Ikkje tilgjengeleg',
+  'Not connected': 'Ikkje tilkopla',
+  'NetworkManager (nmcli) not found on the host. Requires Raspberry Pi OS Bookworm or newer.':
+    'NetworkManager (nmcli) ikkje funne på verten. Krev Raspberry Pi OS Bookworm eller nyare.',
+  'Network': 'Nett',
+  'Signal': 'Signal',
+  'Scan for networks': 'Skann etter nett',
+  'Scan failed': 'Skann feila',
+  'Forget network': 'Gløym nettet',
+  'active': 'aktivt',
+  'Open': 'Ope',
+  'No networks found.': 'Ingen nett funne.',
+  'Hidden network': 'Skjult nett',
+  'Network name (SSID)': 'Nettnamn (SSID)',
+  'Enter the WiFi password': 'Skriv inn WiFi-passordet',
+  'Enter the network name (SSID)': 'Skriv inn nettnamnet (SSID)',
   // Header / Auth
   'Log out': 'Logg ut',
   'Log in': 'Logg inn',

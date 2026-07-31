@@ -1601,6 +1601,52 @@ def api_nas_status():
         return jsonify({"montert": False, "feil": str(e)})
 
 
+@app.route("/api/wifi/status")
+def api_wifi_status():
+    """Noverande WiFi-tilstand på verten (SSID, IP, signal, radio)."""
+    try:
+        import wifi_manager
+        return jsonify(wifi_manager.status())
+    except Exception as e:
+        return jsonify({"nmcli_tilgjengeleg": False, "feil": str(e)})
+
+
+@app.route("/api/wifi/skann", methods=["POST"])
+def api_wifi_skann():
+    """Skann etter tilgjengelege WiFi-nett."""
+    try:
+        import wifi_manager
+        return jsonify(wifi_manager.skann())
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/wifi/koble", methods=["POST"])
+def api_wifi_koble():
+    """Kople verten til eit WiFi-nett (SSID + passord)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import wifi_manager
+        ok, melding = wifi_manager.koble_til(
+            ssid=data.get("ssid", ""), passord=data.get("passord", ""),
+            skjult=bool(data.get("skjult", False)))
+        return jsonify({"suksess": ok, "melding": melding, **wifi_manager.status()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/wifi/gloym", methods=["POST"])
+def api_wifi_gloym():
+    """Slett den lagra profilen for eit WiFi-nett."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import wifi_manager
+        ok, melding = wifi_manager.gløym(ssid=data.get("ssid", ""))
+        return jsonify({"suksess": ok, "melding": melding, **wifi_manager.status()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/raa-fil/konfig", methods=["PUT"])
 def api_raa_fil_konfig_sett():
     """Lagre rå-fil-konfig (aktivert, katalog). Katalog kan vere ein
