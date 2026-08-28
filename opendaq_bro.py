@@ -100,6 +100,7 @@ class OpenDAQBro:
         self._sirius_aktiv = False  # True når reell SIRIUS-data strøymer
         self._sirius_ts = 0.0       # Tidsstempel for siste SIRIUS-data
         self._mqtt_pkt_teller = 0   # Antal MQTT-pakketar sendt
+        self._idle_feil_teller = 0  # Feil i _send_idle_adc (skal vere 0)
         self._acqloop_disabled = False  # Sporing av om acqLoop er deaktivert
         self._leser_traad = None
         self._stopp_event = threading.Event()
@@ -647,6 +648,10 @@ class OpenDAQBro:
             # er ListProperty som kan trigge DataType-åtvaringar.
             self._fiks_primary_connection_strings(ip)
 
+            # Diagnostikk: fangar opp statiske Avahi-filer på verten som
+            # annonserer dei same tenestene på feil (daude) adresser.
+            self._aatvar_om_framand_mdns(ip)
+
             # Fase 3: Aktiver mDNS-discovery
             # BERRE NativeStreaming — ikkje OPC-UA.
             # OPC-UA er tilgjengeleg på port 4840 for intern bruk
@@ -1139,8 +1144,17 @@ class OpenDAQBro:
                 dom_sig.send_packet(time_pkt)
                 sig.send_packet(val_pkt)
                 self._total_samples[idx] += blokk_storleik
-            except Exception:
-                pass  # Stille feil — idle-data er ikkje kritisk
+            except Exception as e:
+                # Idle-data er ikkje kritisk i seg sjølv, MEN stoppar det opp
+                # sluttar DewesoftX å vise ALLE kanalar (ventar på ADC-data
+                # som aldri kjem). Difor: aldri stille feil — logg rate-limita
+                # slik at ein ser det i loggen utan å drukne han.
+                self._idle_feil_teller += 1
+                if (self._idle_feil_teller <= 5 or
+                        self._idle_feil_teller % 1000 == 0):
+                    log.warning(
+                        f"  _send_idle_adc Ch{idx} FEIL "
+                        f"#{self._idle_feil_teller}: {e}")
 
     def hent_sample_buffer(self, max_samples: int = 2000) -> dict:
         """Returner siste N samples per kanal frå ringbufferen og fjern dei.
@@ -1171,6 +1185,7 @@ class OpenDAQBro:
             "pakett_klar": self._pakett_klar,
             "total_samples": list(self._total_samples),
             "acqloop_disabled": self._acqloop_disabled,
+            "idle_feil_teller": self._idle_feil_teller,
         }
         return result
 
@@ -1918,6 +1933,66 @@ class OpenDAQBro:
         except Exception as e:
             log.warning(f"  Fiks server capabilities feilet: {e}")
 
+    def _aatvar_om_framand_mdns(self, ip):
+        """Åtvar viss VERTEN annonserer våre tenester via eigne Avahi-filer.
+
+        Containeren køyrer på macvlan med eigen IP og gjer si eiga mDNS-
+        annonsering via `server.enable_discovery()`. Ligg det i tillegg ei
+        statisk `/etc/avahi/services/*.service` på verten (t.d. den gamle
+        `opendaq.service` frå før enable_discovery vart teken i bruk), vert
+        SAME teneste annonsert ein gong til — men med verten sine adresser,
+        der ingenting lyttar. Klientar som finn spøkelset fyrst får
+        tilkoplingsfeil, og på ein multi-homed vert (LAN + WiFi) vert det
+        eitt feil treff per interface.
+
+        Rein lesing — ingenting vert endra. Loggar berre.
+        """
+        import subprocess
+        try:
+            r = subprocess.run(
+                ["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
+                 "grep", "-rlE", "_opcua-tcp|_opendaq-streaming|_streaming-(lt|ws)",
+                 "/etc/avahi/services/"],
+                capture_output=True, text=True, timeout=10)
+        except Exception:
+            return  # nsenter/grep ikkje tilgjengeleg — hopp stille over
+        filer = [f for f in r.stdout.split() if f.strip()]
+        if not filer:
+            return
+        log.warning("  ⚠ VERTEN annonserer openDAQ-tenester sjølv:")
+        for f in filer:
+            log.warning(f"      {f}")
+        log.warning(f"      Desse peikar til verten sine IP-ar, ikkje {ip}, "
+                    f"og gjev klientane daude adresser for streaming.")
+        log.warning( "      Fjern fila på verten og køyr "
+                    "`systemctl reload avahi-daemon`.")
+
+    @staticmethod
+    def _conn_host_port(streng):
+        """Plukk ut (vert, port) frå ein openDAQ connection string.
+
+        Handterer "daq.ns://192.168.1.161:7420/", "opc.tcp://host:4840",
+        "daq.ns://[::1]:7420/" og tom/ugyldig streng.
+        Returnerer (None, None) når verten ikkje let seg lese ut.
+        """
+        s = str(streng or "").strip()
+        if not s:
+            return None, None
+        if "://" in s:
+            s = s.split("://", 1)[1]
+        s = s.split("/", 1)[0]          # dropp sti
+        if s.startswith("["):           # IPv6-litteral
+            vert, _, rest = s[1:].partition("]")
+            port_del = rest.lstrip(":")
+        else:
+            vert, _, port_del = s.partition(":")
+        if not vert:
+            return None, None
+        try:
+            return vert, int(port_del) if port_del else None
+        except ValueError:
+            return vert, None
+
     def _fiks_primary_connection_strings(self, ip):
         """Sett PrimaryConnectionString på alle ServerCapabilities til riktig IP.
 
@@ -1953,12 +2028,36 @@ class OpenDAQBro:
                 except Exception:
                     noverande = ""
 
-                if ip in str(noverande):
+                # EKSAKT samanlikning av vert+port — ikkje substring.
+                # `ip in noverande` var for slapt på ein multi-homed vert:
+                # ".53" er substring av ".153", og ein cap som peikar til
+                # RIKTIG IP men FEIL port vart godteken. Begge feila stille.
+                n_host, n_port = self._conn_host_port(noverande)
+                if n_host == ip and (n_port is None or n_port == int(port)):
                     log.info(f"  Cap {proto_id}: PrimaryConnectionString OK ({noverande})")
                     continue
 
+                if n_host and n_host != ip:
+                    log.warning(
+                        f"  Cap {proto_id}: FEIL vert i PrimaryConnectionString "
+                        f"({n_host} != {ip}) — multi-homed vert? Skriv om.")
+
                 if self._safe_set(cap, "PrimaryConnectionString", ny_conn):
-                    log.info(f"  Cap {proto_id}: PrimaryConnectionString {noverande!r} → {ny_conn}")
+                    # Les tilbake — set_property_value kan lukkast i Python-laget
+                    # medan OPC-UA-noden beheld gammal verdi (kjend 3.20.6-feil).
+                    try:
+                        etter = cap.get_property_value("PrimaryConnectionString")
+                    except Exception:
+                        etter = "?"
+                    e_host, e_port = self._conn_host_port(etter)
+                    if e_host == ip:
+                        log.info(f"  Cap {proto_id}: PrimaryConnectionString "
+                                 f"{noverande!r} → {etter}")
+                    else:
+                        log.warning(
+                            f"  Cap {proto_id}: PrimaryConnectionString sett til "
+                            f"{ny_conn!r}, men les tilbake {etter!r} — klientar "
+                            f"kan få feil adresse for streaming!")
                 else:
                     log.warning(f"  Cap {proto_id}: Kunne ikkje sette PrimaryConnectionString")
         except Exception as e:
