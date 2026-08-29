@@ -102,6 +102,55 @@ Miljovariablar i `docker-compose.yml`:
 | `SAMPLE_RATE` | `1000` | Samplingsrate (Hz) |
 | `OPENDAQ_IP` | *(auto)* | OPC-UA annonsert IP (auto-detect om tom) |
 
+## Eksternt lese-API (API-nøklar)
+
+Ein klient utanfor hub-nettet — til dømes ein desktop-widget — kan lese
+måledata over HTTPS med ein API-nøkkel. Ingen VPN, ingen sesjons-cookie.
+
+**Opprett nøkkel:** Innstillingar → «Deling og integrasjonar» → API-nøklar.
+Nøkkelen vert vist éin einaste gong; berre ein SHA-256-hash vert lagra, så han
+kan ikkje hentast fram att. Kvar nøkkel kan deaktiverast eller trekkjast
+tilbake for seg, ha utløpsdato, og avgrensast til utvalde kanalar
+(`Sundet/Spenning L1`, eller `Sundet/*` for alt frå ein node).
+
+Alle nøklar er **read-only** — berre GET slepp gjennom, uansett endepunkt.
+
+### Endepunkt
+
+| Endepunkt | Gjer |
+|---|---|
+| `GET /api/v1/info` | Kva hub dette er, og kva nøkkelen har tilgang til |
+| `GET /api/v1/kanalar` | Siste verdi for kvar kanal |
+| `GET /api/v1/straum` | Server-Sent Events, ny pakke kvart `?intervall=<sek>` (0,5–60) |
+
+Nøkkelen sendast som `X-API-Key: <nøkkel>` eller `Authorization: Bearer <nøkkel>`.
+For SSE frå ein nettlesar går han som `?api_key=<nøkkel>`, sidan `EventSource`
+ikkje kan setje headerar — merk at query-parametrar kan hamne i proxy-loggar.
+
+```bash
+curl -H "X-API-Key: pqt_..." https://opendac.pqtech.no/api/v1/kanalar
+```
+
+```json
+{"tid": "2026-08-29T20:15:03",
+ "kanalar": [{"node": "Sundet", "namn": "Spenning L1", "verdi": 232.4,
+              "eining": "V", "type": "opendaq", "tilkobla": true}]}
+```
+
+### Eksempelklient
+
+`eksempel/widget_klient.py` er ei enkelt fil (krev berre `requests`) som viser
+både polling og SSE med reconnect:
+
+```bash
+pip install requests
+export PQTECH_API_NOKKEL=pqt_...
+python eksempel/widget_klient.py --url https://opendac.pqtech.no --straum
+```
+
+Klassen `HubKlient` i den fila kan klippast rett ut og leggjast bak kva GUI
+som helst (tkinter, Qt, tray-ikon).
+
 ## Filar
 
 | Fil | Beskriving |

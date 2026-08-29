@@ -11,7 +11,7 @@ import json
 import hashlib
 import secrets
 
-from flask import request, session, jsonify
+from flask import request, session, jsonify, g
 
 KONFIG_DIR = "/data/konfig"
 BRUKAR_FIL = os.path.join(KONFIG_DIR, "brukar.json")
@@ -91,6 +91,37 @@ def _delte_token() -> set:
     return ut
 
 
+def _api_nokkel_fraa_request() -> str:
+    """Hent klartekst-API-nøkkelen frå requesten.
+
+    Tre stader, i prioritert rekkjefølgje:
+      1. `X-API-Key: <nøkkel>`            — det normale for eit skript
+      2. `Authorization: Bearer <nøkkel>` — for klientbibliotek som ventar det
+      3. `?api_key=<nøkkel>`              — naudsynt for SSE: nettlesarens
+         EventSource kan ikkje setje headerar. Merk at query-parametrar kan
+         hamne i proxy-loggar, så header er å føretrekke der det går.
+    """
+    h = request.headers.get("X-API-Key", "").strip()
+    if h:
+        return h
+    auth = request.headers.get("Authorization", "").strip()
+    if auth.startswith("Bearer "):
+        kandidat = auth[7:].strip()
+        # Flåte-nøkkelen brukar same header; berre pqt_-nøklar er API-nøklar.
+        if kandidat.startswith("pqt_"):
+            return kandidat
+    return request.args.get("api_key", "").strip()
+
+
+def sjekk_api_nokkel():
+    """Verifiser API-nøkkelen i requesten. Returnerer ApiNokkel eller None."""
+    try:
+        import api_nokkel
+    except ImportError:
+        return None
+    return api_nokkel.verifiser(_api_nokkel_fraa_request())
+
+
 def sjekk_passord(brukarnavn: str, passord: str) -> bool:
     """Sjekk om brukarnavn og passord er korrekt."""
     data = les_brukar()
@@ -154,5 +185,22 @@ def init_app(app):
                 and request.method == "POST"
                 and request.headers.get("Authorization", "").startswith("Bearer ")):
             return
+        # Unntatt: /api/v1/ er det eksterne lese-API-et (desktop-widget o.l.
+        # på eit anna nett). Autentisering med API-nøkkel i staden for sesjon,
+        # sidan ein widget ikkje kan halde på ein session-cookie. Read-only:
+        # berre GET slepp gjennom, uansett kva nøkkelen elles skulle tilseie.
+        if request.path.startswith("/api/v1/"):
+            if request.method not in ("GET", "HEAD", "OPTIONS"):
+                return jsonify({"feil": "API-nøkkel gir berre lesetilgang"}), 405
+            nokkel = sjekk_api_nokkel()
+            if nokkel is None:
+                # Ein innlogga admin skal òg kunne bla i API-et frå GUI-et.
+                if "brukar" in session:
+                    g.api_nokkel = None
+                    return
+                return jsonify({"feil": "Ugyldig eller manglande API-nøkkel"}), 401
+            g.api_nokkel = nokkel
+            return
+
         if "brukar" not in session:
             return jsonify({"feil": "Ikkje innlogga"}), 401

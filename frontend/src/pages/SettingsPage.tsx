@@ -11,6 +11,7 @@ import ProbeAnalysisCard from '../components/ProbeAnalysisCard'
 import Ep2RecoveryCard from '../components/Ep2RecoveryCard'
 import BufferConfigCard from '../components/BufferConfigCard'
 import InfluxShareCard from '../components/InfluxShareCard'
+import ApiKeysCard from '../components/ApiKeysCard'
 import EmcCard from '../components/EmcCard'
 import StorageCard from '../components/StorageCard'
 import SettingsSection from '../components/SettingsSection'
@@ -34,6 +35,7 @@ export default function SettingsPage() {
         {/* EMC: på SIRIUS-direkte node frå lokal ADC; på hubben frå dei
             bridga bølgjeformene (hub_emc). Synleg i begge modus. */}
         <EmcCard />
+        <ApiKeysCard />
       </SettingsSection>
 
       <SettingsSection id="lagring" tittel={t('Storage')}>

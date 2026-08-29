@@ -17,7 +17,8 @@ import threading
 import glob as glob_mod
 
 import requests as _http_proxy
-from flask import Flask, jsonify, request, session, send_file, redirect, Response
+from flask import (Flask, jsonify, request, session, send_file, redirect, Response,
+                   g, stream_with_context)
 
 import usbip_manager
 import tailscale_manager
@@ -26,6 +27,7 @@ import influx_pusher
 import emc_pusher
 import hub_lager
 import brukar_auth
+import api_nokkel
 
 # Betinget import av SIRIUS-driver (kun tilgjengelig i NATIVE_SIRIUS-modus)
 try:
@@ -1369,6 +1371,140 @@ def api_metrics():
 
     return Response("\n".join(linjer) + "\n",
                     mimetype="text/plain; version=0.0.4; charset=utf-8")
+
+
+# ── API-nøklar + eksternt lese-API (/api/v1) ──────────────────────────────
+# Hubben er offentleg eksponert via Cloudflare, så ein klient utanfor nettet
+# (t.d. ein desktop-widget) treng berre ein nøkkel — ingen VPN. Nøklane vert
+# administrerte her (session-auth), medan sjølve /api/v1-rutene autentiserer
+# med nøkkelen (sjå brukar_auth.sjekk_auth).
+
+@app.route("/api/api-nokler")
+def api_nokler_liste():
+    """List nøklar. Klarteksten finst ikkje — berre prefiks og metadata."""
+    return jsonify({"nokler": [n.offentleg() for n in api_nokkel.les_nokler()]})
+
+
+@app.route("/api/api-nokler", methods=["POST"])
+def api_nokler_opprett():
+    """Opprett nøkkel. Klarteksten vert returnert HER OG BERRE HER."""
+    data = request.get_json(silent=True) or {}
+    try:
+        klartekst, nokkel = api_nokkel.opprett(
+            data.get("namn", ""),
+            utloep=data.get("utloep", ""),
+            kanal_filter=data.get("kanal_filter") or [],
+        )
+    except OSError as e:
+        return jsonify({"suksess": False, "feil": str(e)}), 500
+    return jsonify({"suksess": True, "nokkel": klartekst, **nokkel.offentleg()})
+
+
+@app.route("/api/api-nokler/<nokkel_id>", methods=["PUT"])
+def api_nokler_endre(nokkel_id):
+    """Slå ein nøkkel av eller på utan å slette han."""
+    data = request.get_json(silent=True) or {}
+    ok = api_nokkel.sett_aktivert(nokkel_id, bool(data.get("aktivert", True)))
+    if not ok:
+        return jsonify({"suksess": False, "feil": "Nøkkel ikkje funnen"}), 404
+    return jsonify({"suksess": True})
+
+
+@app.route("/api/api-nokler/<nokkel_id>", methods=["DELETE"])
+def api_nokler_slett(nokkel_id):
+    """Trekk tilbake ein nøkkel. Verkar med ein gong (ingen cache-forsinking)."""
+    if not api_nokkel.slett(nokkel_id):
+        return jsonify({"suksess": False, "feil": "Nøkkel ikkje funnen"}), 404
+    return jsonify({"suksess": True})
+
+
+def _v1_kanalar(nokkel) -> list:
+    """Kanalane denne nøkkelen får sjå, i eit stabilt, klient-vennleg format.
+
+    Bevisst smalare enn /api/hub/kanalar: eit eksternt API skal ikkje lekke
+    intern struktur som endrar seg med kvar refaktorering.
+    """
+    kanalar = _hent_kanalar_for_eksport()
+    if nokkel is not None:
+        kanalar = api_nokkel.filtrer_kanalar(nokkel, kanalar)
+    ut = []
+    for k in kanalar:
+        ut.append({
+            "node": k.get("node_namn") or k.get("node_id") or "",
+            "namn": k.get("namn") or "",
+            "verdi": k.get("verdi"),
+            "eining": k.get("eining") or "",
+            "type": k.get("kanal_type") or "opendaq",
+            "tilkobla": bool(k.get("tilkobla")),
+        })
+    return ut
+
+
+@app.route("/api/v1/info")
+def api_v1_info():
+    """Kva denne hubben er, og kva nøkkelen din har tilgang til."""
+    nokkel = getattr(g, "api_nokkel", None)
+    return jsonify({
+        "namn": socket.gethostname(),
+        "modus": "hub" if HUB_MODUS else ("direkte" if SIRIUS_DIREKTE else "opendaq"),
+        "versjon": oppdatering.les_versjon().get("sha", ""),
+        "nokkel_namn": nokkel.namn if nokkel else None,
+        "kanal_filter": nokkel.kanal_filter if nokkel else [],
+        "antal_kanalar": len(_v1_kanalar(nokkel)),
+    })
+
+
+@app.route("/api/v1/kanalar")
+def api_v1_kanalar():
+    """Siste verdi for kvar kanal. For klientar som pollar."""
+    from datetime import datetime
+    nokkel = getattr(g, "api_nokkel", None)
+    return jsonify({
+        "tid": datetime.now().isoformat(timespec="seconds"),
+        "kanalar": _v1_kanalar(nokkel),
+    })
+
+
+@app.route("/api/v1/straum")
+def api_v1_straum():
+    """Server-Sent Events: same nyttelast som /api/v1/kanalar, med jamne mellomrom.
+
+    Éi lang HTTPS-tilkobling i staden for polling. `?intervall=<sek>` styrer
+    takten (0.5-60 s). Klienten treng berre lytte; EventSource i nettlesar og
+    `requests`-strøyming i Python handterer begge dette direkte.
+    """
+    import json
+    import time
+    from datetime import datetime
+
+    nokkel = getattr(g, "api_nokkel", None)
+    try:
+        intervall = float(request.args.get("intervall", 2.0))
+    except ValueError:
+        intervall = 2.0
+    intervall = max(0.5, min(60.0, intervall))
+
+    def generer():
+        # Kommentar-linje med ein gong: får proxyar til å sende headerane
+        # vidare, så klienten veit at tilkoblinga står.
+        yield ": pqtech straum open\n\n"
+        while True:
+            nyttelast = {
+                "tid": datetime.now().isoformat(timespec="seconds"),
+                "kanalar": _v1_kanalar(nokkel),
+            }
+            yield f"data: {json.dumps(nyttelast)}\n\n"
+            time.sleep(intervall)
+
+    return Response(
+        stream_with_context(generer()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # hindrar at proxyar bufrar straumen
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.route("/api/influx/konfig")
