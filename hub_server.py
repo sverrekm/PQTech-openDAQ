@@ -23,6 +23,7 @@ import json
 import time
 import logging
 import threading
+import resource
 
 import numpy as np
 from datetime import datetime
@@ -2066,6 +2067,48 @@ def _logg_opcua_tre():
 
 # --- Helsesjekk-løkke ---
 
+# ── Fd-vakt ───────────────────────────────────────────────────────────────
+# openDAQ sin add_device lek ein socket per mislukka tilkoblingsforsøk (native
+# kode — vi kan ikkje lukke han frå Python). Med ein node som er varig nede
+# fyller det fd-tabellen på nokre timar; deretter feilar accept() med EMFILE og
+# web-UI-et heng (lyttesocketen finst, men ingen tek imot — Recv-Q renn over)
+# medan openDAQ-serverane held fram. Difor: hev grensa (start_hub), backoff på
+# rekobling, og kontrollert restart før vi treffer taket.
+_FD_VARSEL = 0.70                # logg åtvaring frå denne andelen
+_FD_RESTART = 0.90               # restart hub kontrollert frå denne andelen
+_REKOBLING_MAKS_S = 900.0        # tak for backoff mellom rekoblingsforsøk
+_fd_varsla = False
+
+
+def _fd_bruk() -> tuple:
+    """Returnerer (opne fd-ar, soft-grense), eller (0, 0) om ukjent."""
+    try:
+        opne = len(os.listdir("/proc/self/fd"))
+        soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        return opne, soft
+    except Exception:
+        return 0, 0
+
+
+def _sjekk_fd_vakt():
+    """Restart kontrollert før fd-taket wedgar accept-loopen."""
+    global _fd_varsla
+    opne, soft = _fd_bruk()
+    if soft <= 0 or opne <= 0:
+        return
+    andel = opne / soft
+    if andel >= _FD_RESTART:
+        log.error(f"FD-VAKT: {opne}/{soft} fd-ar i bruk ({andel:.0%}) — "
+                  f"restartar hub før accept() feilar med EMFILE")
+        os._exit(1)          # restart: unless-stopped startar containeren att
+    if andel >= _FD_VARSEL and not _fd_varsla:
+        _fd_varsla = True
+        log.warning(f"FD-VAKT: {opne}/{soft} fd-ar i bruk ({andel:.0%}) — "
+                    f"sjekk om ein node er varig nede (lekkasje i add_device)")
+    elif andel < _FD_VARSEL:
+        _fd_varsla = False
+
+
 def _helsesjekk_loop():
     """Bakgrunnstråd som sjekkar om fjern-nodar er tilgjengelege."""
     global _helsesjekk_aktiv
@@ -2074,6 +2117,7 @@ def _helsesjekk_loop():
     intervall = konfig.helsesjekk_intervall
     reconnect_intervall = konfig.reconnect_intervall
     _siste_rekobling = {}  # node_id -> timestamp
+    _rekobling_feil = {}   # node_id -> tal på mislukka forsøk (backoff)
 
     while _helsesjekk_aktiv:
         time.sleep(intervall)
@@ -2123,12 +2167,28 @@ def _helsesjekk_loop():
                     except Exception:
                         pass
             else:
-                # Ikkje tilkobla — prøv rekobling med intervall
+                # Ikkje tilkobla — prøv rekobling med eksponentiell backoff.
+                # Kvart mislukka forsøk lek ein socket i openDAQ, så ein node
+                # som er varig nede må ikkje prøvast kvart 30. sekund i det
+                # uendelege (1024 fd-ar er brukt opp på ~4 timar).
+                feil = _rekobling_feil.get(node.id, 0)
+                ventetid = min(reconnect_intervall * (2 ** feil), _REKOBLING_MAKS_S)
                 siste = _siste_rekobling.get(node.id, 0)
-                if time.time() - siste >= reconnect_intervall:
+                if time.time() - siste >= ventetid:
                     _siste_rekobling[node.id] = time.time()
-                    log.info(f"Prøver rekobling til '{node.namn}'...")
-                    _koble_til_node(node)
+                    log.info(f"Prøver rekobling til '{node.namn}' "
+                             f"(feila {feil} gong(er), neste om "
+                             f"{min(ventetid * 2, _REKOBLING_MAKS_S):.0f}s)...")
+                    if _koble_til_node(node):
+                        _rekobling_feil.pop(node.id, None)
+                    else:
+                        _rekobling_feil[node.id] = feil + 1
+
+        # Fd-vakt: kontrollert restart før EMFILE wedgar web-UI-et
+        try:
+            _sjekk_fd_vakt()
+        except Exception as e:
+            log.debug(f"_sjekk_fd_vakt feil: {e}")
 
         # Etter at alle nodar er sjekka: vurder auto-rebuild av kanalstruktur
         try:
@@ -2487,6 +2547,18 @@ def start_hub():
     log.info("=" * 60)
     log.info("  openDAQ Hub — Aggregator")
     log.info("=" * 60)
+
+    # Hev fd-grensa. Standard soft-grense (1024) vert brukt opp på nokre timar
+    # når ein node er varig nede, sidan openDAQ lek ein socket per mislukka
+    # add_device. Hard-grensa i containeren er 524288.
+    try:
+        _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        _ynskt = min(65536, _hard)
+        if _soft < _ynskt:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (_ynskt, _hard))
+            log.info(f"  Fd-grense heva: {_soft} -> {_ynskt} (hard {_hard})")
+    except Exception as e:
+        log.warning(f"  Kunne ikkje heve fd-grense: {e}")
 
     # Les konfig
     _hub_konfig = les_hub_konfig()
