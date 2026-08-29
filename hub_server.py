@@ -2067,16 +2067,47 @@ def _logg_opcua_tre():
 
 # --- Helsesjekk-løkke ---
 
+# ── Nåbarheits-sjekk ──────────────────────────────────────────────────────
+# Ein node kan vere nede lenge (straumbrot, flytta til ny lokasjon, node under
+# ombygging). Hubben skal tole det i det uendelege OG plukke noden opp raskt
+# når han kjem tilbake. Problemet er at openDAQ sin add_device lek ein socket
+# per mislukka forsøk, så vi kan ikkje berre hamre laust. Difor: ein billig
+# TCP-connect fyrst (som Python lukkar reint). Er porten ikkje open, hoppar vi
+# over add_device heilt — då er forsøket gratis og kan gjentakast for evig.
+_NAABAR_TIMEOUT_S = 2.0
+
+
+def _node_naabar(node) -> bool:
+    """True om noden svarar på TCP. Prøver både konfigurert port og den
+    alternative openDAQ-porten, sidan _koble_til_node har protokoll-fallback."""
+    import socket
+
+    portar = [node.port]
+    alt = 7420 if node.port == 4840 else 4840
+    if alt not in portar:
+        portar.append(alt)
+
+    for port in portar:
+        try:
+            with socket.create_connection((node.adresse, port),
+                                          timeout=_NAABAR_TIMEOUT_S):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 # ── Fd-vakt ───────────────────────────────────────────────────────────────
 # openDAQ sin add_device lek ein socket per mislukka tilkoblingsforsøk (native
 # kode — vi kan ikkje lukke han frå Python). Med ein node som er varig nede
 # fyller det fd-tabellen på nokre timar; deretter feilar accept() med EMFILE og
 # web-UI-et heng (lyttesocketen finst, men ingen tek imot — Recv-Q renn over)
 # medan openDAQ-serverane held fram. Difor: hev grensa (start_hub), backoff på
-# rekobling, og kontrollert restart før vi treffer taket.
+# rekobling, og kontrollert restart før vi treffer taket. Med
+# nåbarheits-sjekken over skal vakta i praksis aldri slå ut.
 _FD_VARSEL = 0.70                # logg åtvaring frå denne andelen
 _FD_RESTART = 0.90               # restart hub kontrollert frå denne andelen
-_REKOBLING_MAKS_S = 900.0        # tak for backoff mellom rekoblingsforsøk
+_REKOBLING_MAKS_S = 300.0        # tak for backoff når noden svarar men add_device feilar
 _fd_varsla = False
 
 
@@ -2117,7 +2148,8 @@ def _helsesjekk_loop():
     intervall = konfig.helsesjekk_intervall
     reconnect_intervall = konfig.reconnect_intervall
     _siste_rekobling = {}  # node_id -> timestamp
-    _rekobling_feil = {}   # node_id -> tal på mislukka forsøk (backoff)
+    _rekobling_feil = {}   # node_id -> mislukka add_device (backoff)
+    _nede_logga = set()    # node_id vi alt har logga som utilgjengeleg
 
     while _helsesjekk_aktiv:
         time.sleep(intervall)
@@ -2167,21 +2199,39 @@ def _helsesjekk_loop():
                     except Exception:
                         pass
             else:
-                # Ikkje tilkobla — prøv rekobling med eksponentiell backoff.
-                # Kvart mislukka forsøk lek ein socket i openDAQ, så ein node
-                # som er varig nede må ikkje prøvast kvart 30. sekund i det
-                # uendelege (1024 fd-ar er brukt opp på ~4 timar).
+                # Ikkje tilkobla — prøv rekobling. Nåbarheits-sjekken fyrst:
+                # ein node som er nede (midlertidig, eller flytta) skal aldri
+                # nå fram til add_device, sidan det kallet lek ein socket per
+                # mislukka forsøk. Sjekken er gratis, så vi held fram med å
+                # prøve i det uendelege og fangar noden opp innan eitt
+                # polleintervall når han kjem tilbake.
                 feil = _rekobling_feil.get(node.id, 0)
                 ventetid = min(reconnect_intervall * (2 ** feil), _REKOBLING_MAKS_S)
                 siste = _siste_rekobling.get(node.id, 0)
                 if time.time() - siste >= ventetid:
                     _siste_rekobling[node.id] = time.time()
-                    log.info(f"Prøver rekobling til '{node.namn}' "
-                             f"(feila {feil} gong(er), neste om "
-                             f"{min(ventetid * 2, _REKOBLING_MAKS_S):.0f}s)...")
+
+                    if not _node_naabar(node):
+                        # Ikkje nåbar: ingen add_device, ingen lekkasje. Logg
+                        # éin gong, og hald pollinga på grunnintervallet så
+                        # noden vert plukka opp med ein gong han er tilbake.
+                        _rekobling_feil.pop(node.id, None)
+                        if node.id not in _nede_logga:
+                            _nede_logga.add(node.id)
+                            log.info(
+                                f"Node '{node.namn}' ({node.adresse}) svarar ikkje "
+                                f"— ventar, sjekkar kvart {reconnect_intervall}s")
+                        continue
+
+                    if node.id in _nede_logga:
+                        _nede_logga.discard(node.id)
+                        log.info(f"Node '{node.namn}' svarar igjen — koplar til")
+                    log.info(f"Prøver rekobling til '{node.namn}'...")
                     if _koble_til_node(node):
                         _rekobling_feil.pop(node.id, None)
                     else:
+                        # Nåbar, men openDAQ-tilkoblinga feila (her ligg
+                        # lekkasjen) — backoff til taket.
                         _rekobling_feil[node.id] = feil + 1
 
         # Fd-vakt: kontrollert restart før EMFILE wedgar web-UI-et
