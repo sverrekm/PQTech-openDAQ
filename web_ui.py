@@ -252,6 +252,29 @@ def _hent_node_for_proxy(node_id: str):
     return None
 
 
+def _node_utilgjengeleg_html(node) -> str:
+    """Lesbar feilside når ein node ikkje svarar (i staden for blank skjerm)."""
+    namn = getattr(node, "namn", "") or "Noden"
+    adresse = getattr(node, "adresse", "")
+    return (
+        "<!DOCTYPE html><html lang=\"no\"><head><meta charset=\"utf-8\">"
+        "<title>Node utilgjengeleg</title><style>"
+        "body{font-family:system-ui,sans-serif;background:#f7f7f8;color:#333;"
+        "display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
+        ".k{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:32px;"
+        "max-width:420px;box-shadow:0 1px 3px rgba(0,0,0,.06)}"
+        "h1{font-size:18px;margin:0 0 8px}p{font-size:14px;line-height:1.5;color:#666;margin:0 0 16px}"
+        "code{background:#f3f3f3;padding:2px 6px;border-radius:4px;font-size:13px}"
+        "a{color:#D76428;text-decoration:none;font-size:14px}"
+        "</style></head><body><div class=\"k\">"
+        f"<h1>{namn} svarar ikkje</h1>"
+        f"<p>Hubben nådde ikkje <code>{adresse}</code>. Noden kan vere avslått, "
+        "utan nett, eller flytta til ei ny adresse.</p>"
+        "<a href=\"/\">&larr; Tilbake til hubben</a>"
+        "</div></body></html>"
+    )
+
+
 @app.route("/node-proxy/<node_id>/", defaults={"sub_path": ""},
            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 @app.route("/node-proxy/<node_id>/<path:sub_path>",
@@ -284,9 +307,14 @@ def node_proxy(node_id, sub_path):
     target_url = f"http://{node_host}:{_NODE_PROXY_PORT}/{sub_path}"
 
     # Bygg forward-request
+    # Referer vert med vilje IKKJE forwarda: han peikar på /node-proxy/<id>/,
+    # som berre gir meining på hubben. Noden køyrer same image (og dermed same
+    # _proxy_assets_rewrite), så ein forwarda Referer får noden til å tru at
+    # HAN er proxyen og redirecte på nytt → dobbelt prefiks → 404 på alle
+    # API-kall frå node-UI-et (kvit side).
     fwd_headers = {k: v for k, v in request.headers
                    if k.lower() not in _NODE_PROXY_HOP_HEADERS
-                   and k.lower() != "host"}
+                   and k.lower() not in ("host", "referer")}
     # Set X-Forwarded-* slik at noden veit kva proxy-prefiks å bruke
     fwd_headers["X-Forwarded-Host"] = request.host
     fwd_headers["X-Forwarded-Proto"] = request.scheme
@@ -309,9 +337,16 @@ def node_proxy(node_id, sub_path):
             params=request.query_string,
             allow_redirects=False,
             stream=True,
-            timeout=30.0,
+            # (connect, read): ein node som er heilt nede skal feile raskt.
+            # 30 s connect-timeout gav 30 sekund blank side i nettlesaren før
+            # feilmeldinga kom.
+            timeout=(4.0, 30.0),
         )
     except _http_proxy.exceptions.RequestException as e:
+        if "text/html" in request.headers.get("Accept", ""):
+            # Toppnivå-navigasjon: vis noko lesbart, ikkje ein JSON-klump.
+            return Response(_node_utilgjengeleg_html(node), status=502,
+                            mimetype="text/html")
         return jsonify({"feil": f"Node ikkje nåbar: {e}"}), 502
 
     # Bygg respons med headers (filtrer bort hop-by-hop)
@@ -344,6 +379,11 @@ def _proxy_assets_rewrite():
     ingen node-proxy-Referer og blir difor aldri redirecta.
     """
     if request.path.startswith("/node-proxy/"):
+        return None
+    # Kjem requesten frå hub-proxyen, er prefikset alt handtert der. Utan denne
+    # sperra ville noden (same image, same rewrite) redirecte ein forwarda
+    # request på nytt og byggje opp dobbelt prefiks.
+    if request.headers.get("X-Forwarded-Prefix"):
         return None
     if not (request.path.startswith("/assets/")
             or request.path.startswith("/api/")
