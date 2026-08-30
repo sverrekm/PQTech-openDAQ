@@ -1520,6 +1520,20 @@ def _koble_til_node(node: FjernNode) -> bool:
 
         return True
 
+    # openDAQ seier berre «Device with the same local ID already exists.».
+    # I praksis tyder det alltid det same: to nodar har same
+    # OPENDAQ_DEVICE_IDX, so begge byggjer rota si som daqref://device0 og
+    # hubben kan ikkje halde to device med same lokale ID. Sei det rett ut —
+    # elles er meldinga uråd å handle på frå GUI-et.
+    if "local id" in feil_melding.lower():
+        feil_melding = (
+            f"Noden brukar same openDAQ device-indeks som ein node som alt er "
+            f"tilkobla (begge blir daqref://device0). Sett ein unik "
+            f"OPENDAQ_DEVICE_IDX på {node.namn}: «sudo bash pqtech-config.sh» "
+            f"på node-verten → OpenDAQ device-indeks → Bruk endringar. "
+            f"Rekoble deretter noden her. (openDAQ: {feil_melding})"
+        )
+
     with _hub_lock:
         _node_devices.pop(node.id, None)
         _node_status[node.id] = {
@@ -2508,6 +2522,13 @@ def legg_til_node_api(data: dict) -> tuple:
         _pending_changes = True
     status_tekst = "tilkobla" if ok else "lagt til (tilkobling feila)"
     melding = f"Node '{node.namn}' {status_tekst}"
+    if not ok:
+        # Utan årsaka her ser brukaren berre «tilkobling feila» i toasten og
+        # må leite i node-lista etter kvifor.
+        with _hub_lock:
+            aarsak = (_node_status.get(node.id) or {}).get("feil") or ""
+        if aarsak:
+            melding += f": {aarsak}"
     if _pending_changes:
         melding += " — restart hub for å aktivere kanalar i DewesoftX"
     return True, melding, node.til_dict()
