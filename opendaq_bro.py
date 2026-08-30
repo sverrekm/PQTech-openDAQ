@@ -399,7 +399,18 @@ class OpenDAQBro:
             # Device-indeks frå env (default 0). Må vere unik per Pi når
             # fleire nodar koplast til same hub, ellers får hub
             # "Device with same local ID already exists" (alle blir RefDev0).
+            # Konfigfila vinn over env, so indeksen kan settast frå GUI-et på
+            # ein node ein ikkje har vertstilgang til (env krev .env-endring
+            # + container-recreate på verten).
             dev_idx = os.environ.get("OPENDAQ_DEVICE_IDX", "0").strip() or "0"
+            try:
+                from enhet_konfig import les_enhet_konfig as _les_enhet
+                _idx_konf = _les_enhet().opendaq_device_idx
+                if _idx_konf is not None and int(_idx_konf) >= 0:
+                    dev_idx = str(int(_idx_konf))
+                    log.info(f"  Device-indeks frå konfig: {dev_idx}")
+            except Exception as e:
+                log.debug(f"  Kunne ikkje lese device-indeks frå konfig: {e}")
             conn_str = f"daqref://device{dev_idx}"
             builder.set_root_device(conn_str)
             self._instance = builder.build()

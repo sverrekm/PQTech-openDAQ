@@ -33,6 +33,11 @@ class EnhetKonfig:
     antal_adc_kanalar: int = 8       # 4, 8, 16 etc. avhengig av modell
     modell: str = ""                 # Auto-detektert eller manuelt sett (tom = ukjend)
     location: str = ""               # Plassering som visest i DewesoftX (t.d. "Verksted", "Tavle 3")
+    # openDAQ-rota vert bygd som daqref://device<idx>. Indeksen MÅ vere unik
+    # per node under same hub — elles får to nodar same lokale device-ID og
+    # hubben kan berre halde den eine («Device with the same local ID already
+    # exists»). -1 = ikkje sett her; då gjeld env OPENDAQ_DEVICE_IDX (default 0).
+    opendaq_device_idx: int = -1
 
 
 def les_enhet_konfig() -> EnhetKonfig:
@@ -89,7 +94,21 @@ def valider_enhet_konfig(data: dict) -> tuple:
     modell = str(data.get("modell", ""))
     location = str(data.get("location", ""))
 
-    return EnhetKonfig(antal_adc_kanalar=n, modell=modell, location=location), None
+    # Device-indeksen vert sett frå eit eige endepunkt/kort. Manglar nøkkelen
+    # i input, skal den lagra verdien stå — elles ville kvart lagre frå
+    # enhet-kortet nulle ut indeksen og kollisjonen kome tilbake.
+    if "opendaq_device_idx" in data:
+        try:
+            idx = int(data.get("opendaq_device_idx", -1))
+        except (TypeError, ValueError):
+            return None, "opendaq_device_idx maa vere eit heiltal"
+        if idx < -1 or idx > 63:
+            return None, f"opendaq_device_idx {idx} utanfor gyldig omraade (-1 til 63)"
+    else:
+        idx = les_enhet_konfig().opendaq_device_idx
+
+    return EnhetKonfig(antal_adc_kanalar=n, modell=modell, location=location,
+                       opendaq_device_idx=idx), None
 
 
 # --- Modus-persistens ---

@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { fetchOpenDaqStatus, restartOpenDaq } from '../api/opendaq'
+import { useState, useEffect, useCallback } from 'react'
+import { fetchOpenDaqStatus, restartOpenDaq, fetchDeviceIdx, settDeviceIdx } from '../api/opendaq'
 import { usePolling } from '../hooks/usePolling'
 import InfoGrid from './InfoGrid'
 import CopyableCommand from './CopyableCommand'
@@ -17,6 +17,32 @@ export default function OpenDaqBridgeCard() {
   const fetcher = useCallback(() => fetchOpenDaqStatus(), [])
   const { data: s, refresh, loading } = usePolling(fetcher, 3000)
   const [restartMsg, setRestartMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  // openDAQ-rota er daqref://device<idx>. To nodar med same indeks får same
+  // lokale device-ID, og hubben kan då berre halde den eine.
+  const [devIdx, setDevIdx] = useState<string>('')
+  const [idxBusy, setIdxBusy] = useState(false)
+  const [idxMsg, setIdxMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  useEffect(() => {
+    fetchDeviceIdx().then(d => setDevIdx(String(d.device_idx))).catch(() => {})
+  }, [])
+
+  const lagreIdx = async () => {
+    const n = parseInt(devIdx)
+    if (isNaN(n) || n < 0 || n > 63) {
+      setIdxMsg({ text: t('Index must be a whole number between 0 and 63.'), ok: false })
+      return
+    }
+    setIdxBusy(true); setIdxMsg(null)
+    try {
+      const res = await settDeviceIdx(n)
+      setIdxMsg({ text: res.melding, ok: res.suksess })
+      refresh()
+    } catch (e) {
+      setIdxMsg({ text: String(e), ok: false })
+    }
+    setIdxBusy(false)
+  }
 
   if (loading) {
     return (
@@ -106,6 +132,31 @@ export default function OpenDaqBridgeCard() {
           </span>
         )}
       </div>
+      <div className="border-t border-gray-100 mt-3 pt-3">
+        <label className="block text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">
+          {t('openDAQ device index')}
+        </label>
+        <p className="text-xs text-gray-500 mb-2 leading-snug">
+          {t('The root device is daqref://device<index>. It must be unique per node under the same hub — two nodes with the same index get the same local device ID, and the hub can only hold one of them.')}
+        </p>
+        <div className="flex gap-2 items-center">
+          <input
+            type="number" min={0} max={63} value={devIdx}
+            onChange={e => setDevIdx(e.target.value)}
+            className="w-24 text-sm px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+          />
+          <button
+            onClick={lagreIdx} disabled={idxBusy}
+            className="bg-[#D76428] text-white text-sm px-4 py-1.5 rounded-md hover:bg-[#c25a24] disabled:opacity-50"
+          >
+            {idxBusy ? t('Saving...') : t('Save and rebuild bridge')}
+          </button>
+        </div>
+        {idxMsg && (
+          <p className={`text-sm mt-2 ${idxMsg.ok ? 'text-green-700' : 'text-red-600'}`}>{idxMsg.text}</p>
+        )}
+      </div>
+
     </div>
   )
 }

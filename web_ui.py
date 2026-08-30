@@ -70,7 +70,8 @@ except ImportError:
 
 from kanal_konfig import KanalKonfig, les_konfig, lagre_konfig, valider_konfig, STANDARD_KONFIG
 from mqtt_konfig import valider_mqtt_konfig
-from enhet_konfig import valider_enhet_konfig, les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB
+from enhet_konfig import (valider_enhet_konfig, les_enhet_konfig, lagre_enhet_konfig,
+                          les_modus, lagre_modus, MODUS_DIREKTE, MODUS_USBIP, MODUS_HUB)
 from buffer_konfig import valider_buffer_konfig, les_buffer_konfig
 from push_konfig import (
     valider_push_konfig, les_push_konfig, lagre_push_konfig, PushKonfig,
@@ -804,6 +805,56 @@ def api_opendaq_restart():
         return jsonify({"suksess": ok, "melding": melding})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/opendaq/device-idx")
+def api_opendaq_device_idx():
+    """Kva openDAQ device-indeks denne noden byggjer rota si med.
+
+    Rota er daqref://device<idx>. Indeksen MÅ vere unik per node under same
+    hub — to nodar med same indeks får same lokale device-ID, og hubben kan
+    berre halde den eine.
+    """
+    konfig = les_enhet_konfig()
+    frå_env = os.environ.get("OPENDAQ_DEVICE_IDX", "0").strip() or "0"
+    lagra = int(konfig.opendaq_device_idx)
+    return jsonify({
+        "device_idx": lagra if lagra >= 0 else int(frå_env),
+        "frå_konfig": lagra >= 0,
+        "env_verdi": int(frå_env),
+    })
+
+
+@app.route("/api/opendaq/device-idx", methods=["PUT"])
+def api_opendaq_device_idx_sett():
+    """Sett device-indeks. Krev at openDAQ-brua byggjast på nytt for å tre i
+    kraft — send {"restart": true} for å gjere det med ein gong."""
+    data = request.get_json(silent=True) or {}
+    try:
+        idx = int(data.get("device_idx"))
+    except (TypeError, ValueError):
+        return jsonify({"suksess": False, "melding": "device_idx maa vere eit heiltal"}), 400
+    if idx < 0 or idx > 63:
+        return jsonify({"suksess": False, "melding": f"device_idx {idx} utanfor 0-63"}), 400
+
+    konfig = les_enhet_konfig()
+    konfig.opendaq_device_idx = idx
+    if not lagre_enhet_konfig(konfig):
+        return jsonify({"suksess": False, "melding": "Lagring feila"}), 500
+
+    melding = f"Device-indeks sett til {idx}"
+    if data.get("restart"):
+        if not SIRIUS_DIREKTE:
+            melding += " — restart noden for at det skal tre i kraft"
+        else:
+            try:
+                ok, m = _opendaq_restart()
+                melding += f" — openDAQ-brua bygd på nytt ({m})" if ok else                            f" — restart av brua feila: {m}"
+            except Exception as e:
+                melding += f" — restart av brua feila: {e}"
+    else:
+        melding += " — restart openDAQ-brua for at det skal tre i kraft"
+    return jsonify({"suksess": True, "melding": melding, "device_idx": idx})
 
 
 @app.route("/api/opendaq/verdiar")

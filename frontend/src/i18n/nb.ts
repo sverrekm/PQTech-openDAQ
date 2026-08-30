@@ -543,4 +543,8 @@ export const nb: Record<string, string> = {
   'Disable': 'Deaktiver',
   'Enable': 'Aktiver',
   'Revoke': 'Trekk tilbake',
+  'openDAQ device index': 'openDAQ device-indeks',
+  'The root device is daqref://device<index>. It must be unique per node under the same hub — two nodes with the same index get the same local device ID, and the hub can only hold one of them.': 'Rot-eininga er daqref://device<indeks>. Han må vere unik per node under same hub — to nodar med same indeks får same lokale device-ID, og hubben kan berre halde den eine.',
+  'Save and rebuild bridge': 'Lagre og bygg brua på nytt',
+  'Index must be a whole number between 0 and 63.': 'Indeksen må vere eit heiltal mellom 0 og 63.',
 }
