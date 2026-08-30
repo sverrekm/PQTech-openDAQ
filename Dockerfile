@@ -724,6 +724,18 @@ COPY hub_pusher.py .
 COPY oppdatering.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
+# Modular lagt til etter at COPY-lista sist vart oppdatert. Utan desse
+# feilar 'from web_ui import app' paa import og web-UI-traaden doeyr,
+# medan harmonic-forwarder og modbus-lageret fell ut kvar for seg.
+COPY api_nokkel.py .
+COPY emc_pusher.py .
+COPY hub_emc.py .
+COPY hub_lager.py .
+COPY influx_pusher.py .
+COPY modbus_lager.py .
+COPY nas_manager.py .
+COPY raa_fil_skrivar.py .
+COPY wifi_manager.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
