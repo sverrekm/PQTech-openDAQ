@@ -49,6 +49,7 @@ def les_enhet_konfig() -> EnhetKonfig:
                 antal_adc_kanalar=int(data.get("antal_adc_kanalar", 8)),
                 modell=str(data.get("modell", "")),
                 location=str(data.get("location", "")),
+                opendaq_device_idx=int(data.get("opendaq_device_idx", -1)),
             )
             log.info(f"Lasta enhet-konfig: {konfig.antal_adc_kanalar} ADC-kanalar, "
                      f"modell={konfig.modell}")
