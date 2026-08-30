@@ -752,7 +752,7 @@ ENV WEB_PORT=8080
 ENV TILKOBLING=""
 
 HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
-    CMD pgrep -f "opendaq_server.py\|sirius_server.py\|hub_server.py" > /dev/null || exit 1
+    CMD pgrep -f "python3 -m (opendaq_server|sirius_server|hub_server)" > /dev/null || exit 1
 
 # DewesoftRT-kompatibilitet (SSH-kommandoar fraa DewesoftX)
 RUN mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system \
