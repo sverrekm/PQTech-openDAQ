@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # =============================================================
 # openDAQ Server for Dewesoft SIRIUS - Raspberry Pi 5
 # =============================================================
@@ -58,7 +59,7 @@ RUN git clone --depth 1 --branch ${OPENDAQ_BRANCH} \
 # ikkje getDomain() til rot-eininga, so den returnerer nil sjølv
 # om referanse-eininga har ein gyldig DeviceDomain frå initClock().
 # Fix: Returner ein standard DeviceDomain når ingen er sett.
-RUN python3 << 'PYEOF'
+RUN python3 <<'PYEOF'
 import re, sys
 
 path = "/src/core/opendaq/device/include/opendaq/device_impl.h"
@@ -204,7 +205,7 @@ PYEOF
 # fordi referanse-eininga brukar standardverdiar ("openDAQ", "Reference device").
 # DeviceInfo er frosen (read-only) etter build — kan ikkje endrast frå Python.
 # Fix: Patch C++-kjelda til å bruke SIRIUS-verdiar som standard.
-RUN python3 << 'PYEOF'
+RUN python3 <<'PYEOF'
 import sys
 
 path = "/src/modules/ref_device_module/src/ref_device_impl.cpp"
@@ -316,7 +317,7 @@ PYEOF
 # TmsServerComponent::createOptionalNode() returnerer false som standard,
 # og TmsServerDevice sin kviteliste inkluderer ikkje desse.
 # Utan denne patchen vert nodane aldri oppretta → DewesoftX viser "Not provided".
-RUN python3 << 'PYEOF'
+RUN python3 <<'PYEOF'
 import sys
 
 path = "/src/shared/libraries/opcuatms/opcuatms_server/src/objects/tms_server_device.cpp"
@@ -357,7 +358,7 @@ PYEOF
 #
 # VIKTIG: Checked EVERY iteration (ikkje static!) slik at Python kan toggle
 # dynamisk. access() er billeg (~1 syscall per 50ms).
-RUN python3 << 'PYEOF'
+RUN python3 <<'PYEOF'
 import sys
 
 path = "/src/modules/ref_device_module/src/ref_device_impl.cpp"
@@ -434,7 +435,7 @@ PYEOF
 # TypeDefinition child nodes expect narrower types (UInt16, UInt32, Float).
 # Fix: Read the node's DataType before writing and coerce the variant.
 # This eliminates ~90 "DataType of the value is incompatible" warnings.
-RUN python3 << 'PYEOF'
+RUN python3 <<'PYEOF'
 import sys, re
 
 path = "/src/shared/libraries/opcua/opcuaserver/src/opcuaserver.cpp"
