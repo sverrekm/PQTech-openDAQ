@@ -78,9 +78,10 @@ logging.getLogger().addHandler(_logg_buffer)
 
 _hub_lock = threading.Lock()
 _instance = None                # openDAQ Instance — BERRE server (DewesoftX koplar hit)
-_klient_instance = None         # openDAQ Instance — BERRE klient (les fjern-nodar)
+_klient_instance = None         # openDAQ Instance — mal/fallback for klientar
 _hub_konfig: HubKonfig = HubKonfig()
-_node_devices = {}              # node_id -> openDAQ device-objekt (på _klient_instance)
+_node_devices = {}              # node_id -> openDAQ device-objekt
+_node_instances = {}            # node_id -> openDAQ Instance (eitt namnerom per node)
 _node_status = {}               # node_id -> {"tilkobla": bool, "feil": str, ...}
 _helsesjekk_aktiv = True
 _hub_startet = None             # ISO timestamp
@@ -244,6 +245,47 @@ def _opprett_instance():
     klient_builder.add_module_path(module_path)
     _klient_instance = klient_builder.build()
     log.info("Klient-instans oppretta (for fjern-node-tilkoblingar)")
+
+
+def _ny_klient_instans():
+    """Bygg ein tom openDAQ-klientinstans (ingen serverar, ingen root device)."""
+    import opendaq as daq
+    module_path = os.environ.get("OPENDAQ_MODULE_PATH", "/usr/local/lib")
+    b = daq.InstanceBuilder()
+    b.add_module_path(module_path)
+    return b.build()
+
+
+def _klient_for_node(node_id: str):
+    """Éin openDAQ-klientinstans per node — kvar node får sitt eige namnerom.
+
+    openDAQ krev unik device local ID *innanfor ein instans*. Local ID-en
+    kjem frå fjern-noden sitt root device, og daqref-modulen tilbyr berre
+    device0 og device1 (RefDev0/RefDev1). Med alle nodane i same instans
+    ville node nummer tre difor alltid krasje med «Device with the same
+    local ID already exists», uansett kva OPENDAQ_DEVICE_IDX vi sette.
+
+    Eigen instans per node fjernar heile kollisjonen: RefDev1 på to nodar er
+    like uproblematisk som to filer med same namn i kvar sin katalog.
+    Kostnaden er ein ekstra ModuleManager per node — små tital MB, og talet
+    på nodar er lite.
+    """
+    inst = _node_instances.get(node_id)
+    if inst is None:
+        inst = _ny_klient_instans()
+        _node_instances[node_id] = inst
+    return inst
+
+
+def _lukk_klient_instans(node_id: str):
+    """Slepp instansen til ein node som er fjerna frå konfigurasjonen."""
+    inst = _node_instances.pop(node_id, None)
+    if inst is None:
+        return
+    try:
+        del inst
+    except Exception:
+        pass
 
 
 _kanal_mapping = []     # [(node_id, ch_index, scale, offset), ...]
@@ -1431,18 +1473,22 @@ def _koble_til_node(node: FjernNode) -> bool:
     tilkobling = node.tilkobling_streng
     log.info(f"Koplar til node '{node.namn}' ({tilkobling})...")
 
+    # Eigen instans per node, så to nodar med same device local ID (RefDev0/
+    # RefDev1) ikkje kolliderer. Sjå _klient_for_node.
+    inst = _klient_for_node(node.id)
+
     # Diagnostikk: list tilgjengelege device-typar (berre fyrste gong)
     try:
-        dev_types = _klient_instance.available_device_types
+        dev_types = inst.available_device_types
         log.info(f"  Tilgjengelege device-typar: {list(dev_types.keys())}")
     except Exception:
         pass
 
     def _prøv_tilkobling(conn_str):
-        """Prøv add_device på klient-instansen."""
+        """Prøv add_device på node-instansen."""
         config = None
         try:
-            dev_types = _klient_instance.available_device_types
+            dev_types = inst.available_device_types
             for type_id in dev_types:
                 tid = type_id.lower()
                 if 'opcua' in conn_str and ('opcua' in tid):
@@ -1456,7 +1502,7 @@ def _koble_til_node(node: FjernNode) -> bool:
                     break
         except Exception:
             pass
-        return _klient_instance.add_device(conn_str, config)
+        return inst.add_device(conn_str, config)
 
     feil_melding = ""
     try:
@@ -1520,18 +1566,15 @@ def _koble_til_node(node: FjernNode) -> bool:
 
         return True
 
-    # openDAQ seier berre «Device with the same local ID already exists.».
-    # I praksis tyder det alltid det same: to nodar har same
-    # OPENDAQ_DEVICE_IDX, so begge byggjer rota si som daqref://device0 og
-    # hubben kan ikkje halde to device med same lokale ID. Sei det rett ut —
-    # elles er meldinga uråd å handle på frå GUI-et.
+    # «Device with the same local ID already exists.» skal ikkje lenger kunne
+    # skje — kvar node har sin eigen instans. Dukkar han likevel opp, tyder
+    # det at same node er lagt inn to gonger i konfigurasjonen.
     if "local id" in feil_melding.lower():
         feil_melding = (
-            f"Noden brukar same openDAQ device-indeks som ein node som alt er "
-            f"tilkobla (begge blir daqref://device0). Sett ein unik "
-            f"OPENDAQ_DEVICE_IDX på {node.namn}: «sudo bash pqtech-config.sh» "
-            f"på node-verten → OpenDAQ device-indeks → Bruk endringar. "
-            f"Rekoble deretter noden her. (openDAQ: {feil_melding})"
+            f"openDAQ avviste noden fordi ein annan node med same device "
+            f"local ID alt ligg i same instans. Sjekk om {node.namn} er lagt "
+            f"inn to gonger i nodelista (same adresse eller same node-id). "
+            f"(openDAQ: {feil_melding})"
         )
 
     with _hub_lock:
@@ -1564,12 +1607,15 @@ def _fråkoble_node(node_id: str):
             if k[0] == node_id:
                 _relay_readers.pop(k, None)
 
-    if device and _klient_instance:
+    inst = _node_instances.get(node_id)
+    if device and inst:
         try:
-            _klient_instance.remove_device(device)
+            inst.remove_device(device)
             log.info(f"  Fjerna device for node {node_id}")
         except Exception as e:
             log.warning(f"  Feil ved remove_device for {node_id}: {e}")
+    # Noden er ute av bildet — slepp instansen hans òg.
+    _lukk_klient_instans(node_id)
 
 
 def _start_modbus_node(node: FjernNode) -> bool:
@@ -2207,9 +2253,12 @@ def _helsesjekk_loop():
                         for k in list(_relay_readers.keys()):
                             if k[0] == node.id:
                                 _relay_readers.pop(k, None)
-                    # Prøv remove_device (utan lås — kan blokkere)
+                    # Prøv remove_device (utan lås — kan blokkere). Instansen
+                    # til noden lever vidare, klar til rekobling.
                     try:
-                        _klient_instance.remove_device(device)
+                        inst = _node_instances.get(node.id)
+                        if inst is not None:
+                            inst.remove_device(device)
                     except Exception:
                         pass
             else:

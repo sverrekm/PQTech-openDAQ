@@ -29,6 +29,7 @@ import time
 import signal
 import logging
 import argparse
+import traceback
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -1749,10 +1750,24 @@ def start_server(args):
 
     # Start web-grensesnitt i bakgrunnstraad (starter ALLTID, ogsaa uten enhet)
     def _start_web():
-        from web_ui import app as flask_app
+        # Web-UI-et kjoerer i ein daemon-traad. Kastar importen eller
+        # flask_app.run(), doer traaden stille: openDAQ-portane held fram
+        # med aa svare medan 8080 nektar tilkobling, og noden ser levande
+        # ut for alle utanom nettlesaren. Logg det hoegt, og proev igjen.
         web_port = int(os.environ.get("WEB_PORT", 8080))
-        log.info(f"Web UI startet paa port {web_port}")
-        flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False, threaded=True)
+        forsoek = 0
+        while True:
+            try:
+                from web_ui import app as flask_app
+                log.info(f"Web UI startet paa port {web_port}")
+                flask_app.run(host="0.0.0.0", port=web_port, use_reloader=False, threaded=True)
+                log.error("Web UI avslutta uventa — startar paa nytt om 10 s")
+            except Exception:
+                forsoek += 1
+                log.error(f"Web UI kunne ikkje starte (forsoek {forsoek}) — "
+                          f"noden svarar paa openDAQ, men ikkje paa 8080")
+                log.error(traceback.format_exc())
+            time.sleep(10)
 
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()

@@ -811,9 +811,10 @@ def api_opendaq_restart():
 def api_opendaq_device_idx():
     """Kva openDAQ device-indeks denne noden byggjer rota si med.
 
-    Rota er daqref://device<idx>. Indeksen MÅ vere unik per node under same
-    hub — to nodar med same indeks får same lokale device-ID, og hubben kan
-    berre halde den eine.
+    Rota er daqref://device<idx>, og daqref-modulen tilbyr berre device0 og
+    device1. Hubben gir kvar node sin eigen openDAQ-instans, so indeksen
+    treng IKKJE vere unik mellom nodar — han styrer berre kva rota heiter
+    (RefDev0/RefDev1) utetter mot DewesoftX.
     """
     konfig = les_enhet_konfig()
     frå_env = os.environ.get("OPENDAQ_DEVICE_IDX", "0").strip() or "0"
@@ -834,10 +835,16 @@ def api_opendaq_device_idx_sett():
         idx = int(data.get("device_idx"))
     except (TypeError, ValueError):
         return jsonify({"suksess": False, "melding": "device_idx maa vere eit heiltal"}), 400
-    if idx < 0 or idx > 63:
-        return jsonify({"suksess": False, "melding": f"device_idx {idx} utanfor 0-63"}), 400
+    # daqref-modulen har berre device0 og device1. Ein høgare indeks gir
+    # «Device with id "N" not found» og etterlèt noden utan openDAQ-bru —
+    # so vi stoppar det her i staden for å la brua døy.
+    if idx < 0 or idx > 1:
+        return jsonify({"suksess": False,
+                        "melding": f"device_idx {idx} finst ikkje — daqref har "
+                                   f"berre device0 og device1"}), 400
 
     konfig = les_enhet_konfig()
+    gammal_idx = int(konfig.opendaq_device_idx)
     konfig.opendaq_device_idx = idx
     if not lagre_enhet_konfig(konfig):
         return jsonify({"suksess": False, "melding": "Lagring feila"}), 500
@@ -847,11 +854,28 @@ def api_opendaq_device_idx_sett():
         if not SIRIUS_DIREKTE:
             melding += " — restart noden for at det skal tre i kraft"
         else:
+            ok, m = False, ""
             try:
                 ok, m = _opendaq_restart()
-                melding += f" — openDAQ-brua bygd på nytt ({m})" if ok else                            f" — restart av brua feila: {m}"
             except Exception as e:
-                melding += f" — restart av brua feila: {e}"
+                m = str(e)
+            if ok:
+                melding += f" — openDAQ-brua bygd på nytt ({m})"
+            else:
+                # Bygg brua opp att med den gamle indeksen. Ein node utan
+                # openDAQ-bru er verre enn ein node med «feil» indeks.
+                konfig.opendaq_device_idx = gammal_idx
+                lagre_enhet_konfig(konfig)
+                try:
+                    _opendaq_restart()
+                except Exception:
+                    pass
+                return jsonify({
+                    "suksess": False,
+                    "device_idx": gammal_idx,
+                    "melding": f"Indeks {idx} feila ({m}) — rulla tilbake til "
+                               f"{gammal_idx if gammal_idx >= 0 else 'env-verdien'}",
+                }), 400
     else:
         melding += " — restart openDAQ-brua for at det skal tre i kraft"
     return jsonify({"suksess": True, "melding": melding, "device_idx": idx})

@@ -29,8 +29,8 @@ export default function OpenDaqBridgeCard() {
 
   const lagreIdx = async () => {
     const n = parseInt(devIdx)
-    if (isNaN(n) || n < 0 || n > 63) {
-      setIdxMsg({ text: t('Index must be a whole number between 0 and 63.'), ok: false })
+    if (isNaN(n) || n < 0 || n > 1) {
+      setIdxMsg({ text: t('The index must be 0 or 1 — daqref only provides device0 and device1.'), ok: false })
       return
     }
     setIdxBusy(true); setIdxMsg(null)
@@ -137,11 +137,11 @@ export default function OpenDaqBridgeCard() {
           {t('openDAQ device index')}
         </label>
         <p className="text-xs text-gray-500 mb-2 leading-snug">
-          {t('The root device is daqref://device<index>. It must be unique per node under the same hub — two nodes with the same index get the same local device ID, and the hub can only hold one of them.')}
+          {t('The root device is daqref://device<index>, and daqref only provides device0 and device1. The index does not have to be unique across nodes — the hub gives every node its own openDAQ instance. It only decides what the root is called (RefDev0 / RefDev1) towards DewesoftX.')}
         </p>
         <div className="flex gap-2 items-center">
           <input
-            type="number" min={0} max={63} value={devIdx}
+            type="number" min={0} max={1} value={devIdx}
             onChange={e => setDevIdx(e.target.value)}
             className="w-24 text-sm px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
           />

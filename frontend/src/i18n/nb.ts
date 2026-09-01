@@ -544,7 +544,7 @@ export const nb: Record<string, string> = {
   'Enable': 'Aktiver',
   'Revoke': 'Trekk tilbake',
   'openDAQ device index': 'openDAQ device-indeks',
-  'The root device is daqref://device<index>. It must be unique per node under the same hub — two nodes with the same index get the same local device ID, and the hub can only hold one of them.': 'Rot-eininga er daqref://device<indeks>. Han må vere unik per node under same hub — to nodar med same indeks får same lokale device-ID, og hubben kan berre halde den eine.',
+  'The root device is daqref://device<index>, and daqref only provides device0 and device1. The index does not have to be unique across nodes — the hub gives every node its own openDAQ instance. It only decides what the root is called (RefDev0 / RefDev1) towards DewesoftX.': 'Rot-eininga er daqref://device<indeks>, og daqref har berre device0 og device1. Indeksen treng ikkje vere unik mellom nodar — hubben gir kvar node sin eigen openDAQ-instans. Han styrer berre kva rota heiter (RefDev0 / RefDev1) utetter mot DewesoftX.',
   'Save and rebuild bridge': 'Lagre og bygg brua på nytt',
-  'Index must be a whole number between 0 and 63.': 'Indeksen må vere eit heiltal mellom 0 og 63.',
+  'The index must be 0 or 1 — daqref only provides device0 and device1.': 'Indeksen må vere 0 eller 1 — daqref har berre device0 og device1.',
 }
