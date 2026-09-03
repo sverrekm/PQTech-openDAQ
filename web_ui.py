@@ -1346,15 +1346,104 @@ def api_hub_konfig_oppdater():
     return jsonify({"suksess": ok, "melding": melding_base})
 
 
+def _node_versjon(host: str) -> tuple:
+    """(sha, kjelde) for versjonen ein node køyrer.
+
+    Prøver web-porten først, så berge-porten — ein node med daudt web-UI
+    skal framleis kunne rapportere kva kode han står på.
+    """
+    tok = _floate_token()
+    hdr = {"X-Hub-Auth": tok} if tok else {}
+    try:
+        r = _http_proxy.get(f"http://{host}:{_NODE_PROXY_PORT}/api/system/versjon",
+                            headers=hdr, timeout=(2.0, 4.0))
+        if r.status_code == 200:
+            return str((r.json() or {}).get("sha", "") or "").strip(), "web"
+    except Exception:
+        pass
+    try:
+        r = _http_proxy.get(f"http://{host}:{_NODE_BERGE_PORT}/berge/status",
+                            headers=hdr, timeout=(2.0, 4.0))
+        if r.status_code == 200:
+            # berge/status gir "sha — melding"; vi vil berre ha sha-en
+            v = str((r.json() or {}).get("versjon", "") or "").strip()
+            return v.split("—")[0].strip(), "berge"
+    except Exception:
+        pass
+    return "", ""
+
+
+def _provisjoner_node(node_id: str, namn: str, host: str) -> None:
+    """Oppdater ein nyleg lagt til node til same versjon som hubben.
+
+    Køyrer i bakgrunnstråd: nedlasting + restart tar ~40 s, og det skal
+    ikkje halde add-node-kallet opent. Poenget er at ein node som blir
+    lagt inn i hubben skal konvergere til flåte-versjonen av seg sjølv,
+    utan at nokon hugsar å køyre fleet-oppdatering etterpå.
+    """
+    log = __import__("logging").getLogger("provisjon")
+    try:
+        hub_sha = str((oppdatering.les_versjon() or {}).get("sha", "") or "").strip()
+        node_sha, kjelde = _node_versjon(host)
+        if not node_sha:
+            log.warning(f"Provisjonering av '{namn}': fann ikkje versjon "
+                        f"(korkje web- eller berge-port svarte) — hoppar over")
+            return
+        if hub_sha and node_sha == hub_sha:
+            log.info(f"Provisjonering av '{namn}': alt på {node_sha}, "
+                     f"ingenting å gjere")
+            return
+
+        log.info(f"Provisjonering av '{namn}': node står på {node_sha}, "
+                 f"hubben på {hub_sha} — oppdaterer (via {kjelde}-porten)")
+        konf = oppdatering.hent_oppdater_konfig()
+        body = {"repo_url": konf["repo_url"], "branch": konf["branch"]}
+        if konf.get("token"):
+            body["token"] = konf["token"]
+        tok = _floate_token()
+
+        if kjelde == "web":
+            r = _http_proxy.post(
+                f"http://{host}:{_NODE_PROXY_PORT}/api/system/oppdater",
+                json=body,
+                headers={"Authorization": f"Bearer {tok}"} if tok else {},
+                timeout=(4.0, 150.0))
+        else:
+            r = _http_proxy.post(
+                f"http://{host}:{_NODE_BERGE_PORT}/berge/oppdater",
+                headers={"X-Hub-Auth": tok} if tok else {},
+                timeout=(4.0, 150.0))
+        log.info(f"Provisjonering av '{namn}': svar {r.status_code} "
+                 f"{r.text[:160]}")
+    except Exception as e:
+        log.warning(f"Provisjonering av '{namn}' feila: {e}")
+
+
 @app.route("/api/hub/nodar", methods=["POST"])
 def api_hub_legg_til_node():
-    """Legg til ein ny fjern-node (openDAQ eller modbus_tcp)."""
+    """Legg til ein ny fjern-node (openDAQ eller modbus_tcp).
+
+    Etter at noden er lagt til, provisjonerer hubben han i bakgrunnen:
+    står noden på ein annan versjon enn flåten, blir han oppdatert med
+    ein gong. Slik verkar ein ny node rett etter at han er lagt inn,
+    utan at nokon må hugse fleet-oppdateringa.
+    """
     data = request.get_json(silent=True) or {}
     if HUB_MODUS:
         ok, melding, node = legg_til_node_api(data)
         result = {"suksess": ok, "melding": melding}
         if node:
             result["node"] = node
+            vert = str(node.get("adresse", "")).split(":")[0].strip()
+            if ok and vert and node.get("type") != "modbus_tcp":
+                threading.Thread(
+                    target=_provisjoner_node,
+                    args=(node.get("id"), node.get("namn") or node.get("id"), vert),
+                    daemon=True,
+                    name=f"provisjon-{node.get('id')}").start()
+                result["provisjonering"] = "startar"
+                melding += " — sjekkar versjon og oppdaterer om nødvendig"
+                result["melding"] = melding
         return jsonify(result), 200 if ok else 400
 
     # Node-modus: valider via hub_konfig-validator (støttar både openDAQ + modbus)

@@ -71,17 +71,126 @@ def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 2.0) -> bool
 
 def _vakt_loop() -> None:
     """Sjekkar web-porten jamt slik at /berge/status er fersk utan aa
-    maatte opne ein socket per foresporsel."""
+    maatte opne ein socket per foresporsel — og lækjer noden sjoelv naar
+    porten held seg daud.
+
+    Sjoelvhelinga er grunnen til at ein node ikkje treng menneske: har
+    web-porten vore daud i SJOLVHEAL_MIN minutt, er aarsaka nesten alltid
+    knekt kode, og retry-loopen i web-traaden kjem aldri til aa fikse det.
+    Difor prover vi ei oppdatering. Restart skjer BERRE naar oppdateringa
+    faktisk installerte noko nytt — er vi alt paa nyaste versjon, ville
+    ein restart gitt same feilen og ein evig loop.
+    """
     global _web_open, _web_sist_sjekka
+    daud_sidan = 0.0
+    sist_forsoek = 0.0
     while True:
         try:
             open_no = _port_open(_web_port)
             with _lock:
                 _web_open = open_no
                 _web_sist_sjekka = time.time()
+
+            no = time.time()
+            if open_no:
+                daud_sidan = 0.0
+            else:
+                if daud_sidan == 0.0:
+                    daud_sidan = no
+                daud_min = (no - daud_sidan) / 60.0
+                pause_ok = (no - sist_forsoek) > _SJOLVHEAL_PAUSE_S
+                if daud_min >= _sjolvheal_min() and pause_ok:
+                    sist_forsoek = no
+                    _prov_sjolvheling(daud_min)
         except Exception:
             pass
         time.sleep(20)
+
+
+def _sjolvheal_min() -> float:
+    """Minutt med daud web-port foer vi prover aa lækje. 0 slaar av."""
+    try:
+        return float(os.environ.get("BERGE_SJOLVHEAL_MIN", "10"))
+    except Exception:
+        return 10.0
+
+
+_SJOLVHEAL_PAUSE_S = 1800.0   # maks eitt forsoek per halvtime
+
+
+def _prov_sjolvheling(daud_min: float) -> None:
+    """Hent ny kode og restart — men berre om det faktisk kom noko nytt."""
+    if _sjolvheal_min() <= 0:
+        return
+    try:
+        import logging
+        lg = logging.getLogger("berge")
+    except Exception:
+        lg = None
+
+    def _logg(niva, melding):
+        if lg is None:
+            return
+        try:
+            getattr(lg, niva)(melding)
+        except Exception:
+            pass
+
+    _logg("error", f"Web-porten {_web_port} har vore daud i "
+                   f"{daud_min:.0f} min — vurderer sjoelvheling")
+
+    try:
+        import oppdatering
+    except Exception:
+        _logg("error", f"Sjoelvheling: kan ikkje importere oppdatering — "
+                       f"{traceback.format_exc()}")
+        return
+
+    # Samanlikn SHA foerst. `oppdaterte_filer` frae oppdateringa listar ALLE
+    # kopierte filer, ikkje berre endra, so han kan ikkje brukast til aa
+    # avgjere om det kom noko nytt. Utan denne sjekken ville ein node med
+    # varig knekt kode restarte i ring kvar halvtime.
+    try:
+        lokal = str((oppdatering.les_versjon() or {}).get("sha", "") or "").strip()
+        fjern_info = oppdatering.sjekk_github() or {}
+        fjern = str(fjern_info.get("sha", "") or "").strip()
+    except Exception:
+        _logg("error", f"Sjoelvheling: versjonssjekk feila — "
+                       f"{traceback.format_exc()}")
+        return
+
+    if not fjern:
+        _logg("error", "Sjoelvheling: fann ikkje fjern-versjon (nett/token?) "
+                       "— prover igjen seinare")
+        return
+
+    if lokal and fjern == lokal:
+        # Feilen ligg i koden som ER nyaste. Restart gir same feilen, so vi
+        # ventar paa ein fiks i repoet i staden. openDAQ svarar framleis, og
+        # bergesida er naabar via hubben heile tida.
+        _logg("error", f"Sjoelvheling: alt paa nyaste versjon ({lokal}) — "
+                       f"feilen ligg i koden som er ute. Ventar paa ny commit.")
+        return
+
+    _logg("error", f"Sjoelvheling: ny versjon finst ({lokal or 'ukjend'} -> "
+                   f"{fjern}) — hentar og restartar")
+    try:
+        res = oppdatering.last_ned_og_oppdater()
+    except Exception:
+        _logg("error", f"Sjoelvheling: oppdatering kasta — "
+                       f"{traceback.format_exc()}")
+        return
+
+    if not isinstance(res, dict) or not res.get("suksess"):
+        melding = (res.get("melding") or res.get("feil")
+                   if isinstance(res, dict) else res)
+        _logg("error", f"Sjoelvheling: oppdatering feila ({melding}) — "
+                       f"lar prosessen staa, openDAQ svarar framleis")
+        return
+
+    _logg("error", f"Sjoelvheling: oppdatert til {res.get('versjon')} "
+                   f"({res.get('melding')}) — restartar no")
+    _avslutt(0, 1.0)
 
 
 # --- Autorisering ----------------------------------------------------------
