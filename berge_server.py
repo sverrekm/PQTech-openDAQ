@@ -191,13 +191,18 @@ def _oppetid_tekst(sekund: float) -> str:
 
 
 def _versjon() -> str:
-    for sti in ("/app/.versjon", "/data/konfig/.versjon"):
-        try:
-            with open(sti, "r", encoding="utf-8") as f:
-                return f.read().strip()[:40] or "ukjend"
-        except Exception:
-            continue
-    return "ukjend"
+    """Same fil som oppdatering.VERSJON_FIL, men lese direkte — vi importerer
+    ikkje oppdatering paa modulnivaa."""
+    try:
+        with open("/data/konfig/versjon.json", "r", encoding="utf-8") as f:
+            d = json.load(f)
+        sha = str(d.get("sha", "") or "").strip()
+        melding = str(d.get("melding", "") or "").strip()
+        if sha and melding:
+            return f"{sha} — {melding[:60]}"
+        return sha or melding or "ukjend"
+    except Exception:
+        return "ukjend"
 
 
 # --- HTTP-handtering -------------------------------------------------------
