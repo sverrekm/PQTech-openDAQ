@@ -234,6 +234,10 @@ def hent_status():
 # (cookies blir forwarded så det held over reload).
 
 _NODE_PROXY_PORT = int(os.environ.get("NODE_PROXY_PORT", "8080"))
+# Berge-porten (berge_server.py paa noden) er reservevegen inn naar Flask paa
+# 8080 er doed. Han deler ingen importar med web_ui, saa han lever vidare
+# nettopp i dei tilfella der web-UI-et ikkje gjer det.
+_NODE_BERGE_PORT = int(os.environ.get("NODE_BERGE_PORT", "8081"))
 _NODE_PROXY_HOP_HEADERS = {
     "content-length", "content-encoding", "transfer-encoding",
     "connection", "keep-alive", "upgrade", "proxy-authorization",
@@ -269,8 +273,10 @@ def _node_utilgjengeleg_html(node) -> str:
         "a{color:#D76428;text-decoration:none;font-size:14px}"
         "</style></head><body><div class=\"k\">"
         f"<h1>{namn} svarar ikkje</h1>"
-        f"<p>Hubben nådde ikkje <code>{adresse}</code>. Noden kan vere avslått, "
-        "utan nett, eller flytta til ei ny adresse.</p>"
+        f"<p>Hubben nådde korkje web-porten eller berge-porten på "
+        f"<code>{adresse}</code>. Då er heile noden nede — avslått, utan nett, "
+        "eller flytta til ei ny adresse. (Var det berre web-UI-et som var "
+        "knekt, hadde du komme til bergesida i staden for hit.)</p>"
         "<a href=\"/\">&larr; Tilbake til hubben</a>"
         "</div></body></html>"
     )
@@ -344,11 +350,21 @@ def node_proxy(node_id, sub_path):
             timeout=(4.0, 30.0),
         )
     except _http_proxy.exceptions.RequestException as e:
+        # 8080 svarar ikkje. Før vi gir opp: lever berge-serveren? Er noden
+        # oppe men utan Flask (typisk ein knekt import), får brukaren då ei
+        # brukbar side med traceback og restart i staden for ei blindveg.
+        berge = _node_berge_oppe(node_host)
         if "text/html" in request.headers.get("Accept", ""):
+            if berge:
+                return redirect(f"/node-berge/{node_id}/")
             # Toppnivå-navigasjon: vis noko lesbart, ikkje ein JSON-klump.
             return Response(_node_utilgjengeleg_html(node), status=502,
                             mimetype="text/html")
-        return jsonify({"feil": f"Node ikkje nåbar: {e}"}), 502
+        return jsonify({
+            "feil": f"Node ikkje nåbar: {e}",
+            "berge_tilgjengeleg": berge,
+            "berge_url": f"/node-berge/{node_id}/" if berge else None,
+        }), 502
 
     # Bygg respons med headers (filtrer bort hop-by-hop)
     resp_headers = []
@@ -362,6 +378,74 @@ def node_proxy(node_id, sub_path):
 
     return Response(upstream.content, status=upstream.status_code,
                     headers=resp_headers)
+
+
+def _node_berge_oppe(node_host: str) -> bool:
+    """Svarar berge-serveren på noden? Avgjer om vi kan tilby berging."""
+    try:
+        r = _http_proxy.get(
+            f"http://{node_host}:{_NODE_BERGE_PORT}/berge/status",
+            headers={"X-Hub-Auth": _floate_token()},
+            timeout=(2.0, 5.0),
+        )
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+@app.route("/node-berge/<node_id>/", defaults={"sub_path": ""},
+           methods=["GET", "POST"])
+@app.route("/node-berge/<node_id>/<path:sub_path>", methods=["GET", "POST"])
+def node_berge_proxy(node_id, sub_path):
+    """Proxy til node sin berge-server.
+
+    Dette er grunnen til at web-GUI-et er nåbart via hubben også når Flask
+    på noden er død: berge-serveren køyrer utanfor Flask, på eigen port, og
+    deler ingen importar med han. Får du ikkje det verkelege UI-et, får du
+    i det minste traceback og ein oppdater-og-restart-knapp herifrå.
+
+    Timeout er romsleg fordi /berge/oppdater lastar ned ein tarball før den
+    svarar.
+    """
+    if "brukar" not in session:
+        if request.method != "GET":
+            return jsonify({"feil": "Hub-session utløpt — logg inn på hubben "
+                                    "på nytt."}), 401
+        return redirect("/")
+
+    node = _hent_node_for_proxy(node_id)
+    if node is None:
+        return jsonify({"feil": f"Node {node_id} finst ikkje i hub-konfig"}), 404
+
+    node_host = str(node.adresse).split(":")[0].strip()
+    if not node_host:
+        return jsonify({"feil": "Node manglar IP-adresse"}), 502
+
+    url = f"http://{node_host}:{_NODE_BERGE_PORT}/{sub_path}"
+    try:
+        upstream = _http_proxy.request(
+            method=request.method,
+            url=url,
+            headers={
+                "X-Hub-Auth": _floate_token(),
+                "Accept": request.headers.get("Accept", "*/*"),
+            },
+            data=request.get_data(),
+            params=request.query_string,
+            allow_redirects=False,
+            timeout=(4.0, 120.0),
+        )
+    except _http_proxy.exceptions.RequestException as e:
+        namn = getattr(node, "namn", "") or node_id
+        if "text/html" in request.headers.get("Accept", ""):
+            return Response(_node_utilgjengeleg_html(node), status=502,
+                            mimetype="text/html")
+        return jsonify({"feil": f"Berge-serveren på {namn} svarar heller "
+                                f"ikkje: {e}"}), 502
+
+    return Response(upstream.content, status=upstream.status_code,
+                    mimetype=upstream.headers.get("Content-Type",
+                                                  "text/plain; charset=utf-8"))
 
 
 @app.before_request
@@ -2229,8 +2313,27 @@ def api_system_oppdater_floate():
                 "feil": j.get("feil") if not ok else None,
             })
         except Exception as e:
+            # 8080 nektar. Det er nettopp den noden som TRENG oppdateringa
+            # mest — web_ui er knekt og kan ikkje reparere seg sjølv. Prøv
+            # berge-porten, som ikkje deler importar med web_ui.
+            berge_feil = None
+            try:
+                rb = _http_proxy.post(
+                    f"http://{host}:{_NODE_BERGE_PORT}/berge/oppdater",
+                    headers={"X-Hub-Auth": tok} if tok else {},
+                    timeout=(4.0, 120.0))
+                if rb.status_code == 200:
+                    resultat["nodar"].append({
+                        "id": n.id, "namn": n.namn, "suksess": True,
+                        "melding": f"berga via berge-porten: "
+                                   f"{rb.text[:160]}"})
+                    continue
+                berge_feil = f"berge-port svara {rb.status_code}: {rb.text[:160]}"
+            except Exception as be:
+                berge_feil = f"berge-port: {be}"
             resultat["nodar"].append({
-                "id": n.id, "namn": n.namn, "suksess": False, "feil": str(e)})
+                "id": n.id, "namn": n.namn, "suksess": False,
+                "feil": f"{e} ({berge_feil})"})
 
     # Hubben sjølv til slutt (restart kuttar samband — difor sist)
     try:

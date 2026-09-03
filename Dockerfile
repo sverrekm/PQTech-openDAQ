@@ -722,6 +722,7 @@ COPY hub_buffer.py .
 COPY push_konfig.py .
 COPY hub_pusher.py .
 COPY oppdatering.py .
+COPY berge_server.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
 # Modular lagt til etter at COPY-lista sist vart oppdatert. Utan desse
@@ -751,8 +752,14 @@ ENV PYTHONUNBUFFERED=1
 ENV WEB_PORT=8080
 ENV TILKOBLING=""
 
-HEALTHCHECK --interval=60s --timeout=10s --retries=3 \
-    CMD pgrep -f "python3 -m (opendaq_server|sirius_server|hub_server)" > /dev/null || exit 1
+# Prosessen aleine er ikkje nok: web_ui koeyrer i ein daemon-traad som kan
+# doe stille medan hovudtraaden (openDAQ) held fram. Det gav ein node som
+# rapporterte "healthy" med daudt GUI i dagar. Sjekk difor at web-porten
+# faktisk svarar OGSAA.
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=120s \
+    CMD pgrep -f "python3 -m (opendaq_server|sirius_server|hub_server)" > /dev/null \
+        && python3 -c "import socket,os,sys; p=int(os.environ.get('WEB_PORT','8080')); s=socket.socket(); s.settimeout(5); sys.exit(0 if s.connect_ex(('127.0.0.1',p))==0 else 1)" \
+        || exit 1
 
 # DewesoftRT-kompatibilitet (SSH-kommandoar fraa DewesoftX)
 RUN mkdir -p /opt/dewesoft/scripts /opt/dewesoft/software/system \

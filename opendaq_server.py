@@ -534,7 +534,22 @@ def start_server(args):
                 log.error(f"Web UI kunne ikkje starte (forsoek {forsoek}) — "
                           f"noden svarar paa openDAQ, men ikkje paa 8080")
                 log.error(traceback.format_exc())
+                try:
+                    import berge_server
+                    berge_server.meld_web_feil(traceback.format_exc())
+                except Exception:
+                    pass
             time.sleep(10)
+
+    # Berge-serveren startar FOER Flask og er uavhengig av han: doeyr
+    # web-traaden, er noden framleis naabar via hubben paa berge-porten,
+    # med traceback og ein oppdater-og-restart-knapp. Utan denne er ein node
+    # med knekt web_ui berre naabar fysisk eller over SSH.
+    try:
+        import berge_server
+        berge_server.start(web_port=int(os.environ.get("WEB_PORT", 8080)))
+    except Exception:
+        log.error(f"Berge-server starta ikkje: {traceback.format_exc()}")
 
     web_traad = threading.Thread(target=_start_web, daemon=True)
     web_traad.start()
