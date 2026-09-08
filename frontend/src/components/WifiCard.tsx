@@ -148,6 +148,16 @@ export default function WifiCard() {
       {feil && (
         <div className="p-2 mb-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{feil}</div>
       )}
+      {status?.siste_op?.tilstand === 'koeyrer' && (
+        <div className="p-2 mb-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+          {t('Connecting to')} {status.siste_op.ssid} … {t('this can take up to a minute')}
+        </div>
+      )}
+      {status?.siste_op?.tilstand === 'feil' && (
+        <div className="p-2 mb-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {status.siste_op.melding}
+        </div>
+      )}
       {melding && (
         <div className="p-2 mb-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">{melding}</div>
       )}

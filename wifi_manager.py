@@ -21,8 +21,32 @@ rapporterer vi det tydeleg i status().
 import re
 import logging
 import subprocess
+import threading
+import time
 
 log = logging.getLogger("wifi_manager")
+
+# Tilstand for den siste (asynkrone) tilkoplinga. WiFi-kortet pollar
+# /api/wifi/status og les denne, so brukaren ser kva som skjer.
+_op_lock = threading.Lock()
+_siste_op = {"tilstand": "", "ssid": "", "melding": "", "alder_s": None}
+_op_tid = 0.0
+
+
+def _sett_op(tilstand: str, ssid: str, melding: str = "") -> None:
+    global _op_tid
+    with _op_lock:
+        _siste_op["tilstand"] = tilstand      # koeyrer | ok | feil
+        _siste_op["ssid"] = ssid
+        _siste_op["melding"] = melding
+        _op_tid = time.time()
+
+
+def _hent_op() -> dict:
+    with _op_lock:
+        d = dict(_siste_op)
+    d["alder_s"] = round(time.time() - _op_tid, 1) if _op_tid else None
+    return d
 
 # Køyr i host sitt mount/uts/net/ipc-namespace (same mønster som nas_manager).
 _HOST_NS = ["nsenter", "-t", "1", "-m", "-u", "-n", "-i"]
@@ -100,6 +124,7 @@ def status() -> dict:
         "signal": None,         # 0-100
         "ip": "",
         "tilstand": "",
+        "siste_op": _hent_op(),
     }
     if not _har_nmcli():
         ut["feil"] = ("NetworkManager (nmcli) ikkje funne på verten. "
@@ -125,6 +150,12 @@ def status() -> dict:
                 ut["tilstand"] = v
                 ut["tilkobla"] = v.startswith("100")   # 100 (connected)
             elif k == "GENERAL.CONNECTION" and v and v != "--":
+                # Dette er PROFILNAMNET, ikkje SSID-en. Raspberry Pi Imager
+                # kallar profilen sin "preconfigured", og finst profilen frå
+                # før lagar nmcli "SSID 1". Vi viste dette som SSID før, noko
+                # som gjorde at nodane såg ut til å stå på eit nett som heitte
+                # «preconfigured». Rett SSID vert henta under.
+                ut["profil"] = v
                 ut["ssid"] = v
             elif k.startswith("IP4.ADDRESS") and v and v != "--":
                 ut["ip"] = v.split("/")[0]
@@ -143,6 +174,9 @@ def status() -> dict:
                         ut["signal"] = int(f[1])
                     except ValueError:
                         pass
+                    ekte_ssid = f[2].strip()
+                    if ekte_ssid:
+                        ut["ssid"] = ekte_ssid
                     break
         except Exception:
             pass
@@ -192,6 +226,48 @@ def skann() -> dict:
 # ---------------------------------------------------------------
 #  Kople til / gløym
 # ---------------------------------------------------------------
+def _aktiv_profil(dev: str) -> str:
+    """Namnet NetworkManager faktisk gav profilen på dette grensesnittet.
+
+    Vi kan ikkje gjette at profilen heiter det same som SSID-en: Raspberry
+    Pi Imager lagar «preconfigured», og finst profilen frå før lagar nmcli
+    «SSID 1». `connection modify` mot feil namn feilar stille.
+    """
+    try:
+        r = _nmcli(["-t", "-f", "GENERAL.CONNECTION", "device", "show", dev],
+                   timeout=10)
+        for ln in r.stdout.splitlines():
+            k, _, v = ln.partition(":")
+            if k == "GENERAL.CONNECTION" and v.strip() and v.strip() != "--":
+                return v.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _profil_for_ssid(ssid: str) -> str:
+    """Finn profilnamnet som høyrer til eit SSID. Fell tilbake til SSID-en."""
+    try:
+        r = _nmcli(["-t", "-f", "NAME,TYPE", "connection", "show"], timeout=12)
+        namn = []
+        for ln in r.stdout.splitlines():
+            f = _felt(ln)
+            if len(f) >= 2 and "wireless" in f[1]:
+                namn.append(_unescape(f[0]))
+        if ssid in namn:
+            return ssid
+        for n in namn:
+            r2 = _nmcli(["-t", "-f", "802-11-wireless.ssid", "connection",
+                         "show", n], timeout=10)
+            for ln in r2.stdout.splitlines():
+                _, _, v = ln.partition(":")
+                if v.strip() == ssid:
+                    return n
+    except Exception:
+        pass
+    return ssid
+
+
 def _sett_berre_lokalt(ssid: str, dev: str) -> str:
     """Gjer eit WiFi-nett til reint instrumentnett.
 
@@ -203,32 +279,66 @@ def _sett_berre_lokalt(ssid: str, dev: str) -> str:
     Motsett veg (wifi mot ein 5G-ruter som ER internettvegen) skal IKKJE
     ha dette, og då kallar vi ikkje denne.
     """
-    r = _nmcli(["connection", "modify", ssid,
+    profil = _aktiv_profil(dev) or _profil_for_ssid(ssid)
+    r = _nmcli(["connection", "modify", profil,
                 "ipv4.never-default", "yes",
                 "ipv4.ignore-auto-dns", "yes",
                 "ipv6.never-default", "yes"], timeout=20)
     if r.returncode != 0:
         return (r.stderr or r.stdout or "").strip()
     # Profilendringa slår ikkje inn før tilkoplinga er reaktivert.
-    _nmcli(["connection", "up", ssid, "ifname", dev], timeout=45)
+    _nmcli(["connection", "up", profil, "ifname", dev], timeout=45)
     return ""
 
 
 def koble_til(ssid: str, passord: str = "", skjult: bool = False,
               berre_lokalt: bool = False) -> tuple:
-    """Kople verten til eit WiFi-nett. NetworkManager persisterer profilen.
+    """Start tilkopling til eit WiFi-nett. Returnerer med ein gong.
+
+    Tilkoplinga køyrer i bakgrunnen fordi ho er treg: `nmcli device wifi
+    connect` kan bruke 45 s, og med `berre_lokalt` kjem ein reaktivering
+    på toppen. Hub-proxyen gir opp etter 30 s lesetimeout, så eit synkront
+    kall gav 502 sjølv når tilkoplinga gjekk fint. WiFi-kortet pollar
+    /api/wifi/status og les `siste_op` for å sjå korleis det gjekk.
 
     `berre_lokalt=True` for instrumentnett (Elspec BlackBox o.l.): nettet
     blir nåbart, men får aldri vere default-rute eller DNS-kjelde. Bruk
     False når wifi-et ER vegen ut (t.d. 5G-ruter).
 
-    Returnerer (ok, melding). Passordet vert aldri logga.
+    Passordet vert aldri logga.
     """
     ssid = (ssid or "").strip()
     if not ssid:
         return False, "Manglar SSID"
     if not _har_nmcli():
         return False, "NetworkManager (nmcli) ikkje tilgjengeleg på verten."
+
+    with _op_lock:
+        if _siste_op.get("tilstand") == "koeyrer":
+            return False, (f"Ei tilkopling til «{_siste_op.get('ssid')}» "
+                           f"pågår alt — vent til ho er ferdig.")
+
+    _sett_op("koeyrer", ssid, "Koplar til …")
+    threading.Thread(
+        target=_koble_synk, args=(ssid, passord, skjult, berre_lokalt),
+        daemon=True, name="wifi-koble").start()
+    return True, f"Koplar til «{ssid}» … følg med på statusen."
+
+
+def _koble_synk(ssid: str, passord: str, skjult: bool,
+                berre_lokalt: bool) -> None:
+    """Sjølve tilkoplinga. Køyrer i bakgrunnstråd; melder frå via _sett_op."""
+    try:
+        ok, melding = _koble_no(ssid, passord, skjult, berre_lokalt)
+    except Exception as e:
+        _sett_op("feil", ssid, str(e))
+        return
+    _sett_op("ok" if ok else "feil", ssid, melding)
+
+
+def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
+              berre_lokalt: bool = False) -> tuple:
+    """Blokkerande tilkopling. Returnerer (ok, melding)."""
     _radio_på()
     dev = _wifi_dev()
 
@@ -268,8 +378,10 @@ def gløym(ssid: str) -> tuple:
         return False, "Manglar SSID"
     if not _har_nmcli():
         return False, "NetworkManager (nmcli) ikkje tilgjengeleg på verten."
+    # Profilen heiter ikkje nødvendigvis det same som SSID-en.
+    profil = _profil_for_ssid(ssid)
     try:
-        r = _nmcli(["connection", "delete", "id", ssid], timeout=15)
+        r = _nmcli(["connection", "delete", "id", profil], timeout=15)
     except Exception as e:
         return False, str(e)
     if r.returncode == 0:

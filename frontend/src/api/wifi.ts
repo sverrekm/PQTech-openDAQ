@@ -18,6 +18,17 @@ export interface WifiStatus {
   ip: string
   tilstand: string
   feil?: string
+  // Profilnamnet i NetworkManager. Ikkje det same som ssid: Pi Imager lagar
+  // "preconfigured", og finst profilen frå før blir det "SSID 1".
+  profil?: string
+  // Tilkopling er treg og køyrer i bakgrunnen paa noden; her ser vi korleis
+  // det gaar. tilstand: '' | 'koeyrer' | 'ok' | 'feil'
+  siste_op?: {
+    tilstand: string
+    ssid: string
+    melding: string
+    alder_s: number | null
+  }
 }
 
 export interface WifiSkann {
