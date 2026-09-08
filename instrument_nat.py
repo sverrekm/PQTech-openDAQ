@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""
+Instrument-NAT — la noden vere ruter mellom to nett som ikkje veit om kvarandre
+==============================================================================
+Elspec BLACKBOX (og mange andre instrument) er fastlaast paa 192.168.1.0/24
+paa innsida, og gaar tilbake dit ved reset. Det er som regel same subnett
+som kunde-LAN-et noden staar paa. To grensesnitt paa same subnett gir
+tvitydig ruting, og med instrumentet paa .1 - same adresse som LAN-gatewayen
+- finst det inga maske som reddar det.
+
+Loesinga er aa ikkje la dei moetast i det heile. Noden blir ein ruter:
+
+    LAN-verda                  |  Instrument-verda
+    192.168.1.0/24 paa end0    |  192.168.1.0/24 paa wlan0
+    hovud-rutingbord           |  eige rutingbord (t.d. 99)
+                               |
+        containeren snakkar berre med ALIAS-nettet:
+        10.99.0.0/24  <--NETMAP 1:1-->  192.168.1.0/24
+        10.99.0.1  =  instrumentet
+        10.99.0.254 =  instrument-ruteren
+
+Tre grep gjer det:
+
+1. `nmcli ... ipv4.route-table <N>` legg ALLE rutene frae wifi-profilen i eit
+   eige bord. Vertens hovudbord ser aldri instrumentnettet, so kollisjonen
+   oppstaar aldri. Dette er kjernen - utan det hjelper ingenting anna.
+2. `iptables -t mangle PREROUTING -d <alias> -j MARK` merkjer trafikken, og
+   `ip rule fwmark <N> lookup <N>` sender berre den ut wifi-bordet. Merket
+   blir sett FOER nat-PREROUTING, so rutevalet etter NETMAP brukar rett bord.
+3. `iptables -t nat PREROUTING -d <alias> -j NETMAP --to <ekte>` mapper heile
+   subnettet 1:1, og MASQUERADE ut wifi-grensesnittet gir instrumentet ei
+   avsendaradresse det kan svare til.
+
+Alt koeyrer paa VERTEN via `nsenter -t 1` (same moenster som wifi_manager),
+og alt er idempotent: reglar blir sjekka foer dei blir lagt til, so gjentatte
+kall og restartar ikkje hopar opp duplikat.
+"""
+
+import ipaddress
+import json
+import logging
+import os
+import subprocess
+
+log = logging.getLogger("instrument_nat")
+
+KONFIG_FIL = "/data/konfig/instrument_nat.json"
+
+# Hald oss unna bord/merke som andre kan bruke.
+FOERSTE_TABELL = 99
+
+
+# ---------------------------------------------------------------
+#  Kommandoar paa verten
+# ---------------------------------------------------------------
+_HOST_NS = ["nsenter", "-t", "1", "-m", "-u", "-n", "-i"]
+
+
+def _host(cmd: list, timeout: float = 20.0) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(_HOST_NS + cmd, capture_output=True,
+                              text=True, timeout=timeout)
+    except FileNotFoundError:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout)
+
+
+def _ok(r) -> bool:
+    return r is not None and r.returncode == 0
+
+
+# ---------------------------------------------------------------
+#  Konfig
+# ---------------------------------------------------------------
+def _standard_nett(i: int) -> dict:
+    return {
+        "namn": "",
+        "grensesnitt": "wlan0",
+        "ekte": "192.168.1.0/24",
+        "alias": f"10.{99 + i}.0.0/24",
+        "tabell": FOERSTE_TABELL + i,
+        "merke": FOERSTE_TABELL + i,
+    }
+
+
+def les_konfig() -> dict:
+    try:
+        with open(KONFIG_FIL, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return {"aktivert": True, "nett": []}
+    nett = []
+    for i, n in enumerate(d.get("nett") or []):
+        base = _standard_nett(i)
+        base.update({k: v for k, v in n.items() if v not in (None, "")})
+        base["tabell"] = int(base["tabell"])
+        base["merke"] = int(base["merke"])
+        nett.append(base)
+    return {"aktivert": bool(d.get("aktivert", True)), "nett": nett}
+
+
+def valider(nett: dict) -> str:
+    """Tom streng om oppsettet er brukbart, elles forklaring."""
+    try:
+        ekte = ipaddress.ip_network(nett["ekte"], strict=False)
+        alias = ipaddress.ip_network(nett["alias"], strict=False)
+    except Exception as e:
+        return f"Ugyldig subnett: {e}"
+    if ekte.prefixlen != alias.prefixlen:
+        return (f"Alias {alias} og instrumentnett {ekte} må ha same "
+                f"prefikslengd — NETMAP mapper 1:1.")
+    if alias.overlaps(ekte):
+        return (f"Alias {alias} overlappar instrumentnettet {ekte}. "
+                f"Vel eit alias som ikkje finst nokon annan stad, t.d. "
+                f"10.99.0.0/24.")
+    if not nett.get("grensesnitt"):
+        return "Manglar grensesnitt (t.d. wlan0)"
+    return ""
+
+
+def lagre_konfig(konfig: dict) -> tuple:
+    nett = []
+    for i, n in enumerate(konfig.get("nett") or []):
+        base = _standard_nett(i)
+        base.update({k: v for k, v in n.items() if v not in (None, "")})
+        base["tabell"] = int(base["tabell"])
+        base["merke"] = int(base["merke"])
+        feil = valider(base)
+        if feil:
+            return False, feil
+        nett.append(base)
+    ut = {"aktivert": bool(konfig.get("aktivert", True)), "nett": nett}
+    try:
+        os.makedirs(os.path.dirname(KONFIG_FIL), exist_ok=True)
+        with open(KONFIG_FIL, "w", encoding="utf-8") as f:
+            json.dump(ut, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        return False, f"Kunne ikkje lagre: {e}"
+    return True, f"Lagra {len(nett)} instrument-NAT"
+
+
+# ---------------------------------------------------------------
+#  Oppsett paa verten
+# ---------------------------------------------------------------
+def _aktiv_profil(dev: str) -> str:
+    r = _host(["nmcli", "-t", "-f", "GENERAL.CONNECTION", "device", "show", dev])
+    if not _ok(r):
+        return ""
+    for ln in r.stdout.splitlines():
+        k, _, v = ln.partition(":")
+        if k == "GENERAL.CONNECTION" and v.strip() and v.strip() != "--":
+            return v.strip()
+    return ""
+
+
+def _isoler_profil(dev: str, tabell: int) -> str:
+    """Legg wifi-profilen sine ruter i eit eige bord.
+
+    Dette er kjernen: utan det installerer NetworkManager 192.168.1.0/24 i
+    hovudbordet, ved sida av LAN-et, og då er kollisjonen eit faktum før vi
+    har fått gjort noko som helst.
+    """
+    profil = _aktiv_profil(dev)
+    if not profil:
+        return f"Fann ingen aktiv profil på {dev}"
+    r = _host(["nmcli", "connection", "modify", profil,
+               "ipv4.route-table", str(tabell),
+               "ipv6.route-table", str(tabell),
+               "ipv4.never-default", "yes",
+               "ipv4.ignore-auto-dns", "yes",
+               "ipv6.never-default", "yes"], timeout=25)
+    if not _ok(r):
+        return (r.stderr or r.stdout or "").strip()
+    r = _host(["nmcli", "connection", "up", profil, "ifname", dev], timeout=60)
+    if not _ok(r):
+        return (r.stderr or r.stdout or "").strip()
+    return ""
+
+
+def _har_regel(tabell: int, merke: int) -> bool:
+    r = _host(["ip", "rule", "show"])
+    if not _ok(r):
+        return False
+    naal = f"lookup {tabell}"
+    for ln in r.stdout.splitlines():
+        if naal in ln and (f"fwmark {merke:#x}" in ln or f"fwmark {merke}" in ln):
+            return True
+    return False
+
+
+def _iptables(tabell: str, kjede: str, regel: list, dev_sjekk=True) -> str:
+    """Legg til ein iptables-regel om han ikkje finst frå før."""
+    sjekk = _host(["iptables", "-t", tabell, "-C", kjede] + regel)
+    if _ok(sjekk):
+        return ""                      # finst alt
+    r = _host(["iptables", "-t", tabell, "-A", kjede] + regel)
+    if _ok(r):
+        return ""
+    return (r.stderr or r.stdout or "").strip()
+
+
+def sett_opp(nett: dict) -> dict:
+    """Set opp NAT-ruting for eitt instrumentnett. Returnerer resultat-dict."""
+    feil = valider(nett)
+    if feil:
+        return {"namn": nett.get("namn", ""), "ok": False, "melding": feil}
+
+    dev = nett["grensesnitt"]
+    ekte, alias = nett["ekte"], nett["alias"]
+    tabell, merke = int(nett["tabell"]), int(nett["merke"])
+    steg = []
+
+    # 1. Isoler wifi-rutene i eige bord
+    m = _isoler_profil(dev, tabell)
+    if m:
+        return {"namn": nett.get("namn", ""), "ok": False,
+                "melding": f"Kunne ikkje isolere {dev}: {m}"}
+    steg.append(f"{dev}-ruter i bord {tabell}")
+
+    # 2. Sørg for at instrumentnettet finst i bordet (NM legg det normalt inn
+    #    sjølv, men ikkje om adressa er /32 eller profilen er spesiell)
+    _host(["ip", "route", "replace", ekte, "dev", dev, "table", str(tabell)])
+
+    # 3. Regel: merka trafikk brukar det bordet
+    if not _har_regel(tabell, merke):
+        r = _host(["ip", "rule", "add", "fwmark", str(merke),
+                   "lookup", str(tabell)])
+        if not _ok(r):
+            return {"namn": nett.get("namn", ""), "ok": False,
+                    "melding": f"ip rule feila: "
+                               f"{(r.stderr or r.stdout or '').strip()}"}
+    steg.append(f"fwmark {merke} → bord {tabell}")
+
+    # 4. Merk trafikk mot aliaset. Må skje i mangle, som køyrer FØR nat —
+    #    elles er destinasjonen alt omskriven når vi vil kjenne han att.
+    m = _iptables("mangle", "PREROUTING",
+                  ["-d", alias, "-j", "MARK", "--set-mark", str(merke)])
+    if m:
+        return {"namn": nett.get("namn", ""), "ok": False,
+                "melding": f"mangle-regel feila: {m}"}
+
+    # 5. NETMAP: heile aliasnettet 1:1 over på det ekte
+    m = _iptables("nat", "PREROUTING",
+                  ["-d", alias, "-j", "NETMAP", "--to", ekte])
+    if m:
+        return {"namn": nett.get("namn", ""), "ok": False,
+                "melding": f"NETMAP feila: {m}"}
+    steg.append(f"{alias} ⇄ {ekte}")
+
+    # 6. MASQUERADE ut instrument-grensesnittet, så instrumentet svarar til
+    #    ei adresse på sitt eige nett
+    m = _iptables("nat", "POSTROUTING", ["-o", dev, "-j", "MASQUERADE"])
+    if m:
+        return {"namn": nett.get("namn", ""), "ok": False,
+                "melding": f"MASQUERADE feila: {m}"}
+
+    # 7. Laus reverse-path-sjekk: med to like subnett i ulike bord vil streng
+    #    rp_filter kaste svara.
+    _host(["sysctl", "-w", "net.ipv4.conf.all.rp_filter=2"])
+    _host(["sysctl", "-w", f"net.ipv4.conf.{dev}.rp_filter=2"])
+    _host(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+
+    log.info(f"Instrument-NAT oppe: {alias} → {ekte} via {dev} (bord {tabell})")
+    return {"namn": nett.get("namn", ""), "ok": True,
+            "alias": alias, "ekte": ekte, "melding": ", ".join(steg)}
+
+
+def riv_ned(nett: dict) -> dict:
+    """Fjern oppsettet for eitt instrumentnett."""
+    dev = nett["grensesnitt"]
+    alias, ekte = nett["alias"], nett["ekte"]
+    merke, tabell = int(nett["merke"]), int(nett["tabell"])
+    _host(["iptables", "-t", "nat", "-D", "PREROUTING",
+           "-d", alias, "-j", "NETMAP", "--to", ekte])
+    _host(["iptables", "-t", "mangle", "-D", "PREROUTING",
+           "-d", alias, "-j", "MARK", "--set-mark", str(merke)])
+    _host(["ip", "rule", "del", "fwmark", str(merke), "lookup", str(tabell)])
+    return {"namn": nett.get("namn", ""), "ok": True, "melding": "Fjerna"}
+
+
+def bruk_frå_konfig() -> list:
+    """Kallast ved oppstart — reglar på verten overlever ikkje reboot."""
+    konfig = les_konfig()
+    if not konfig["aktivert"] or not konfig["nett"]:
+        return []
+    ut = []
+    for n in konfig["nett"]:
+        try:
+            ut.append(sett_opp(n))
+        except Exception as e:
+            ut.append({"namn": n.get("namn", ""), "ok": False,
+                       "melding": str(e)})
+    return ut
+
+
+# ---------------------------------------------------------------
+#  Status
+# ---------------------------------------------------------------
+def status() -> dict:
+    konfig = les_konfig()
+    ut = {"aktivert": konfig["aktivert"], "nett": [], "vert_ok": False}
+
+    r = _host(["ip", "rule", "show"])
+    reglar = r.stdout if _ok(r) else ""
+    ut["vert_ok"] = _ok(r)
+
+    r = _host(["iptables", "-t", "nat", "-S", "PREROUTING"])
+    natreglar = r.stdout if _ok(r) else ""
+
+    for n in konfig["nett"]:
+        aktiv = (f"lookup {n['tabell']}" in reglar
+                 and n["alias"] in natreglar)
+        r2 = _host(["ip", "route", "show", "table", str(n["tabell"])])
+        ut["nett"].append({
+            **n,
+            "aktiv": aktiv,
+            "bord": (r2.stdout.strip().splitlines() if _ok(r2) else []),
+        })
+    return ut
+
+
+def test_naa(alias_ip: str, port: int = 80, timeout: float = 4.0) -> dict:
+    """Prøv å nå instrumentet på alias-adressa, frå containeren."""
+    import socket
+    s = socket.socket()
+    s.settimeout(timeout)
+    try:
+        s.connect((alias_ip, int(port)))
+        return {"ok": True, "melding": f"{alias_ip}:{port} svarar"}
+    except Exception as e:
+        return {"ok": False,
+                "melding": f"{alias_ip}:{port} — {type(e).__name__}: {e}"}
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass

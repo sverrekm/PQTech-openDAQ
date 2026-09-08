@@ -2070,6 +2070,51 @@ def api_instrumentnett_test():
         return jsonify({"ok": False, "melding": str(e)}), 500
 
 
+# --- Instrument-NAT: noden som ruter mellom LAN og instrumentnett -----
+
+@app.route("/api/instrument-nat")
+def api_instrument_nat_status():
+    try:
+        import instrument_nat
+        return jsonify(instrument_nat.status())
+    except Exception as e:
+        return jsonify({"feil": str(e), "nett": [], "vert_ok": False}), 500
+
+
+@app.route("/api/instrument-nat", methods=["PUT"])
+def api_instrument_nat_sett():
+    """Lagre oppsettet og set det opp paa verten med ein gong."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_nat, instrument_ruter
+        ok, melding = instrument_nat.lagre_konfig(data)
+        if not ok:
+            return jsonify({"suksess": False, "melding": melding}), 400
+        resultat = instrument_nat.bruk_frå_konfig()
+        # Containeren treng rute til alias-netta for aa naa dei i det heile
+        instrument_ruter.bruk_ruter(instrument_ruter.alias_nett())
+        feila = [r for r in resultat if not r.get("ok")]
+        if feila:
+            melding += " — men " + "; ".join(
+                f"{r.get('namn') or '?'}: {r.get('melding')}" for r in feila)
+        return jsonify({"suksess": not feila, "melding": melding,
+                        "resultat": resultat, **instrument_nat.status()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/instrument-nat/test", methods=["POST"])
+def api_instrument_nat_test():
+    """Prøv å nå instrumentet på alias-adressa."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_nat
+        return jsonify(instrument_nat.test_naa(
+            str(data.get("adresse", "")), int(data.get("port", 80) or 80)))
+    except Exception as e:
+        return jsonify({"ok": False, "melding": str(e)}), 500
+
+
 # --- Nett-skann: kva staar paa instrumentnettet -----------------------
 
 @app.route("/api/nettskann")

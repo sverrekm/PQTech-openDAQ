@@ -544,6 +544,18 @@ def start_server(args):
     # Ruter til instrumentnett maa leggjast inn paa nytt ved kvar oppstart:
     # ruter i eit container-namespace overlever ikkje restart.
     try:
+        # NAT-ruting paa verten foerst - han lagar alias-netta som
+        # container-rutene under peikar paa.
+        import instrument_nat
+        for r in instrument_nat.bruk_frå_konfig():
+            if r.get("ok"):
+                log.info(f"Instrument-NAT {r.get('namn')}: {r.get('melding')}")
+            else:
+                log.warning(f"Instrument-NAT {r.get('namn')}: {r.get('melding')}")
+    except Exception:
+        log.warning(f"Instrument-NAT: {traceback.format_exc(limit=1).strip()}")
+
+    try:
         import instrument_ruter
         instrument_ruter.bruk_frå_konfig()
     except Exception:

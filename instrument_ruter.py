@@ -286,14 +286,30 @@ def bruk_ruter(nett: list = None) -> list:
     return ut
 
 
+def alias_nett() -> list:
+    """Alias-subnetta frå instrument_nat. Containeren snakkar med desse,
+    ikkje med dei ekte instrumentadressene — sjå instrument_nat.py."""
+    try:
+        import instrument_nat
+        k = instrument_nat.les_konfig()
+        if not k.get("aktivert"):
+            return []
+        return [{"subnett": n["alias"],
+                 "namn": n.get("namn") or f"NAT → {n['ekte']}"}
+                for n in k.get("nett") or []]
+    except Exception:
+        return []
+
+
 def bruk_frå_konfig() -> None:
     """Kallast ved oppstart. Ruter i containeren overlever ikkje restart,
     so dei må leggjast inn på nytt kvar gong."""
     sikre_default_rute()
     konfig = les_konfig()
-    if not konfig["nett"]:
+    alle = konfig["nett"] + alias_nett()
+    if not alle:
         return
-    for res in bruk_ruter():
+    for res in bruk_ruter(alle):
         if res["ok"]:
             log.info(f"Instrumentnett {res['subnett']}: {res['melding']}")
         else:
@@ -308,7 +324,7 @@ def status() -> dict:
     konfig = les_konfig()
     return {
         "aktivert": konfig["aktivert"],
-        "nett": konfig["nett"],
+        "nett": konfig["nett"] + alias_nett(),
         "bru": bru,
         "bru_tilgjengeleg": bool(bru),
         "aktive_ruter": gjeldande_ruter(),
