@@ -33,6 +33,8 @@ export const nb: Record<string, string> = {
   'Hidden network': 'Skjult nett',
   'Network name (SSID)': 'Nettnamn (SSID)',
   'Enter the WiFi password': 'Skriv inn WiFi-passordet',
+  'Instrument network only': 'Berre instrumentnett',
+  'For instruments with a built-in router. The node stays reachable on its wired network.': 'For instrument med innebygd ruter. Noden held fram med aa vere naabar paa kabelnettet.',
   'Enter the network name (SSID)': 'Skriv inn nettnamnet (SSID)',
   // Header / Auth
   'Log out': 'Logg ut',

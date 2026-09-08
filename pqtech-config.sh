@@ -158,6 +158,28 @@ auto_parent() {
         | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1
 }
 
+# Les subnett (CIDR) av grensesnittet slik det faktisk staar paa nettet.
+# Utan dette blir macvlan-subnettet staaande paa 192.168.1.0/24 uansett kva
+# nett noden er sett i - og daa svarar containeren ikkje paa LAN-et i det
+# heile. Elspec BlackBox og 5G-ruterar deler ut sine eigne subnett.
+auto_subnett() {  # dev -> echo 192.168.10.0/24
+    local dev="$1" cidr
+    [ -z "$dev" ] && return
+    cidr="$(ip -o -f inet addr show dev "$dev" 2>/dev/null | awk '{print $4; exit}')"
+    [ -z "$cidr" ] && return
+    python3 - "$cidr" 2>/dev/null <<'PYEOF'
+import sys, ipaddress
+print(ipaddress.ip_interface(sys.argv[1]).network)
+PYEOF
+}
+
+# Default gateway for eit gjeve grensesnitt.
+auto_gateway() {  # dev -> echo 192.168.10.1
+    local dev="$1"
+    [ -z "$dev" ] && return
+    ip route show default 2>/dev/null | awk -v d="$dev" '$5==d {print $3; exit}'
+}
+
 # Finn ein ledig IP på subnettet til ein gjeven base-IP (192.168.1.X).
 # Pingar .150–.199 og returnerer den fyrste som ikkje svarar.
 finn_ledig_ip() {  # base-ip -> echo ledig ip (eller tom)
@@ -186,10 +208,11 @@ handter_nettverk() {
 
     local val
     val="$(ui_meny "Nettverk" \
-        "IP: ${ip}\nGrensesnitt (parent): ${parent:-auto}\n\nVel handling:" \
+        "IP: ${ip}\nGrensesnitt (parent): ${parent:-auto}\nSubnett: $(les_env NET_SUBNET 192.168.1.0/24)\nGateway: $(les_env NET_GATEWAY 192.168.1.1)\n\nVel handling:" \
         fast   "Sett fast IP (skriv inn)" \
         auto   "Auto — finn ledig IP på subnettet" \
         parent "Endre nettverksgrensesnitt (parent)" \
+        oppdag "Les subnett + gateway av nettet (ved flytting)" \
         attende "Tilbake")" || return
 
     case "$val" in
@@ -222,6 +245,26 @@ handter_nettverk() {
             nyp="$(ui_input "Grensesnitt" "Nettverksgrensesnitt for macvlan (parent):" "${parent:-eth0}")" || return
             [ -n "$nyp" ] && sett_env NET_PARENT "$nyp"
             ui_msg "Nettverk" "Parent-grensesnitt sett: $nyp"
+            ;;
+        oppdag)
+            local dev sn gw fri
+            dev="${parent:-$(auto_parent)}"
+            sn="$(auto_subnett "$dev")"
+            gw="$(auto_gateway "$dev")"
+            if [ -z "$sn" ] || [ -z "$gw" ]; then
+                ui_msg "Nettoppdaging" "Fann ikkje subnett/gateway for $dev.\n\nSubnett: ${sn:-?}\nGateway: ${gw:-?}\n\nHar grensesnittet fatt IP? Sjekk: ip addr show $dev"
+                return
+            fi
+            fri="$(finn_ledig_ip "$gw")"
+            if ui_yesno "Nettoppdaging" "Grensesnitt: $dev\nSubnett:  $sn\nGateway:  $gw\nLedig IP: ${fri:-fann ingen}\n\nLagre dette som macvlan-oppsett?"; then
+                sett_env NET_SUBNET "$sn"
+                sett_env NET_GATEWAY "$gw"
+                if [ -n "$fri" ]; then
+                    sett_env CONTAINER_IP "$fri"
+                    sett_env OPENDAQ_IP "$fri"
+                fi
+                ui_msg "Nettverk" "Lagra.\n\nSubnett: $sn\nGateway: $gw\nContainer-IP: ${fri:-uendra}\n\nBruk Bruk endringar for aa aktivere (krev recreate)."
+            fi
             ;;
     esac
 }
@@ -479,6 +522,8 @@ bruk_endringar() {
         # Sørg for NET_PARENT (som start.sh)
         local parent; parent="$(les_env NET_PARENT "$(auto_parent)")"
         export NET_PARENT="$parent"
+        export NET_SUBNET="$(les_env NET_SUBNET "$(auto_subnett "$parent")")"
+        export NET_GATEWAY="$(les_env NET_GATEWAY "$(auto_gateway "$parent")")"
         cd "$REPO_DIR" || { ui_msg "Feil" "Kjem ikkje inn i $REPO_DIR"; return; }
         clear
         echo "== docker compose down =="

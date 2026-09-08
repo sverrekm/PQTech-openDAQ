@@ -30,7 +30,14 @@ export const fetchWifiStatus = () => apiGet<WifiStatus>('/api/wifi/status')
 
 export const skannWifi = () => apiPost<WifiSkann>('/api/wifi/skann')
 
-export const kobleWifi = (p: { ssid: string; passord?: string; skjult?: boolean }) =>
+// berre_lokalt: instrument-nett (Elspec BlackBox o.l.) som ikkje skal få
+// vere default-rute eller DNS-kjelde. La den vere av når wifi-et ER vegen ut.
+export const kobleWifi = (p: {
+  ssid: string
+  passord?: string
+  skjult?: boolean
+  berre_lokalt?: boolean
+}) =>
   apiPost<{ suksess: boolean; melding: string } & WifiStatus>('/api/wifi/koble', p)
 
 export const gloymWifi = (ssid: string) =>

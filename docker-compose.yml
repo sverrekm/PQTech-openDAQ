@@ -103,6 +103,10 @@ networks:
       parent: ${NET_PARENT:-eth0}
     ipam:
       config:
-        - subnet: 192.168.1.0/24
-          gateway: 192.168.1.1
+        # Subnett og gateway MAA matche nettet som parent-grensesnittet
+        # faktisk staar paa. Dei var hardkoda til 192.168.1.0/24, som er
+        # grunnen til at alle anlegg enda paa same subnett - og til at to
+        # kundenett kolliderte. pqtech-config.sh les dei av verten.
+        - subnet: ${NET_SUBNET:-192.168.1.0/24}
+          gateway: ${NET_GATEWAY:-192.168.1.1}
           ip_range: ${CONTAINER_IP:-192.168.1.161}/32

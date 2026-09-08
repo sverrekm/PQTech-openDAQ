@@ -192,9 +192,38 @@ def skann() -> dict:
 # ---------------------------------------------------------------
 #  Kople til / gløym
 # ---------------------------------------------------------------
-def koble_til(ssid: str, passord: str = "", skjult: bool = False) -> tuple:
+def _sett_berre_lokalt(ssid: str, dev: str) -> str:
+    """Gjer eit WiFi-nett til reint instrumentnett.
+
+    Eit måleinstrument med innebygd ruter (Elspec BlackBox) deler ut både
+    gateway og DNS over DHCP. Tek den over default-ruta, mistar noden
+    internett og Tailscale — altså deg. Difor: la profilen rute berre sitt
+    eige subnett, og aldri vere veg ut.
+
+    Motsett veg (wifi mot ein 5G-ruter som ER internettvegen) skal IKKJE
+    ha dette, og då kallar vi ikkje denne.
+    """
+    r = _nmcli(["connection", "modify", ssid,
+                "ipv4.never-default", "yes",
+                "ipv4.ignore-auto-dns", "yes",
+                "ipv6.never-default", "yes"], timeout=20)
+    if r.returncode != 0:
+        return (r.stderr or r.stdout or "").strip()
+    # Profilendringa slår ikkje inn før tilkoplinga er reaktivert.
+    _nmcli(["connection", "up", ssid, "ifname", dev], timeout=45)
+    return ""
+
+
+def koble_til(ssid: str, passord: str = "", skjult: bool = False,
+              berre_lokalt: bool = False) -> tuple:
     """Kople verten til eit WiFi-nett. NetworkManager persisterer profilen.
-    Returnerer (ok, melding). Passordet vert aldri logga."""
+
+    `berre_lokalt=True` for instrumentnett (Elspec BlackBox o.l.): nettet
+    blir nåbart, men får aldri vere default-rute eller DNS-kjelde. Bruk
+    False når wifi-et ER vegen ut (t.d. 5G-ruter).
+
+    Returnerer (ok, melding). Passordet vert aldri logga.
+    """
     ssid = (ssid or "").strip()
     if not ssid:
         return False, "Manglar SSID"
@@ -215,7 +244,15 @@ def koble_til(ssid: str, passord: str = "", skjult: bool = False) -> tuple:
     except Exception as e:
         return False, f"Tilkopling feila: {e}"
     if r.returncode == 0:
-        log.info(f"WiFi kopla til SSID={ssid!r} på {dev}")
+        log.info(f"WiFi kopla til SSID={ssid!r} på {dev} "
+                 f"(berre_lokalt={berre_lokalt})")
+        if berre_lokalt:
+            feil = _sett_berre_lokalt(ssid, dev)
+            if feil:
+                return True, (f"Kopla til «{ssid}», men kunne ikkje låse han "
+                              f"til instrumentnett: {feil}")
+            return True, (f"Kopla til «{ssid}» som instrumentnett "
+                          f"(ingen default-rute eller DNS herifrå)")
         return True, f"Kopla til «{ssid}»"
     feil = (r.stderr or r.stdout or "").strip()
     # Ikkje lek passord om nmcli skulle ekko kommandoen

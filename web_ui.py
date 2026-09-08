@@ -2053,7 +2053,8 @@ def api_wifi_koble():
         import wifi_manager
         ok, melding = wifi_manager.koble_til(
             ssid=data.get("ssid", ""), passord=data.get("passord", ""),
-            skjult=bool(data.get("skjult", False)))
+            skjult=bool(data.get("skjult", False)),
+            berre_lokalt=bool(data.get("berre_lokalt", False)))
         return jsonify({"suksess": ok, "melding": melding, **wifi_manager.status()})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)}), 500

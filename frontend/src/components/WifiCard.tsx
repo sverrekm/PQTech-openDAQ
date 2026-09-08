@@ -22,6 +22,10 @@ export default function WifiCard() {
   const [valt, setValt] = useState<string>('')
   const [passord, setPassord] = useState('')
   const [skjultSsid, setSkjultSsid] = useState('')
+  // Instrumentnett (Elspec BlackBox o.l.) deler ut gateway og DNS over
+  // DHCP. Tek dei over default-ruta, mistar noden internett og Tailscale.
+  // Av som standard, sidan wifi like gjerne KAN vere vegen ut (5G-ruter).
+  const [berreLokalt, setBerreLokalt] = useState(false)
   const [laddar, setLaddar] = useState(false)
   const [skannar, setSkannar] = useState(false)
   const [melding, setMelding] = useState<string | null>(null)
@@ -50,7 +54,7 @@ export default function WifiCard() {
     }
     setLaddar(true); setFeil(null); setMelding(null)
     try {
-      const res = await kobleWifi({ ssid, passord: open ? undefined : passord.trim() })
+      const res = await kobleWifi({ ssid, passord: open ? undefined : passord.trim(), berre_lokalt: berreLokalt })
       if (res.suksess) { setMelding(res.melding); setPassord(''); setValt('') }
       else setFeil(res.melding)
       refresh()
@@ -65,7 +69,7 @@ export default function WifiCard() {
     if (!skjultSsid.trim()) { setFeil(t('Enter the network name (SSID)')); return }
     setLaddar(true); setFeil(null); setMelding(null)
     try {
-      const res = await kobleWifi({ ssid: skjultSsid.trim(), passord: passord.trim() || undefined, skjult: true })
+      const res = await kobleWifi({ ssid: skjultSsid.trim(), passord: passord.trim() || undefined, skjult: true, berre_lokalt: berreLokalt })
       if (res.suksess) { setMelding(res.melding); setPassord(''); setSkjultSsid('') }
       else setFeil(res.melding)
       refresh()
@@ -205,6 +209,19 @@ export default function WifiCard() {
                                   />
                                 </div>
                               )}
+                              <label
+                                className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap pb-1.5"
+                                onClick={(e) => e.stopPropagation()}
+                                title={t('For instruments with a built-in router. The node stays reachable on its wired network.')}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={berreLokalt}
+                                  onChange={(e) => setBerreLokalt(e.target.checked)}
+                                  className="rounded border-gray-300 text-[#D76428] focus:ring-[#D76428]"
+                                />
+                                {t('Instrument network only')}
+                              </label>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleKoble(n.ssid, n.open) }}
                                 disabled={laddar}
