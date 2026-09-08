@@ -492,6 +492,13 @@ def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
     dev = _wifi_dev()
 
     if statisk_ip:
+        # Utan prefiks gir NetworkManager /32. Då finst det ingen on-link-rute
+        # til resten av subnettet, so noden står "connected" utan å kunne nå
+        # instrumentet — og kollisjonssjekken ser eit /32 som ikkje kolliderer
+        # med noko. Nesten alltid meint som /24.
+        if "/" not in statisk_ip:
+            statisk_ip = f"{statisk_ip}/24"
+            log.info(f"Statisk IP utan prefiks — tolkar som {statisk_ip}")
         kol = _kollisjon(statisk_ip, unnta_dev=dev)
         if kol:
             return False, kol
