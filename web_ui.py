@@ -2128,6 +2128,17 @@ def api_nettskann_status():
                         "funn": [], "ferdig": 0, "totalt": 0}), 500
 
 
+@app.route("/api/nettskann/siste")
+def api_nettskann_siste():
+    """Siste kjende funn per subnett, frå autoskannet. Lar GUI-et vise kva
+    som står på instrumentnettet utan at nokon må skanne først."""
+    try:
+        import nett_skann
+        return jsonify({"subnett": nett_skann.siste()})
+    except Exception as e:
+        return jsonify({"subnett": {}, "feil": str(e)}), 500
+
+
 @app.route("/api/nettskann/start", methods=["POST"])
 def api_nettskann_start():
     """Start skann av eit subnett. Returnerer straks — skannet tek titals

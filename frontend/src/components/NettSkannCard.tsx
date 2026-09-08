@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { fetchSkann, startSkann, stoppSkann } from '../api/nettskann'
-import type { SkannStatus } from '../api/nettskann'
+import { fetchSkann, startSkann, stoppSkann, fetchSisteSkann } from '../api/nettskann'
+import type { SkannStatus, SkannFunn, SisteFunn } from '../api/nettskann'
 import { useI18n } from '../i18n'
 
 /**
@@ -19,6 +19,12 @@ export default function NettSkannCard() {
   // Tett polling medan skannet går, roleg elles.
   const { data, refresh } = usePolling<SkannStatus>(fetcher, 2000)
   const koeyrer = data?.tilstand === 'koeyrer'
+
+  // Autoskannet held desse oppdaterte i bakgrunnen, so kortet viser kva som
+  // staar paa instrumentnettet utan at nokon maa trykkje "skann".
+  const sisteFetcher = useCallback(() => fetchSisteSkann(), [])
+  const { data: lagra } = usePolling<{ subnett: Record<string, SisteFunn> }>(
+    sisteFetcher, 20000)
 
   const start = async () => {
     const s = subnett.trim()
@@ -39,6 +45,47 @@ export default function NettSkannCard() {
 
   const prosent = data && data.totalt
     ? Math.round((data.ferdig / data.totalt) * 100) : 0
+
+  const rader = (funn: SkannFunn[]) => funn.map((f) => (
+    <tr key={f.ip} className="border-b border-gray-100 align-top">
+      <td className="py-1.5 pr-3 font-mono text-xs whitespace-nowrap">{f.ip}</td>
+      <td className="py-1.5 pr-3">
+        {f.portar.length === 0 ? (
+          <span className="text-xs text-gray-400">{t('answers ping only')}</span>
+        ) : (
+          <span className="flex flex-wrap gap-1">
+            {f.portar.map((p) => (
+              <span
+                key={p.port}
+                className={
+                  'text-xs px-1.5 py-0.5 rounded ' +
+                  (p.interessant
+                    ? 'bg-[#D76428]/10 text-[#D76428] font-medium'
+                    : 'bg-gray-100 text-gray-600')
+                }
+              >
+                {p.port} {p.namn}
+              </span>
+            ))}
+          </span>
+        )}
+      </td>
+      <td className="py-1.5 text-xs text-gray-600">
+        {f.server && <div>{f.server}</div>}
+        {f.tittel && <div className="text-gray-500">{f.tittel}</div>}
+      </td>
+    </tr>
+  ))
+
+  const hovud = (
+    <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
+      <th className="py-1.5 pr-3 font-medium">{t('Address')}</th>
+      <th className="py-1.5 pr-3 font-medium">{t('Open ports')}</th>
+      <th className="py-1.5 font-medium">{t('Identification')}</th>
+    </tr>
+  )
+
+  const lagraRader = Object.entries(lagra?.subnett ?? {})
 
   return (
     <div className="bg-white rounded-lg shadow p-4">
@@ -103,47 +150,33 @@ export default function NettSkannCard() {
       {data && data.funn.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
-                <th className="py-1.5 pr-3 font-medium">{t('Address')}</th>
-                <th className="py-1.5 pr-3 font-medium">{t('Open ports')}</th>
-                <th className="py-1.5 font-medium">{t('Identification')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.funn.map((f) => (
-                <tr key={f.ip} className="border-b border-gray-100 align-top">
-                  <td className="py-1.5 pr-3 font-mono text-xs whitespace-nowrap">{f.ip}</td>
-                  <td className="py-1.5 pr-3">
-                    {f.portar.length === 0 ? (
-                      <span className="text-xs text-gray-400">{t('answers ping only')}</span>
-                    ) : (
-                      <span className="flex flex-wrap gap-1">
-                        {f.portar.map((p) => (
-                          <span
-                            key={p.port}
-                            title={`${p.port}`}
-                            className={
-                              'text-xs px-1.5 py-0.5 rounded ' +
-                              (p.port === 502 || p.port === 4840
-                                ? 'bg-[#D76428]/10 text-[#D76428] font-medium'
-                                : 'bg-gray-100 text-gray-600')
-                            }
-                          >
-                            {p.port} {p.namn}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-1.5 text-xs text-gray-600">
-                    {f.server && <div>{f.server}</div>}
-                    {f.tittel && <div className="text-gray-500">{f.tittel}</div>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
+            <thead>{hovud}</thead>
+            <tbody>{rader(data.funn)}</tbody>
           </table>
+        </div>
+      )}
+
+      {lagraRader.length > 0 && (
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <h3 className="text-xs font-semibold text-gray-600 mb-2">
+            {t('Last known on the instrument networks')}
+          </h3>
+          {lagraRader.map(([subnett, res]) => (
+            <div key={subnett} className="mb-3">
+              <div className="text-xs text-gray-500 mb-1">
+                {subnett} — {res.funn.length} {t('devices')}
+                {res.tid ? ` · ${new Date(res.tid * 1000).toLocaleString()}` : ''}
+              </div>
+              {res.funn.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>{hovud}</thead>
+                    <tbody>{rader(res.funn)}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

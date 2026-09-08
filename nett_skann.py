@@ -44,6 +44,10 @@ PORTAR = [
     (9100, "JetDirect"), (20000, "DNP3"),
 ]
 
+# Portar som betyr at vi faktisk kan hente MAALEDATA herifraa, eller styre
+# eininga. Dei blir loefta fram i GUI-et; resten er berre kontekst.
+INTERESSANTE = {502, 4840, 7420, 1883, 102, 20000, 2404, 22}
+
 # Mindre sett for oppdagingsfasen — held skannet raskt.
 OPPDAGING = [80, 502, 443, 22, 4840, 8080, 23, 21]
 
@@ -195,7 +199,8 @@ def _detaljer(funn: dict, timeout: float) -> dict:
         if _stopp.is_set():
             break
         if port in funn["portar"] or _tcp(ip, port, timeout):
-            opne.append({"port": port, "namn": namn})
+            opne.append({"port": port, "namn": namn,
+                         "interessant": port in INTERESSANTE})
     funn["portar"] = opne
     for p in (80, 8080, 443, 8443):
         if _stopp.is_set():
@@ -246,9 +251,63 @@ def _kjoer(nett, timeout: float, traadar: int) -> None:
         _sett(tilstand="stoppa", melding="Skannet vart stoppa", brukt_s=brukt)
     else:
         n = len(status()["funn"])
+        _lagre_resultat(str(nett), status()["funn"])
         _sett(tilstand="ferdig", brukt_s=brukt,
               melding=f"{n} {'vert' if n == 1 else 'vertar'} funne på "
                       f"{brukt:.0f} s")
+
+
+# --- Lager: siste resultat per subnett -------------------------------
+# GUI-et skal kunne vise kva som staar paa instrumentnettet utan at nokon
+# maa trykkje "skann" foerst.
+_siste = {}
+
+
+def siste() -> dict:
+    with _lock:
+        return {k: dict(v) for k, v in _siste.items()}
+
+
+def _lagre_resultat(subnett: str, funn: list) -> None:
+    with _lock:
+        _siste[subnett] = {"tid": time.time(), "funn": list(funn)}
+
+
+def _auto_loop(hent_subnett, intervall_min: float) -> None:
+    """Skannar instrumentnetta jamt. Instrument kjem og gaar - ein node som
+    staar i eit anlegg i maanader skal vise kva som ER der, ikkje kva som
+    var der da nokon sist trykte paa ein knapp."""
+    # Vent litt so rutene rekk aa komme opp etter oppstart
+    time.sleep(45)
+    while True:
+        try:
+            for subnett in (hent_subnett() or []):
+                with _lock:
+                    travel = _tilstand["tilstand"] == "koeyrer"
+                if travel:
+                    break                      # manuelt skann har forrang
+                ok, _ = start(subnett)
+                if not ok:
+                    continue
+                while status()["tilstand"] == "koeyrer":
+                    time.sleep(1)
+                st = status()
+                if st["tilstand"] == "ferdig":
+                    _lagre_resultat(subnett, st["funn"])
+                    log.info(f"Autoskann {subnett}: {len(st['funn'])} vertar")
+        except Exception as e:
+            log.warning(f"Autoskann feila: {e}")
+        time.sleep(max(60.0, intervall_min * 60.0))
+
+
+def start_auto(hent_subnett, intervall_min: float = 30.0) -> None:
+    """Start bakgrunns-autoskann. `hent_subnett` er ein callable som gir
+    lista over subnett som skal skannast (typisk alias-netta)."""
+    if intervall_min <= 0:
+        return
+    threading.Thread(target=_auto_loop, args=(hent_subnett, intervall_min),
+                     daemon=True, name="nett-autoskann").start()
+    log.info(f"Autoskann av instrumentnett kvart {intervall_min:.0f} min")
 
 
 def start(subnett: str, timeout: float = 0.6, traadar: int = 64) -> tuple:

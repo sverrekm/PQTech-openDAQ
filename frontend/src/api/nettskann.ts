@@ -3,6 +3,8 @@ import { apiGet, apiPost } from './client'
 export interface SkannPort {
   port: number
   namn: string
+  /** Gir ein faktisk dataveg (Modbus, OPC UA, MQTT, openDAQ, SSH ...) */
+  interessant?: boolean
 }
 
 export interface SkannFunn {
@@ -33,3 +35,12 @@ export const startSkann = (subnett: string) =>
 
 export const stoppSkann = () =>
   apiPost<{ suksess: boolean; melding: string }>('/api/nettskann/stopp')
+
+export interface SisteFunn {
+  tid: number
+  funn: SkannFunn[]
+}
+
+/** Siste kjende funn per subnett, frå autoskannet. */
+export const fetchSisteSkann = () =>
+  apiGet<{ subnett: Record<string, SisteFunn> }>('/api/nettskann/siste')

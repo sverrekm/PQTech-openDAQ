@@ -561,6 +561,18 @@ def start_server(args):
     except Exception:
         log.warning(f"Instrument-ruting: {traceback.format_exc(limit=1).strip()}")
 
+    # Autoskann av instrumentnetta. Instrument kjem og gaar i eit anlegg;
+    # GUI-et skal vise kva som ER der, ikkje kva som var der sist nokon
+    # trykte paa ein knapp.
+    try:
+        import nett_skann, instrument_ruter as _ir
+        nett_skann.start_auto(
+            lambda: [n["subnett"] for n in
+                     (_ir.les_konfig()["nett"] + _ir.alias_nett())],
+            intervall_min=float(os.environ.get("AUTOSKANN_MIN", "30")))
+    except Exception:
+        log.warning(f"Autoskann: {traceback.format_exc(limit=1).strip()}")
+
     # Berge-serveren startar FOER Flask og er uavhengig av han: doeyr
     # web-traaden, er noden framleis naabar via hubben paa berge-porten,
     # med traceback og ein oppdater-og-restart-knapp. Utan denne er ein node

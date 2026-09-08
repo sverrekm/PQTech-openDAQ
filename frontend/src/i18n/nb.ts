@@ -48,6 +48,8 @@ export const nb: Record<string, string> = {
   'Test via alias address': 'Test via alias-adressa',
   'inactive': 'inaktiv',
   'Network scan': 'Nett-skann',
+  'Last known on the instrument networks': 'Sist kjende paa instrumentnetta',
+  'devices': 'einingar',
   'Scans from the node itself, through the same route the measurement polling uses.': 'Skannar frae noden sjoelv, gjennom same rute som maalepollinga brukar.',
   'Scan': 'Skann',
   'Open ports': 'Opne portar',
