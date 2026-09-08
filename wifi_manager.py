@@ -226,6 +226,101 @@ def skann() -> dict:
 # ---------------------------------------------------------------
 #  Kople til / gløym
 # ---------------------------------------------------------------
+_NM_TILSTAND = {
+    "20": "grensesnittet er utilgjengeleg",
+    "30": "fråkopla",
+    "40": "leitar etter nettet",
+    "50": "held på å autentisere",
+    "60": "ventar på autentisering (passord?)",
+    "70": ("assosiert med nettet, men fekk ikkje IP-adresse — DHCP-serveren "
+           "svarar ikkje. Prøv statisk IP."),
+    "100": "tilkopla",
+}
+
+
+def _dev_tilstand(dev: str) -> tuple:
+    """(kode, rå-tekst) frå GENERAL.STATE for grensesnittet."""
+    try:
+        r = _nmcli(["-t", "-f", "GENERAL.STATE", "device", "show", dev],
+                   timeout=10)
+        for ln in r.stdout.splitlines():
+            k, _, v = ln.partition(":")
+            if k == "GENERAL.STATE":
+                v = v.strip()
+                return v.split(" ")[0], v
+    except Exception:
+        pass
+    return "", ""
+
+
+def _forklar_tilstand(dev: str) -> str:
+    """Menneskeleg forklaring på kvar tilkoplinga står.
+
+    Ein rå `subprocess timed out`-streng seier ingenting om kva som gjekk
+    gale. NetworkManager veit det: state 70 tyder at radioen er inne, men
+    DHCP ikkje svarar — heilt annan feil enn 60 (passord).
+    """
+    kode, raa = _dev_tilstand(dev)
+    if not kode:
+        return ""
+    forklaring = _NM_TILSTAND.get(kode, "")
+    return f"{forklaring} (NM-tilstand {raa})" if forklaring else f"NM-tilstand {raa}"
+
+
+def _nett_i_bruk(unnta_dev: str = "") -> dict:
+    """{nettverk: grensesnitt} for alle IPv4-adresser på verten.
+
+    Brukt til å fange subnettkollisjonar før dei skjer. Eit instrument med
+    innebygd ruter kjem typisk med 192.168.1.0/24 rett frå fabrikken — same
+    subnett som mange kunde-LAN. Legg ein då wlan0 på same nett som eth0,
+    blir rutinga tvitydig og kabelvegen kan ryke. (Vi har alt sett kva to
+    kundenett på 192.168.1.0/24 gjer.)
+    """
+    ut = {}
+    try:
+        import ipaddress
+        r = _host(["ip", "-o", "-f", "inet", "addr", "show"], timeout=10)
+        for ln in r.stdout.splitlines():
+            f = ln.split()
+            if len(f) < 4:
+                continue
+            dev, cidr = f[1], f[3]
+            if dev == "lo" or dev == unnta_dev:
+                continue
+            try:
+                ut[str(ipaddress.ip_interface(cidr).network)] = dev
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ut
+
+
+def _kollisjon(cidr: str, unnta_dev: str = "") -> str:
+    """Tom streng om `cidr` er trygg, elles ei forklaring."""
+    try:
+        import ipaddress
+        nett = str(ipaddress.ip_interface(cidr).network)
+    except Exception:
+        return ""
+    treff = _nett_i_bruk(unnta_dev).get(nett)
+    if treff:
+        return (f"Subnettet {nett} er alt i bruk på {treff}. To grensesnitt "
+                f"på same subnett gir tvitydig ruting, og kabelvegen inn til "
+                f"noden kan ryke. Endre subnettet på instrument-ruteren "
+                f"(t.d. til 192.168.50.0/24) før du koplar til.")
+    return ""
+
+
+def _rydd_opp(dev: str) -> None:
+    """Kople frå eit forsøk som står fast, så wlan0 ikkje blir liggjande
+    og prøve i det uendelege."""
+    try:
+        _nmcli(["device", "disconnect", dev], timeout=15)
+    except Exception:
+        pass
+
+
 def _aktiv_profil(dev: str) -> str:
     """Namnet NetworkManager faktisk gav profilen på dette grensesnittet.
 
@@ -292,7 +387,8 @@ def _sett_berre_lokalt(ssid: str, dev: str) -> str:
 
 
 def koble_til(ssid: str, passord: str = "", skjult: bool = False,
-              berre_lokalt: bool = False) -> tuple:
+              berre_lokalt: bool = False, statisk_ip: str = "",
+              gateway: str = "") -> tuple:
     """Start tilkopling til eit WiFi-nett. Returnerer med ein gong.
 
     Tilkoplinga køyrer i bakgrunnen fordi ho er treg: `nmcli device wifi
@@ -320,27 +416,83 @@ def koble_til(ssid: str, passord: str = "", skjult: bool = False,
 
     _sett_op("koeyrer", ssid, "Koplar til …")
     threading.Thread(
-        target=_koble_synk, args=(ssid, passord, skjult, berre_lokalt),
+        target=_koble_synk,
+        args=(ssid, passord, skjult, berre_lokalt, statisk_ip, gateway),
         daemon=True, name="wifi-koble").start()
     return True, f"Koplar til «{ssid}» … følg med på statusen."
 
 
-def _koble_synk(ssid: str, passord: str, skjult: bool,
-                berre_lokalt: bool) -> None:
+def _koble_synk(ssid: str, passord: str, skjult: bool, berre_lokalt: bool,
+                statisk_ip: str = "", gateway: str = "") -> None:
     """Sjølve tilkoplinga. Køyrer i bakgrunnstråd; melder frå via _sett_op."""
     try:
-        ok, melding = _koble_no(ssid, passord, skjult, berre_lokalt)
+        ok, melding = _koble_no(ssid, passord, skjult, berre_lokalt,
+                                statisk_ip, gateway)
     except Exception as e:
         _sett_op("feil", ssid, str(e))
         return
     _sett_op("ok" if ok else "feil", ssid, melding)
 
 
+def _koble_statisk(ssid: str, passord: str, skjult: bool, dev: str,
+                   statisk_ip: str, gateway: str) -> tuple:
+    """Lag profilen med fast IP og aktiver han.
+
+    Går utanom `device wifi connect`, som ventar på DHCP. Eit instrument
+    med innebygd ruter deler ikkje alltid ut leige i det heile — då står
+    NetworkManager for evig i tilstand 70 (getting IP configuration).
+    """
+    profil = _profil_for_ssid(ssid)
+    _nmcli(["connection", "delete", "id", profil], timeout=15)
+
+    cmd = ["connection", "add", "type", "wifi", "ifname", dev,
+           "con-name", ssid, "ssid", ssid,
+           "ipv4.method", "manual", "ipv4.addresses", statisk_ip]
+    if gateway:
+        cmd += ["ipv4.gateway", gateway]
+    if passord:
+        cmd += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", passord]
+    if skjult:
+        cmd += ["802-11-wireless.hidden", "yes"]
+
+    r = _nmcli(cmd, timeout=30)
+    if r.returncode != 0:
+        feil = (r.stderr or r.stdout or "").strip()
+        if passord:
+            feil = feil.replace(passord, "***")
+        return False, f"Kunne ikkje lage profilen: {feil}"
+
+    try:
+        r = _nmcli(["connection", "up", ssid, "ifname", dev], timeout=60)
+    except Exception as e:
+        _rydd_opp(dev)
+        return False, f"Aktivering feila: {e}. {_forklar_tilstand(dev)}"
+    if r.returncode != 0:
+        feil = (r.stderr or r.stdout or "").strip()
+        _rydd_opp(dev)
+        return False, f"{feil or 'Aktivering feila'}. {_forklar_tilstand(dev)}"
+    return True, f"Kopla til «{ssid}» med fast IP {statisk_ip}"
+
+
 def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
-              berre_lokalt: bool = False) -> tuple:
+              berre_lokalt: bool = False, statisk_ip: str = "",
+              gateway: str = "") -> tuple:
     """Blokkerande tilkopling. Returnerer (ok, melding)."""
     _radio_på()
     dev = _wifi_dev()
+
+    if statisk_ip:
+        kol = _kollisjon(statisk_ip, unnta_dev=dev)
+        if kol:
+            return False, kol
+        ok, melding = _koble_statisk(ssid, passord, skjult, dev,
+                                     statisk_ip, gateway)
+        if ok and berre_lokalt:
+            feil = _sett_berre_lokalt(ssid, dev)
+            if feil:
+                return True, f"{melding}, men låsinga til instrumentnett feila: {feil}"
+            return True, f"{melding} (ingen default-rute eller DNS herifrå)"
+        return ok, melding
 
     cmd = ["device", "wifi", "connect", ssid]
     if passord:
@@ -350,9 +502,15 @@ def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
     cmd += ["ifname", dev]
 
     try:
-        r = _nmcli(cmd, timeout=45)
-    except Exception as e:
-        return False, f"Tilkopling feila: {e}"
+        # NetworkManager sin eigen timeout er 90 s. Vi låg under han med 45,
+        # so vi drap kommandoen midt i og rapporterte «timed out» i staden
+        # for kva som faktisk stod på.
+        r = _nmcli(cmd, timeout=100)
+    except Exception:
+        forklaring = _forklar_tilstand(dev)
+        _rydd_opp(dev)
+        return False, (f"Tilkoplinga vart ikkje ferdig. {forklaring}"
+                       if forklaring else "Tilkoplinga vart ikkje ferdig.")
     if r.returncode == 0:
         log.info(f"WiFi kopla til SSID={ssid!r} på {dev} "
                  f"(berre_lokalt={berre_lokalt})")
@@ -363,12 +521,19 @@ def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
                               f"til instrumentnett: {feil}")
             return True, (f"Kopla til «{ssid}» som instrumentnett "
                           f"(ingen default-rute eller DNS herifrå)")
+        adr = status().get("ip") or ""
+        if adr:
+            kol = _kollisjon(f"{adr}/24", unnta_dev=dev)
+            if kol:
+                return True, f"Kopla til «{ssid}» ({adr}) — MEN: {kol}"
         return True, f"Kopla til «{ssid}»"
     feil = (r.stderr or r.stdout or "").strip()
     # Ikkje lek passord om nmcli skulle ekko kommandoen
     if passord:
         feil = feil.replace(passord, "***")
-    return False, feil or "Tilkopling feila"
+    forklaring = _forklar_tilstand(dev)
+    _rydd_opp(dev)
+    return False, " ".join(x for x in (feil or "Tilkopling feila", forklaring) if x)
 
 
 def gløym(ssid: str) -> tuple:

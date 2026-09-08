@@ -2054,7 +2054,9 @@ def api_wifi_koble():
         ok, melding = wifi_manager.koble_til(
             ssid=data.get("ssid", ""), passord=data.get("passord", ""),
             skjult=bool(data.get("skjult", False)),
-            berre_lokalt=bool(data.get("berre_lokalt", False)))
+            berre_lokalt=bool(data.get("berre_lokalt", False)),
+            statisk_ip=str(data.get("statisk_ip", "") or "").strip(),
+            gateway=str(data.get("gateway", "") or "").strip())
         return jsonify({"suksess": ok, "melding": melding, **wifi_manager.status()})
     except Exception as e:
         return jsonify({"suksess": False, "melding": str(e)}), 500

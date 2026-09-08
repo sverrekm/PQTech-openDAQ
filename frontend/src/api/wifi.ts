@@ -48,6 +48,10 @@ export const kobleWifi = (p: {
   passord?: string
   skjult?: boolean
   berre_lokalt?: boolean
+  // Fast IP i CIDR, t.d. 192.168.50.20/24. Gaar utanom DHCP - naudsynt naar
+  // instrument-ruteren ikkje deler ut leige (NM blir staaande i tilstand 70).
+  statisk_ip?: string
+  gateway?: string
 }) =>
   apiPost<{ suksess: boolean; melding: string } & WifiStatus>('/api/wifi/koble', p)
 

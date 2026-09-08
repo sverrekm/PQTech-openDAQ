@@ -26,6 +26,8 @@ export default function WifiCard() {
   // DHCP. Tek dei over default-ruta, mistar noden internett og Tailscale.
   // Av som standard, sidan wifi like gjerne KAN vere vegen ut (5G-ruter).
   const [berreLokalt, setBerreLokalt] = useState(false)
+  // Tom = DHCP. Fyll ut naar instrument-ruteren ikkje deler ut leige.
+  const [statiskIp, setStatiskIp] = useState('')
   const [laddar, setLaddar] = useState(false)
   const [skannar, setSkannar] = useState(false)
   const [melding, setMelding] = useState<string | null>(null)
@@ -54,7 +56,7 @@ export default function WifiCard() {
     }
     setLaddar(true); setFeil(null); setMelding(null)
     try {
-      const res = await kobleWifi({ ssid, passord: open ? undefined : passord.trim(), berre_lokalt: berreLokalt })
+      const res = await kobleWifi({ ssid, passord: open ? undefined : passord.trim(), berre_lokalt: berreLokalt, statisk_ip: statiskIp.trim() || undefined })
       if (res.suksess) { setMelding(res.melding); setPassord(''); setValt('') }
       else setFeil(res.melding)
       refresh()
@@ -69,7 +71,7 @@ export default function WifiCard() {
     if (!skjultSsid.trim()) { setFeil(t('Enter the network name (SSID)')); return }
     setLaddar(true); setFeil(null); setMelding(null)
     try {
-      const res = await kobleWifi({ ssid: skjultSsid.trim(), passord: passord.trim() || undefined, skjult: true, berre_lokalt: berreLokalt })
+      const res = await kobleWifi({ ssid: skjultSsid.trim(), passord: passord.trim() || undefined, skjult: true, berre_lokalt: berreLokalt, statisk_ip: statiskIp.trim() || undefined })
       if (res.suksess) { setMelding(res.melding); setPassord(''); setSkjultSsid('') }
       else setFeil(res.melding)
       refresh()
@@ -219,6 +221,17 @@ export default function WifiCard() {
                                   />
                                 </div>
                               )}
+                              <div className="flex-1">
+                                <label className="block text-xs font-medium text-gray-600 mb-1">{t('Static IP (optional)')}</label>
+                                <input
+                                  type="text"
+                                  value={statiskIp}
+                                  onChange={(e) => setStatiskIp(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  placeholder="192.168.50.20/24"
+                                  className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none"
+                                />
+                              </div>
                               <label
                                 className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap pb-1.5"
                                 onClick={(e) => e.stopPropagation()}
