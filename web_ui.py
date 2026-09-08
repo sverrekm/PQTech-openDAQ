@@ -2070,6 +2070,43 @@ def api_instrumentnett_test():
         return jsonify({"ok": False, "melding": str(e)}), 500
 
 
+# --- Nett-skann: kva staar paa instrumentnettet -----------------------
+
+@app.route("/api/nettskann")
+def api_nettskann_status():
+    """Framdrift og funn for det siste skannet."""
+    try:
+        import nett_skann
+        return jsonify(nett_skann.status())
+    except Exception as e:
+        return jsonify({"tilstand": "feil", "melding": str(e),
+                        "funn": [], "ferdig": 0, "totalt": 0}), 500
+
+
+@app.route("/api/nettskann/start", methods=["POST"])
+def api_nettskann_start():
+    """Start skann av eit subnett. Returnerer straks — skannet tek titals
+    sekund, langt over hub-proxyen sin lesetimeout."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import nett_skann
+        ok, melding = nett_skann.start(str(data.get("subnett", "")))
+        return jsonify({"suksess": ok, "melding": melding,
+                        **nett_skann.status()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/nettskann/stopp", methods=["POST"])
+def api_nettskann_stopp():
+    try:
+        import nett_skann
+        ok, melding = nett_skann.stopp()
+        return jsonify({"suksess": ok, "melding": melding})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/wifi/status")
 def api_wifi_status():
     """Noverande WiFi-tilstand på verten (SSID, IP, signal, radio)."""
