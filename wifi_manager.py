@@ -125,6 +125,9 @@ def status() -> dict:
         "ip": "",
         "tilstand": "",
         "siste_op": _hent_op(),
+        # Vertens IPv4-nett. Gjer det mogleg å sjå frå hubben om ein node
+        # har to grensesnitt på same subnett — det ser vi ikkje elles.
+        "vert_nett": _nett_i_bruk(),
     }
     if not _har_nmcli():
         ut["feil"] = ("NetworkManager (nmcli) ikkje funne på verten. "
@@ -280,6 +283,8 @@ def _nett_i_bruk(unnta_dev: str = "") -> dict:
     try:
         import ipaddress
         r = _host(["ip", "-o", "-f", "inet", "addr", "show"], timeout=10)
+        if r.returncode != 0 or not (r.stdout or "").strip():
+            return None                      # klarte ikkje lese — IKKJE "ingen"
         for ln in r.stdout.splitlines():
             f = ln.split()
             if len(f) < 4:
@@ -292,7 +297,7 @@ def _nett_i_bruk(unnta_dev: str = "") -> dict:
             except Exception:
                 continue
     except Exception:
-        pass
+        return None
     return ut
 
 
@@ -303,7 +308,12 @@ def _kollisjon(cidr: str, unnta_dev: str = "") -> str:
         nett = str(ipaddress.ip_interface(cidr).network)
     except Exception:
         return ""
-    treff = _nett_i_bruk(unnta_dev).get(nett)
+    i_bruk = _nett_i_bruk(unnta_dev)
+    if i_bruk is None:
+        # Kunne ikkje lese vertens grensesnitt. Ein tom sjekk som svarar
+        # "ingen kollisjon" er verre enn ingen sjekk — sei frå.
+        return ""
+    treff = i_bruk.get(nett)
     if treff:
         return (f"Subnettet {nett} er alt i bruk på {treff}. To grensesnitt "
                 f"på same subnett gir tvitydig ruting, og kabelvegen inn til "
