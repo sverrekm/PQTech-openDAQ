@@ -1774,6 +1774,14 @@ def start_server(args):
                     pass
             time.sleep(10)
 
+    # Ruter til instrumentnett maa leggjast inn paa nytt ved kvar oppstart:
+    # ruter i eit container-namespace overlever ikkje restart.
+    try:
+        import instrument_ruter
+        instrument_ruter.bruk_frå_konfig()
+    except Exception:
+        log.warning(f"Instrument-ruting: {traceback.format_exc(limit=1).strip()}")
+
     # Berge-serveren startar FOER Flask og er uavhengig av han: doeyr
     # web-traaden, er noden framleis naabar via hubben paa berge-porten,
     # med traceback og ein oppdater-og-restart-knapp. Utan denne er ein node

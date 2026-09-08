@@ -2025,6 +2025,51 @@ def api_nas_status():
         return jsonify({"montert": False, "feil": str(e)})
 
 
+# --- Instrumentnett: ruter til nett som berre finst paa verten ---------
+
+@app.route("/api/instrumentnett")
+def api_instrumentnett_status():
+    """Status for instrument-ruting: bridge-grensesnitt, konfig, aktive ruter."""
+    try:
+        import instrument_ruter
+        return jsonify(instrument_ruter.status())
+    except Exception as e:
+        return jsonify({"feil": str(e), "bru_tilgjengeleg": False,
+                        "nett": [], "aktive_ruter": []}), 500
+
+
+@app.route("/api/instrumentnett", methods=["PUT"])
+def api_instrumentnett_sett():
+    """Lagre lista over instrumentnett og legg inn rutene med ein gong."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_ruter
+        ok, melding = instrument_ruter.lagre_konfig(data)
+        if not ok:
+            return jsonify({"suksess": False, "melding": melding}), 400
+        resultat = instrument_ruter.bruk_ruter()
+        feila = [r for r in resultat if not r["ok"]]
+        if feila:
+            melding += " — men " + "; ".join(
+                f"{r['subnett']}: {r['melding']}" for r in feila)
+        return jsonify({"suksess": not feila, "melding": melding,
+                        "ruter": resultat, **instrument_ruter.status()})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/instrumentnett/test", methods=["POST"])
+def api_instrumentnett_test():
+    """Prøv å nå eit instrument — svarar på om ruta faktisk verkar."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_ruter
+        return jsonify(instrument_ruter.test_naa(
+            str(data.get("host", "")), int(data.get("port", 80) or 80)))
+    except Exception as e:
+        return jsonify({"ok": False, "melding": str(e)}), 500
+
+
 @app.route("/api/wifi/status")
 def api_wifi_status():
     """Noverande WiFi-tilstand på verten (SSID, IP, signal, radio)."""

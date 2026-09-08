@@ -15,6 +15,13 @@ services:
     networks:
       daqnet:
         ipv4_address: ${CONTAINER_IP:-192.168.1.161}
+      # Veg ut via verten. macvlan-grensesnittet over kan ikkje snakke med
+      # sin eigen vert, og ser difor ingenting av dei andre netta verten er
+      # paa - t.d. eit instrument-wifi eller eit isolert maalesegment. Dette
+      # bridge-nettet gir containeren ein rutbar veg dit; instrument_ruter.py
+      # legg inn rutene. Endrar ikkje default-ruta, som framleis gaar paa
+      # macvlan.
+      instrumentnett: {}
 
     # PID host-namespace: nsenter -t 1 treng tilgang til hostens PID 1
     pid: host
@@ -97,6 +104,12 @@ services:
         max-file: "3"
 
 networks:
+  instrumentnett:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${INSTRUMENT_BRU_SUBNETT:-172.30.0.0/24}
+
   daqnet:
     driver: macvlan
     driver_opts:

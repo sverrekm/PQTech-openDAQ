@@ -723,6 +723,7 @@ COPY push_konfig.py .
 COPY hub_pusher.py .
 COPY oppdatering.py .
 COPY berge_server.py .
+COPY instrument_ruter.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
 # Modular lagt til etter at COPY-lista sist vart oppdatert. Utan desse
