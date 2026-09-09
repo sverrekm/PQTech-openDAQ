@@ -70,18 +70,45 @@ def prefiks(forwarded_prefix: str, vert: str, port: int = 80) -> str:
     return f"{p}/instrument/{vert}{havn}"
 
 
-def skriv_om_html(kropp: bytes, pre: str) -> bytes:
-    """Gjer absolutte stiar om til aa peike gjennom proxyen."""
+def _eigne_url(vert: str, havn: int) -> list:
+    """Dei formene instrumentet kan skrive si eiga adresse paa."""
+    ut = [f"http://{vert}:{havn}", f"//{vert}:{havn}"]
+    if havn == 80:
+        ut += [f"http://{vert}", f"//{vert}"]
+    return ut
+
+
+def skriv_om_html(kropp: bytes, pre: str, vert: str = "",
+                  havn: int = 80) -> bytes:
+    """Gjer adresser i svaret om til aa peike gjennom proxyen.
+
+    Baade absolutte stiar (/style.css) og heile URL-ar med instrumentet si
+    eiga adresse (http://10.99.0.1/login.asp). Det siste er vanleg i
+    innebygde webserverar, og utan omskriving fell brukaren ut av proxyen
+    og over paa ei adresse browseren hans ikkje naar.
+    """
     if not kropp:
         return kropp
     b = pre.encode("utf-8")
+    # REKKJEFOELGJA er viktig. Tek vi URL-ane foerst, blir resultatet
+    # href="/<pre>/x" - og da matchar regexen for absolutte stiar det paa
+    # nytt og legg prefikset inn ein gong til. Difor stiane foerst: dei
+    # roerer ikkje "http://..."-formene, som so blir tekne etterpaa.
     kropp = _ABSOLUTT.sub(rb"\1" + b + b"/", kropp)
     kropp = _CSS_URL.sub(rb"\1" + b + b"/", kropp)
+    if vert:
+        for u in _eigne_url(vert, havn):
+            kropp = kropp.replace(u.encode("utf-8"), b)
     return kropp
 
 
-def skriv_om_location(verdi: str, pre: str) -> str:
+def skriv_om_location(verdi: str, pre: str, vert: str = "",
+                      havn: int = 80) -> str:
     """Redirect innanfor instrumentet skal bli verande i proxyen."""
+    if vert:
+        for u in _eigne_url(vert, havn):
+            if verdi.startswith(u + "/") or verdi == u:
+                return pre + verdi[len(u):]
     if verdi.startswith("/") and not verdi.startswith("//"):
         return pre + verdi
     return verdi

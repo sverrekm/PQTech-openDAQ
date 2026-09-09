@@ -2411,15 +2411,17 @@ def instrument_proxy(vert, sub):
 
     kropp = opp.content
     ct = opp.headers.get("Content-Type", "")
-    if ip.skal_skrive_om(ct):
-        kropp = ip.skriv_om_html(kropp, pre)
+    # Redirect-kroppar er html, men nokre serverar sender dei utan
+    # content-type. Skriv om ogsaa naar det er ei omdirigering.
+    if ip.skal_skrive_om(ct) or 300 <= opp.status_code < 400:
+        kropp = ip.skriv_om_html(kropp, pre, vert_del, havn)
 
     hodar = []
     for k, v in opp.raw.headers.items():
         if k.lower() in ip.HOPP:
             continue
         if k.lower() == "location":
-            v = ip.skriv_om_location(v, pre)
+            v = ip.skriv_om_location(v, pre, vert_del, havn)
         hodar.append((k, v))
     return Response(kropp, status=opp.status_code, headers=hodar)
 
