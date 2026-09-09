@@ -267,12 +267,51 @@ def hent_til_fil(sti: str, maal: str, vert: str = "", **kv) -> dict:
             "brukt_s": round(time.time() - start, 1)}
 
 
+def banner(vert: str = "", port: int = 0, timeout: float = 0) -> dict:
+    """Kople til utan å logge inn — kva slags server er dette?
+
+    530 fortel berre at innlogginga vart avvist; det skil ikkje feil
+    passord frå ein avslått FTP-konto. Velkomstlinja gjer det ofte klart,
+    og ho kjem før USER/PASS. Vi loggar IKKJE inn her, so ingen mislukka
+    forsøk som kan låse ein konto på innebygd utstyr.
+    """
+    k = les_konfig()
+    vert = (vert or k["vert"]).strip()
+    if not vert:
+        return {"suksess": False, "melding": "No FTP host configured"}
+    if not _privat(vert):
+        return {"suksess": False,
+                "melding": "'%s' is not a private IP address" % vert}
+    f = _Klient()
+    try:
+        f.connect(vert, int(port or k["port"]),
+                  timeout=float(timeout or k["timeout_s"]))
+        vel = (f.getwelcome() or "").strip()
+    except Exception as e:
+        return {"suksess": False, "melding": str(e)}
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+    return {"suksess": True, "velkomst": vel,
+            "melding": "Reached FTP server: %s" % (vel or "(no banner)")}
+
+
 def test(vert: str = "", **kv) -> dict:
-    """Kom vi inn, og kva svarar serveren?"""
+    """Kom vi inn, og kva svarar serveren?
+
+    Ved innloggingsfeil tek vi med velkomstbanneret likevel, so brukaren
+    ser kva server det er og kan skilje feil passord frå ein avslått konto.
+    """
     try:
         res = liste("", vert, **kv)
     except Exception as e:
-        return {"suksess": False, "melding": str(e)}
+        svar = {"suksess": False, "melding": str(e)}
+        b = banner(vert)
+        if b.get("velkomst"):
+            svar["velkomst"] = b["velkomst"]
+        return svar
     n = len(res["oppforingar"])
     return {"suksess": True, "velkomst": res["velkomst"], "syst": res["syst"],
             "melding": "Connected, %d %s in %s"
