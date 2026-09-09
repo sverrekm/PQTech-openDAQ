@@ -48,6 +48,21 @@ PORTAR = [
 # eininga. Dei blir loefta fram i GUI-et; resten er berre kontekst.
 INTERESSANTE = {502, 4840, 7420, 1883, 102, 20000, 2404, 22}
 
+# OUI -> produsent. Ei eining som ikkje svarar paa nokon port vi proever er
+# usynleg for eit portskann, men han svarar paa ARP - og da fortel MAC-en
+# kven han er. Vi held lista kort og relevant for maaleutstyr.
+OUI = {
+    "00:60:35": "Elspec",
+    "00:0c:29": "VMware", "00:50:56": "VMware",
+    "b8:27:eb": "Raspberry Pi", "dc:a6:32": "Raspberry Pi",
+    "e4:5f:01": "Raspberry Pi", "d8:3a:dd": "Raspberry Pi",
+    "00:1c:23": "Dell", "00:26:b9": "Dell",
+    "00:04:a3": "Microchip", "00:80:a3": "Lantronix",
+    "00:90:e8": "Moxa", "00:0e:8e": "SparkLAN",
+    "00:11:32": "Synology", "00:1d:73": "Buffalo",
+    "74:fe:48": "Ginlong/Solis",
+}
+
 # Mindre sett for oppdagingsfasen — held skannet raskt.
 OPPDAGING = [80, 502, 443, 22, 4840, 8080, 23, 21]
 
@@ -262,6 +277,15 @@ def _kjoer(nett, timeout: float, traadar: int) -> None:
             if not _stopp.is_set():
                 _sett(melding=f"Found {len(oppdaga)} hosts - reading ports")
                 ferdige = list(pool.map(lambda f: _detaljer(f, timeout), oppdaga))
+                # ARP-tabellen er fersk etter skannet
+                mac = _mac_tabell()
+                for f in ferdige:
+                    m = mac.get(f["ip"], "")
+                    if m:
+                        f["mac"] = m
+                        p = _produsent(m)
+                        if p:
+                            f["produsent"] = p
                 with _lock:
                     _tilstand["funn"] = sorted(
                         ferdige, key=lambda f: tuple(
@@ -366,6 +390,34 @@ def start(subnett: str, timeout: float = 0.6, traadar: int = 64,
     threading.Thread(target=_kjoer, args=(nett, timeout, traadar),
                      daemon=True, name="nett-skann").start()
     return True, f"Scanning {nett} ..."
+
+
+def _mac_tabell() -> dict:
+    """{ip: mac} frae ARP-tabellen, baade i containeren og paa verten.
+
+    Containeren ser berre det som er naabart paa sitt eige L2. Nett som
+    ligg bak verten - t.d. wifi-sida - finst berre i vertens tabell.
+    """
+    import subprocess
+    ut = {}
+    for cmd in (["ip", "neigh", "show"],
+                ["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
+                 "ip", "neigh", "show"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        except Exception:
+            continue
+        if r.returncode != 0:
+            continue
+        for ln in (r.stdout or "").splitlines():
+            f = ln.split()
+            if len(f) >= 5 and f[3] == "lladdr":
+                ut.setdefault(f[0], f[4].lower())
+    return ut
+
+
+def _produsent(mac: str) -> str:
+    return OUI.get((mac or "")[:8].lower(), "")
 
 
 def _manglar_rute(subnett: str) -> str:

@@ -83,8 +83,12 @@ export default function NettSkannCard() {
         )}
       </td>
       <td className="py-1.5 text-xs text-gray-600">
+        {f.produsent && (
+          <div className="font-medium text-[#D76428]">{f.produsent}</div>
+        )}
         {f.server && <div>{f.server}</div>}
         {f.tittel && <div className="text-gray-500">{f.tittel}</div>}
+        {f.mac && <div className="text-gray-400 font-mono">{f.mac}</div>}
       </td>
     </tr>
   ))

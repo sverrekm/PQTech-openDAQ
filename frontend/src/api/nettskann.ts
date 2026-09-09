@@ -12,6 +12,10 @@ export interface SkannFunn {
   portar: SkannPort[]
   /** 'TCP' = svarte på ein port, 'ICMP' = berre ping */
   svar?: string
+  /** Frae ARP-tabellen - finn einingar som ikkje svarar paa nokon port */
+  mac?: string
+  /** Slege opp paa OUI, t.d. "Elspec" */
+  produsent?: string
   server?: string
   tittel?: string
 }
