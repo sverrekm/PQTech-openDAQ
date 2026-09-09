@@ -186,6 +186,19 @@ export default function InstrumentFtpCard() {
             {t('Fetch automatically')}
           </label>
         </div>
+        <div className="col-span-2 flex items-start">
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" className="rounded mt-0.5"
+              checked={v('berre_nyaste') ?? true}
+              onChange={(e) => sett('berre_nyaste', e.target.checked)} />
+            <span>
+              {t('Newest report only (recommended)')}
+              <span className="block text-xs text-gray-400">
+                {t('Fetches just the latest report per type for channels — far gentler on the instrument than downloading the whole archive.')}
+              </span>
+            </span>
+          </label>
+        </div>
       </div>
 
       <div className="flex gap-2 flex-wrap mb-2">

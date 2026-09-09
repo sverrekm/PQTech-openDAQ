@@ -30,6 +30,7 @@ export interface FtpKonfig {
   maalkatalog: string
   monster: string
   kanal_prefiks: string
+  berre_nyaste: boolean
   status?: FtpSynkStatus
 }
 

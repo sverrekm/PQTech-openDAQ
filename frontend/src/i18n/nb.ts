@@ -641,4 +641,6 @@ export const nb: Record<string, string> = {
   'Channel prefix (optional)': 'Kanalprefiks (valfritt)',
   'Channels from reports (pushed to the hub)': 'Kanalar frå rapportane (pusha til hubben)',
   'last row': 'siste rad',
+  'Newest report only (recommended)': 'Berre nyaste rapport (tilrådd)',
+  'Fetches just the latest report per type for channels — far gentler on the instrument than downloading the whole archive.': 'Hentar berre nyaste rapport per type for kanalane — mykje snillare mot instrumentet enn å laste ned heile arkivet.',
 }

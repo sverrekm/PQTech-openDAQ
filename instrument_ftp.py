@@ -41,6 +41,11 @@ STANDARD = {
     # Prefiks framfor kanalnamna frå CSV-en. Fleire instrument på same node
     # ville elles fått same kanalnamn ("Frequency_Avg" osv.).
     "kanal_prefiks": "",
+    # Berre nyaste rapport per type (DL/MR ...) i staden for heile arkivet.
+    # For KANALAR er det alt vi treng, og ein skjør innebygd server toler
+    # to nedlastingar langt betre enn seksti. På = kanaldrift; av = full
+    # arkivering av alle filer.
+    "berre_nyaste": True,
     # Kor mange nedlasta filer vi hugsar, so vi ikkje hentar same fila om
     # att. Instrumentet har ikkje noko "ny sidan"-omgrep.
     "hugs_filer": 5000,
@@ -112,6 +117,7 @@ def lagre_konfig(data: dict) -> tuple:
         "maalkatalog": str(data.get("maalkatalog", k["maalkatalog"])),
         "monster": str(data.get("monster", k["monster"])),
         "kanal_prefiks": str(data.get("kanal_prefiks", k["kanal_prefiks"])),
+        "berre_nyaste": bool(data.get("berre_nyaste", k["berre_nyaste"])),
     })
     # Tomt passord frå GUI-et tyder «ikkje endra» — elles ville kvar lagring
     # av eit skjema som ikkje viser passordet, slette det.
@@ -379,6 +385,45 @@ def _passar(namn: str, monster: str) -> bool:
     return fnmatch.fnmatch(namn.lower(), monster.lower())
 
 
+def _nlst_med_retry(f, mappe: str, forsok: int = 4):
+    """Namn i ein katalog via NLST, med retry. Returnerer (namn, klient).
+
+    NLST sender berre filnamn, ikkje fulle stat-linjer som LIST. På ein
+    stor katalog er det ein mykje mindre dataoverføring, og ein skjør
+    innebygd server (VxWorks hos Elspec) reset han langt sjeldnare. Vi
+    brukar han til å FINNE rapportane; storleik/dato hentar vi berre for
+    dei få vi faktisk lastar ned.
+    """
+    mp = mappe if mappe and mappe != "/" else ""
+    for i in range(forsok):
+        try:
+            namn = f.nlst(mp) if mp else f.nlst()
+            # Nokre serverar tek med full sti, andre berre namnet.
+            return [n.rsplit("/", 1)[-1] for n in namn], f
+        except ftplib.all_errors as e:
+            if i == forsok - 1:
+                raise
+            time.sleep(1.0 + i)
+            _lukk(f)
+            try:
+                f = _opne()
+            except Exception:
+                raise e
+    return [], f
+
+
+def _storleik(f, sti: str):
+    """SIZE på ei fil — ein liten kontroll-kommando, ingen datakanal.
+
+    Trygg der ein LIST av heile katalogen reset: vi spør berre om dei få
+    filene vi vil ha.
+    """
+    try:
+        return f.size(sti)
+    except Exception:
+        return None
+
+
 def _list_med_retry(f, mappe: str, forsok: int = 3):
     """LIST med retry på reset.
 
@@ -449,6 +494,43 @@ def synk_ein_gong() -> dict:
         _synk_gaar.release()
 
 
+def _rapport_type(namn: str) -> str:
+    """"DL log 2023_… .csv" -> "DL log"."""
+    return namn.split(" 20", 1)[0].strip() or namn
+
+
+def _nyaste_fjern(f, mappe: str, monster: str) -> list:
+    """Nyaste rapport per type på instrumentet, funne via NLST.
+
+    Vi listar berre NAMN (lett, reset sjeldan), grupperer på type, og vel
+    det med seinast sluttid i namnet. Storleiken hentar vi med SIZE for
+    berre desse få — so vi slepp ei tung LIST av heile katalogen.
+    """
+    namn, f = _nlst_med_retry(f, mappe)
+    beste: dict = {}
+    for n in namn:
+        if n in (".", ".."):
+            continue
+        # Rapportfiler ("DL log …"/"MR log …") tel med jamvel utan .csv:
+        # den aktive loggen er open og har enno ikkje fått endinga. Elles
+        # eit eige mønster om brukaren har sett eit.
+        er_rapport = n.startswith("DL log") or n.startswith("MR log")
+        if not er_rapport and monster and not _passar(n, monster):
+            continue
+        if not er_rapport and not n.lower().endswith(".csv"):
+            continue
+        slutt = _rapport_slutt(n)
+        typ = _rapport_type(n)
+        if typ not in beste or slutt > beste[typ][0]:
+            beste[typ] = (slutt, n)
+    ut = []
+    for _typ, (_slutt, n) in beste.items():
+        sti = _sti(mappe, n)
+        ut.append({"sti": sti, "namn": n,
+                   "storleik": _storleik(f, sti) or 0, "dato": ""})
+    return ut
+
+
 def _synk_innmat(k: dict) -> dict:
     henta = _les_henta()
     maalkat = k["maalkatalog"]
@@ -456,7 +538,10 @@ def _synk_innmat(k: dict) -> dict:
     with _las:
         f = _opne()
         try:
-            filer = _finn_filer(f, k["rot"] or "/", k["monster"])
+            if k.get("berre_nyaste", True):
+                filer = _nyaste_fjern(f, k["rot"] or "/", k["monster"])
+            else:
+                filer = _finn_filer(f, k["rot"] or "/", k["monster"])
             for n_gjort, fil in enumerate(filer):
                 nokkel = "%s|%d" % (fil["sti"], fil["storleik"])
                 if nokkel in henta:
@@ -579,26 +664,32 @@ def _parse_rapport(lokalsti: str) -> tuple:
     return tid, ut
 
 
-# Sluttidspunktet i eit rapportnamn: "… to 2022_11_01 12_00_00.csv".
-_SLUTT = re.compile(r" to (\d{4})_(\d{2})_(\d{2}) (\d{2})_(\d{2})_(\d{2})")
+# Tidsstempel i eit rapportnamn: "2022_11_01 12_00_00" (start og/eller slutt).
+_TS = re.compile(r"(\d{4})_(\d{2})_(\d{2}) (\d{2})_(\d{2})_(\d{2})")
 
 
 def _rapport_slutt(base: str) -> float:
     """Rangeringsnøkkel for kor fersk ein rapport er, frå filnamnet.
 
     Vi kan IKKJE bruke mtime: synken lastar ned heile mappa på ein gong, so
-    alle filene får same mtime og "nyaste" blir tilfeldig. Sluttidspunktet
-    i namnet er det som faktisk seier kva periode rapporten dekkjer.
+    alle filene får same mtime og "nyaste" blir tilfeldig. Vi tek det
+    SEINASTE tidsstempelet i namnet: ein lukka rapport "A to B" rangerer på
+    slutten B, medan ein open/aktiv logg "A to" (utan sluttdato enno)
+    rangerer på starten A. Slik vinn ein logg som nettopp er starta over ein
+    eldre lukka rapport, men ein gammal foreldrelaus stubb (gammal A) taper
+    framleis mot ferske rapportar.
     """
-    m = _SLUTT.search(base)
-    if not m:
-        return -1.0
-    try:
-        import calendar
-        return float(calendar.timegm(tuple(int(x) for x in m.groups())
-                                     + (0, 0, 0)))
-    except Exception:
-        return -1.0
+    import calendar
+    seinast = -1.0
+    for m in _TS.finditer(base):
+        try:
+            t = float(calendar.timegm(tuple(int(x) for x in m.groups())
+                                      + (0, 0, 0)))
+        except Exception:
+            continue
+        if t > seinast:
+            seinast = t
+    return seinast
 
 
 def _nyaste_per_type(maalkat: str) -> list:
@@ -610,8 +701,12 @@ def _nyaste_per_type(maalkat: str) -> list:
     """
     import glob
     beste: dict = {}
-    for sti in glob.glob(os.path.join(maalkat, "**", "*.csv"),
-                         recursive=True):
+    stiar = set()
+    for m in ("*.csv", "DL log*", "MR log*"):
+        stiar.update(glob.glob(os.path.join(maalkat, "**", m), recursive=True))
+    for sti in stiar:
+        if os.path.isdir(sti):
+            continue
         base = os.path.basename(sti)
         # "DL log 2022_… .csv" -> "DL log", elles heile namnet
         type_ = base.split(" 20", 1)[0].strip() or base
