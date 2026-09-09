@@ -2402,8 +2402,12 @@ def instrument_proxy(vert, sub):
     url = f"http://{vert_del}:{havn}/{sub}"
 
     fwd = {k: v for k, v in request.headers if k.lower() not in ip.HOPP}
-    # Be om ukomprimert svar - vi skal skrive om adressene i HTML-en.
-    fwd["Accept-Encoding"] = "identity"
+    # IKKJE "identity": instrument lagrar gjerne ferdig-gzippa filer
+    # (.js_gz, .ejs_gz hos Elspec) og svarar 403 naar dei blir bedne om
+    # ukomprimert. Vi ber om gzip/deflate, som requests pakkar ut sjoelv,
+    # og droppar brotli som han ikkje alltid kan lese. Content-Encoding
+    # ligg i HOPP, so vi sender kroppen vidare upakka.
+    fwd["Accept-Encoding"] = "gzip, deflate"
 
     try:
         opp = _http_proxy.request(
