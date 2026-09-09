@@ -518,12 +518,34 @@ def _parse_rapport(lokalsti: str) -> tuple:
     return tid, ut
 
 
+# Sluttidspunktet i eit rapportnamn: "… to 2022_11_01 12_00_00.csv".
+_SLUTT = re.compile(r" to (\d{4})_(\d{2})_(\d{2}) (\d{2})_(\d{2})_(\d{2})")
+
+
+def _rapport_slutt(base: str) -> float:
+    """Rangeringsnøkkel for kor fersk ein rapport er, frå filnamnet.
+
+    Vi kan IKKJE bruke mtime: synken lastar ned heile mappa på ein gong, so
+    alle filene får same mtime og "nyaste" blir tilfeldig. Sluttidspunktet
+    i namnet er det som faktisk seier kva periode rapporten dekkjer.
+    """
+    m = _SLUTT.search(base)
+    if not m:
+        return -1.0
+    try:
+        import calendar
+        return float(calendar.timegm(tuple(int(x) for x in m.groups())
+                                     + (0, 0, 0)))
+    except Exception:
+        return -1.0
+
+
 def _nyaste_per_type(maalkat: str) -> list:
     """Nyaste lokale fil for kvar rapport-type (DL/MR/…).
 
-    Filnamna byrjar med typen ("DL log …", "MR log …"). Vi vil ha éin
-    kanalsett per type, frå den ferskaste fila. Nyaste = høgast mtime, som
-    òg er den fila synken nettopp la ned.
+    Filnamna byrjar med typen ("DL log …", "MR log …") og har periodens
+    sluttid i seg. Vi vil ha éin kanalsett per type, frå rapporten som
+    dekkjer den seinaste perioden.
     """
     import glob
     beste: dict = {}
@@ -535,10 +557,13 @@ def _nyaste_per_type(maalkat: str) -> list:
         try:
             mtid = os.path.getmtime(sti)
         except OSError:
-            continue
-        if type_ not in beste or mtid > beste[type_][1]:
-            beste[type_] = (sti, mtid)
-    return [(t, v[0]) for t, v in beste.items()]
+            mtid = 0.0
+        # Primær nøkkel: sluttid i namnet. Fell tilbake til mtime når namnet
+        # ikkje har eit tidsstempel.
+        nokkel = (_rapport_slutt(base), mtid)
+        if type_ not in beste or nokkel > beste[type_][0]:
+            beste[type_] = (nokkel, sti)
+    return [(t, v[1]) for t, v in beste.items()]
 
 
 def oppdater_kanalar() -> dict:
