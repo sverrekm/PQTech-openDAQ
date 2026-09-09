@@ -1072,6 +1072,81 @@ def api_mqtt_konfig_oppdater():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/mqtt/oppdag/start", methods=["POST"])
+def api_mqtt_oppdag_start():
+    """Avlytt brokeren for topics ei kort stund."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import mqtt_oppdag
+        return jsonify(mqtt_oppdag.start(
+            int(data.get("varigheit", 15)),
+            str(data.get("wildcard", "#") or "#")))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/mqtt/oppdag")
+def api_mqtt_oppdag_status():
+    """Kva topics er funne so langt (interessante for straumlogging først)."""
+    try:
+        import mqtt_oppdag
+        return jsonify(mqtt_oppdag.status())
+    except Exception as e:
+        return jsonify({"tilstand": "feil", "melding": str(e), "topics": []}), 500
+
+
+@app.route("/api/mqtt/oppdag/stopp", methods=["POST"])
+def api_mqtt_oppdag_stopp():
+    try:
+        import mqtt_oppdag
+        return jsonify(mqtt_oppdag.stopp())
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/mqtt/oppdag/legg-til", methods=["POST"])
+def api_mqtt_oppdag_legg_til():
+    """Legg eit oppdaga topic (eller JSON-felt) til som ein MQTT-kanal.
+
+    Kanalen strøymer deretter som resten — over openDAQ og push — gjennom
+    den vanlege MQTT-vegen. Les-endre-skriv mot MQTT-konfigen so broker og
+    andre kanalar ikkje blir rørte.
+    """
+    if not SIRIUS_DIREKTE:
+        return jsonify({"suksess": False, "melding": "SIRIUS-driver ikkje lasta"}), 503
+    data = request.get_json(silent=True) or {}
+    topic = str(data.get("topic", "")).strip()
+    if not topic:
+        return jsonify({"suksess": False, "melding": "Missing topic"}), 400
+    try:
+        konfig = _mqtt_hent_konfig()
+        kanalar = list(konfig.get("kanalar", []))
+        json_sti = str(data.get("json_sti", "") or "")
+        # Finst kanalen alt (same topic+sti)? Byt ut i staden for å duplisere.
+        ny = {
+            "topic": topic,
+            "namn": str(data.get("namn", "")).strip() or topic,
+            "enhet": str(data.get("eining", data.get("enhet", "")) or ""),
+            "json_sti": json_sti,
+            "range_min": float(data.get("range_min", -1000.0)),
+            "range_max": float(data.get("range_max", 1000.0)),
+        }
+        for i, k in enumerate(kanalar):
+            if str(k.get("topic")) == topic and str(k.get("json_sti", "")) == json_sti:
+                kanalar[i] = ny
+                break
+        else:
+            kanalar.append(ny)
+        konfig["kanalar"] = kanalar
+        gyldig, feil = valider_mqtt_konfig(konfig)
+        if feil:
+            return jsonify({"suksess": False, "melding": feil}), 400
+        ok, melding = _mqtt_oppdater(gyldig)
+        return jsonify({"suksess": ok, "melding": melding, "namn": ny["namn"]})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/mqtt/status")
 def api_mqtt_status():
     """Hent MQTT-klient tilkoblingsstatus og siste verdiar."""

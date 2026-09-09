@@ -2,6 +2,7 @@ import DeviceNameCard from '../components/DeviceNameCard'
 import DeviceSettingsCard from '../components/DeviceSettingsCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
+import MqttOppdagCard from '../components/MqttOppdagCard'
 import WifiCard from '../components/WifiCard'
 import InstrumentNettverkCard from '../components/InstrumentNettverkCard'
 import NettSkannCard from '../components/NettSkannCard'
@@ -34,6 +35,7 @@ export default function SettingsPage() {
 
       <SettingsSection id="deling" tittel={t('Sharing & integrations')}>
         <MqttSettingsCard />
+        <MqttOppdagCard />
         <InfluxShareCard />
         {/* EMC: på SIRIUS-direkte node frå lokal ADC; på hubben frå dei
             bridga bølgjeformene (hub_emc). Synleg i begge modus. */}
