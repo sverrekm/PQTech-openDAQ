@@ -429,11 +429,27 @@ def _finn_filer(f, mappe: str, monster: str, djup: int = 0,
     return ut
 
 
+# Berre éin synk om gongen. Loekka og eit manuelt "hent no" kan elles gaa
+# oppaa kvarandre: begge les henta-lista, begge lastar ned alt, og
+# status-teljarane blir sjoelvmotseiande.
+_synk_gaar = threading.Lock()
+
+
 def synk_ein_gong() -> dict:
     """Sjå etter nye filer og hent dei. Returnerer kva som vart henta."""
     k = les_konfig()
     if not k["vert"]:
         return {"suksess": False, "melding": "No FTP host configured"}
+    if not _synk_gaar.acquire(blocking=False):
+        return {"suksess": False, "melding": "A sync is already running",
+                "nye": [], "feila": [], "sett": 0}
+    try:
+        return _synk_innmat(k)
+    finally:
+        _synk_gaar.release()
+
+
+def _synk_innmat(k: dict) -> dict:
     henta = _les_henta()
     maalkat = k["maalkatalog"]
     nye, feila, filer = [], [], []
