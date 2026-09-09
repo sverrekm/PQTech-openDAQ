@@ -327,7 +327,10 @@ def last_ned_og_oppdater():
             kilde = os.path.join(repo_rot, filnavn)
             if not os.path.isfile(kilde):
                 continue
-            if filnavn.endswith(".py") or filnavn == "docker-entrypoint.sh":
+            # docker-compose.yml maa vere med: vert_compose legg han ut
+            # paa verten naar containeren skal byggjast om frae GUI-et.
+            if (filnavn.endswith(".py") or filnavn == "docker-entrypoint.sh"
+                    or filnavn == "docker-compose.yml"):
                 maal_fil = os.path.join(APP_DIR, filnavn)
                 shutil.copy2(kilde, maal_fil)
                 # Skript-filer i git-tarballen kan mangle exec-bit (644). Utan +x

@@ -105,16 +105,16 @@ def valider(nett: dict) -> str:
         ekte = ipaddress.ip_network(nett["ekte"], strict=False)
         alias = ipaddress.ip_network(nett["alias"], strict=False)
     except Exception as e:
-        return f"Ugyldig subnett: {e}"
+        return f"Invalid subnet: {e}"
     if ekte.prefixlen != alias.prefixlen:
-        return (f"Alias {alias} og instrumentnett {ekte} må ha same "
-                f"prefikslengd — NETMAP mapper 1:1.")
+        return (f"Alias {alias} and instrument subnet {ekte} must have the "
+                f"same prefix length - NETMAP maps 1:1.")
     if alias.overlaps(ekte):
-        return (f"Alias {alias} overlappar instrumentnettet {ekte}. "
-                f"Vel eit alias som ikkje finst nokon annan stad, t.d. "
+        return (f"Alias {alias} overlaps the instrument subnet {ekte}. "
+                f"Pick an alias range that exists nowhere else, e.g. "
                 f"10.99.0.0/24.")
     if not nett.get("grensesnitt"):
-        return "Manglar grensesnitt (t.d. wlan0)"
+        return "Interface is required (e.g. wlan0)"
     return ""
 
 
@@ -135,8 +135,8 @@ def lagre_konfig(konfig: dict) -> tuple:
         with open(KONFIG_FIL, "w", encoding="utf-8") as f:
             json.dump(ut, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        return False, f"Kunne ikkje lagre: {e}"
-    return True, f"Lagra {len(nett)} instrument-NAT"
+        return False, f"Could not save: {e}"
+    return True, f"Saved {len(nett)} instrument NAT mapping(s)"
 
 
 # ---------------------------------------------------------------
@@ -162,7 +162,7 @@ def _isoler_profil(dev: str, tabell: int) -> str:
     """
     profil = _aktiv_profil(dev)
     if not profil:
-        return f"Fann ingen aktiv profil på {dev}"
+        return f"No active connection profile on {dev}"
     r = _host(["nmcli", "connection", "modify", profil,
                "ipv4.route-table", str(tabell),
                "ipv6.route-table", str(tabell),
@@ -214,7 +214,7 @@ def sett_opp(nett: dict) -> dict:
     m = _isoler_profil(dev, tabell)
     if m:
         return {"namn": nett.get("namn", ""), "ok": False,
-                "melding": f"Kunne ikkje isolere {dev}: {m}"}
+                "melding": f"Could not isolate {dev}: {m}"}
     steg.append(f"{dev}-ruter i bord {tabell}")
 
     # 2. Sørg for at instrumentnettet finst i bordet (NM legg det normalt inn
@@ -227,7 +227,7 @@ def sett_opp(nett: dict) -> dict:
                    "lookup", str(tabell)])
         if not _ok(r):
             return {"namn": nett.get("namn", ""), "ok": False,
-                    "melding": f"ip rule feila: "
+                    "melding": f"ip rule failed: "
                                f"{(r.stderr or r.stdout or '').strip()}"}
     steg.append(f"fwmark {merke} → bord {tabell}")
 
@@ -237,14 +237,14 @@ def sett_opp(nett: dict) -> dict:
                   ["-d", alias, "-j", "MARK", "--set-mark", str(merke)])
     if m:
         return {"namn": nett.get("namn", ""), "ok": False,
-                "melding": f"mangle-regel feila: {m}"}
+                "melding": f"mangle rule failed: {m}"}
 
     # 5. NETMAP: heile aliasnettet 1:1 over på det ekte
     m = _iptables("nat", "PREROUTING",
                   ["-d", alias, "-j", "NETMAP", "--to", ekte])
     if m:
         return {"namn": nett.get("namn", ""), "ok": False,
-                "melding": f"NETMAP feila: {m}"}
+                "melding": f"NETMAP failed: {m}"}
     steg.append(f"{alias} ⇄ {ekte}")
 
     # 6. MASQUERADE ut instrument-grensesnittet, så instrumentet svarar til
@@ -252,7 +252,7 @@ def sett_opp(nett: dict) -> dict:
     m = _iptables("nat", "POSTROUTING", ["-o", dev, "-j", "MASQUERADE"])
     if m:
         return {"namn": nett.get("namn", ""), "ok": False,
-                "melding": f"MASQUERADE feila: {m}"}
+                "melding": f"MASQUERADE failed: {m}"}
 
     # 7. Laus reverse-path-sjekk: med to like subnett i ulike bord vil streng
     #    rp_filter kaste svara.
@@ -275,7 +275,7 @@ def riv_ned(nett: dict) -> dict:
     _host(["iptables", "-t", "mangle", "-D", "PREROUTING",
            "-d", alias, "-j", "MARK", "--set-mark", str(merke)])
     _host(["ip", "rule", "del", "fwmark", str(merke), "lookup", str(tabell)])
-    return {"namn": nett.get("namn", ""), "ok": True, "melding": "Fjerna"}
+    return {"namn": nett.get("namn", ""), "ok": True, "melding": "Removed"}
 
 
 def bruk_frå_konfig() -> list:
@@ -326,7 +326,7 @@ def test_naa(alias_ip: str, port: int = 80, timeout: float = 4.0) -> dict:
     s.settimeout(timeout)
     try:
         s.connect((alias_ip, int(port)))
-        return {"ok": True, "melding": f"{alias_ip}:{port} svarar"}
+        return {"ok": True, "melding": f"{alias_ip}:{port} responds"}
     except Exception as e:
         return {"ok": False,
                 "melding": f"{alias_ip}:{port} — {type(e).__name__}: {e}"}

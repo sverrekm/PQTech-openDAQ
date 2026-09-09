@@ -2070,6 +2070,50 @@ def api_instrumentnett_test():
         return jsonify({"ok": False, "melding": str(e)}), 500
 
 
+# --- Vert: bygg om containeren, og list grensesnitt -------------------
+
+@app.route("/api/vert/grensesnitt")
+def api_vert_grensesnitt():
+    """Nettverksgrensesnitta på verten — til nedtrekksmenyar i GUI-et.
+
+    Namna varierer mellom nodane (eth0 på nokre, end0 på andre), og å skrive
+    dei for hand er ei unødvendig feilkjelde.
+    """
+    try:
+        import vert_compose
+        return jsonify({"grensesnitt": vert_compose.grensesnitt()})
+    except Exception as e:
+        return jsonify({"grensesnitt": [], "feil": str(e)}), 500
+
+
+@app.route("/api/vert/bygg-om")
+def api_vert_bygg_om_status():
+    """Kan containeren byggjast om herifrå, og gjekk det bra sist?"""
+    try:
+        import vert_compose
+        return jsonify(vert_compose.status())
+    except Exception as e:
+        return jsonify({"feil": str(e), "docker": False, "trygt": False}), 500
+
+
+@app.route("/api/vert/bygg-om", methods=["POST"])
+def api_vert_bygg_om():
+    """Bygg om containeren på verten (docker compose up -d).
+
+    Krevst for endringar som ikkje følgjer med fleet-oppdateringa, som nye
+    docker-nettverk. Sjekkar .env først — feil NET_PARENT gjer at containeren
+    aldri kjem opp igjen.
+    """
+    if "brukar" not in session and not _floate_auth_ok():
+        return jsonify({"suksess": False, "melding": "Ikkje autorisert"}), 401
+    try:
+        import vert_compose
+        ok, melding = vert_compose.bygg_om()
+        return jsonify({"suksess": ok, "melding": melding}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 # --- Instrument-NAT: noden som ruter mellom LAN og instrumentnett -----
 
 @app.route("/api/instrument-nat")

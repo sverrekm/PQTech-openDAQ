@@ -130,8 +130,8 @@ def status() -> dict:
         "vert_nett": _nett_i_bruk(),
     }
     if not _har_nmcli():
-        ut["feil"] = ("NetworkManager (nmcli) ikkje funne på verten. "
-                      "Krev Raspberry Pi OS Bookworm eller nyare.")
+        ut["feil"] = ("NetworkManager (nmcli) not found on the host. "
+                      "Requires Raspberry Pi OS Bookworm or newer.")
         return ut
     ut["nmcli_tilgjengeleg"] = True
 
@@ -193,16 +193,16 @@ def skann() -> dict:
     """Skann etter tilgjengelege nett. Returnerer {suksess, nett: [...]}."""
     if not _har_nmcli():
         return {"suksess": False,
-                "melding": "NetworkManager (nmcli) ikkje tilgjengeleg på verten."}
+                "melding": "NetworkManager (nmcli) is not available on the host."}
     _radio_på()
     try:
         r = _nmcli(["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY",
                     "device", "wifi", "list", "--rescan", "yes"], timeout=30)
     except Exception as e:
-        return {"suksess": False, "melding": f"Skann feila: {e}"}
+        return {"suksess": False, "melding": f"Scan failed: {e}"}
     if r.returncode != 0:
         return {"suksess": False,
-                "melding": (r.stderr or r.stdout or "Skann feila").strip()}
+                "melding": (r.stderr or r.stdout or "Scan failed").strip()}
 
     beste = {}   # ssid -> nett (behald sterkaste signal)
     for ln in r.stdout.splitlines():
@@ -230,14 +230,14 @@ def skann() -> dict:
 #  Kople til / gløym
 # ---------------------------------------------------------------
 _NM_TILSTAND = {
-    "20": "grensesnittet er utilgjengeleg",
-    "30": "fråkopla",
-    "40": "leitar etter nettet",
-    "50": "held på å autentisere",
-    "60": "ventar på autentisering (passord?)",
-    "70": ("assosiert med nettet, men fekk ikkje IP-adresse — DHCP-serveren "
-           "svarar ikkje. Prøv statisk IP."),
-    "100": "tilkopla",
+    "20": "the interface is unavailable",
+    "30": "disconnected",
+    "40": "looking for the network",
+    "50": "authenticating",
+    "60": "waiting for authentication (wrong password?)",
+    "70": ("associated with the network, but got no IP address - the DHCP "
+           "server is not answering. Try a static IP."),
+    "100": "connected",
 }
 
 
@@ -315,10 +315,10 @@ def _kollisjon(cidr: str, unnta_dev: str = "") -> str:
         return ""
     treff = i_bruk.get(nett)
     if treff:
-        return (f"Subnettet {nett} er alt i bruk på {treff}. To grensesnitt "
-                f"på same subnett gir tvitydig ruting, og kabelvegen inn til "
-                f"noden kan ryke. Endre subnettet på instrument-ruteren "
-                f"(t.d. til 192.168.50.0/24) før du koplar til.")
+        return (f"Subnet {nett} is already in use on {treff}. Two interfaces "
+                f"on the same subnet make routing ambiguous and can cut the "
+                f"wired path to the node. Use NAT (router mode) instead, or "
+                f"renumber the instrument.")
     return ""
 
 
@@ -415,21 +415,21 @@ def koble_til(ssid: str, passord: str = "", skjult: bool = False,
     """
     ssid = (ssid or "").strip()
     if not ssid:
-        return False, "Manglar SSID"
+        return False, "SSID is required"
     if not _har_nmcli():
-        return False, "NetworkManager (nmcli) ikkje tilgjengeleg på verten."
+        return False, "NetworkManager (nmcli) is not available on the host."
 
     with _op_lock:
         if _siste_op.get("tilstand") == "koeyrer":
-            return False, (f"Ei tilkopling til «{_siste_op.get('ssid')}» "
-                           f"pågår alt — vent til ho er ferdig.")
+            return False, (f"A connection to '{_siste_op.get('ssid')}' is "
+                           f"already in progress - wait for it to finish.")
 
-    _sett_op("koeyrer", ssid, "Koplar til …")
+    _sett_op("koeyrer", ssid, "Connecting ...")
     threading.Thread(
         target=_koble_synk,
         args=(ssid, passord, skjult, berre_lokalt, statisk_ip, gateway),
         daemon=True, name="wifi-koble").start()
-    return True, f"Koplar til «{ssid}» … følg med på statusen."
+    return True, f"Connecting to '{ssid}' ... watch the status."
 
 
 def _koble_synk(ssid: str, passord: str, skjult: bool, berre_lokalt: bool,
@@ -470,18 +470,18 @@ def _koble_statisk(ssid: str, passord: str, skjult: bool, dev: str,
         feil = (r.stderr or r.stdout or "").strip()
         if passord:
             feil = feil.replace(passord, "***")
-        return False, f"Kunne ikkje lage profilen: {feil}"
+        return False, f"Could not create the profile: {feil}"
 
     try:
         r = _nmcli(["connection", "up", ssid, "ifname", dev], timeout=60)
     except Exception as e:
         _rydd_opp(dev)
-        return False, f"Aktivering feila: {e}. {_forklar_tilstand(dev)}"
+        return False, f"Activation failed: {e}. {_forklar_tilstand(dev)}"
     if r.returncode != 0:
         feil = (r.stderr or r.stdout or "").strip()
         _rydd_opp(dev)
-        return False, f"{feil or 'Aktivering feila'}. {_forklar_tilstand(dev)}"
-    return True, f"Kopla til «{ssid}» med fast IP {statisk_ip}"
+        return False, f"{feil or 'Activation failed'}. {_forklar_tilstand(dev)}"
+    return True, f"Connected to '{ssid}' with static IP {statisk_ip}"
 
 
 def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
@@ -507,8 +507,8 @@ def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
         if ok and berre_lokalt:
             feil = _sett_berre_lokalt(ssid, dev)
             if feil:
-                return True, f"{melding}, men låsinga til instrumentnett feila: {feil}"
-            return True, f"{melding} (ingen default-rute eller DNS herifrå)"
+                return True, f"{melding}, but locking it to instrument-only failed: {feil}"
+            return True, f"{melding} (no default route or DNS from it)"
         return ok, melding
 
     cmd = ["device", "wifi", "connect", ssid]
@@ -526,31 +526,31 @@ def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
     except Exception:
         forklaring = _forklar_tilstand(dev)
         _rydd_opp(dev)
-        return False, (f"Tilkoplinga vart ikkje ferdig. {forklaring}"
-                       if forklaring else "Tilkoplinga vart ikkje ferdig.")
+        return False, (f"The connection did not complete. {forklaring}"
+                       if forklaring else "The connection did not complete.")
     if r.returncode == 0:
         log.info(f"WiFi kopla til SSID={ssid!r} på {dev} "
                  f"(berre_lokalt={berre_lokalt})")
         if berre_lokalt:
             feil = _sett_berre_lokalt(ssid, dev)
             if feil:
-                return True, (f"Kopla til «{ssid}», men kunne ikkje låse han "
-                              f"til instrumentnett: {feil}")
-            return True, (f"Kopla til «{ssid}» som instrumentnett "
-                          f"(ingen default-rute eller DNS herifrå)")
+                return True, (f"Connected to '{ssid}', but could not lock it to "
+                              f"instrument-only: {feil}")
+            return True, (f"Connected to '{ssid}' as an instrument network "
+                          f"(no default route or DNS from it)")
         adr = status().get("ip") or ""
         if adr:
             kol = _kollisjon(f"{adr}/24", unnta_dev=dev)
             if kol:
-                return True, f"Kopla til «{ssid}» ({adr}) — MEN: {kol}"
-        return True, f"Kopla til «{ssid}»"
+                return True, f"Connected to '{ssid}' ({adr}) - BUT: {kol}"
+        return True, f"Connected to '{ssid}'"
     feil = (r.stderr or r.stdout or "").strip()
     # Ikkje lek passord om nmcli skulle ekko kommandoen
     if passord:
         feil = feil.replace(passord, "***")
     forklaring = _forklar_tilstand(dev)
     _rydd_opp(dev)
-    return False, " ".join(x for x in (feil or "Tilkopling feila", forklaring) if x)
+    return False, " ".join(x for x in (feil or "Connection failed", forklaring) if x)
 
 
 def gløym(ssid: str) -> tuple:
@@ -567,5 +567,5 @@ def gløym(ssid: str) -> tuple:
     except Exception as e:
         return False, str(e)
     if r.returncode == 0:
-        return True, f"Gløymde «{ssid}»"
-    return False, (r.stderr or r.stdout or "Kunne ikkje gløyme nettet").strip()
+        return True, f"Forgot '{ssid}'"
+    return False, (r.stderr or r.stdout or "Could not forget the network").strip()

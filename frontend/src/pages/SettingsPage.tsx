@@ -3,8 +3,7 @@ import DeviceSettingsCard from '../components/DeviceSettingsCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
 import WifiCard from '../components/WifiCard'
-import InstrumentNatCard from '../components/InstrumentNatCard'
-import InstrumentNettCard from '../components/InstrumentNettCard'
+import InstrumentNettverkCard from '../components/InstrumentNettverkCard'
 import NettSkannCard from '../components/NettSkannCard'
 import TailscaleCard from '../components/TailscaleCard'
 import HubNodeConfigCard from '../components/HubNodeConfigCard'
@@ -48,8 +47,7 @@ export default function SettingsPage() {
 
       <SettingsSection id="nettverk" tittel={t('Network & nodes')}>
         <WifiCard />
-        <InstrumentNatCard />
-        <InstrumentNettCard />
+        <InstrumentNettverkCard />
         <NettSkannCard />
         <TailscaleCard />
         <HubNodeConfigCard />

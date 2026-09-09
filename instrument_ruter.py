@@ -71,7 +71,7 @@ def lagre_konfig(konfig: dict) -> tuple:
         try:
             rett = str(ipaddress.ip_network(subnett, strict=False))
         except Exception as e:
-            return False, f"Ugyldig subnett «{subnett}»: {e}"
+            return False, f"Invalid subnet '{subnett}': {e}"
         kol = kolliderer(rett)
         if kol:
             return False, kol
@@ -83,8 +83,8 @@ def lagre_konfig(konfig: dict) -> tuple:
         with open(KONFIG_FIL, "w", encoding="utf-8") as f:
             json.dump(ut, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        return False, f"Kunne ikkje lagre: {e}"
-    return True, f"Lagra {len(nett)} instrumentnett"
+        return False, f"Could not save: {e}"
+    return True, f"Saved {len(nett)} instrument network(s)"
 
 
 # ---------------------------------------------------------------
@@ -198,7 +198,7 @@ def kolliderer(subnett: str) -> str:
     try:
         maal = ipaddress.ip_network(subnett, strict=False)
     except Exception as e:
-        return f"Ugyldig subnett: {e}"
+        return f"Invalid subnet: {e}"
     try:
         r = _kjoer(["ip", "-o", "-f", "inet", "addr", "show"])
         if r.returncode != 0:
@@ -214,9 +214,9 @@ def kolliderer(subnett: str) -> str:
         except Exception:
             continue
         if maal.overlaps(eige) and f[1] == macvlan_dev():
-            return (f"{maal} overlappar med nettet containeren alt står på "
-                    f"({eige} på {f[1]}). Instrumentet må flyttast til eit "
-                    f"anna subnett — elles kan trafikken ikkje rutast.")
+            return (f"{maal} overlaps the network the container is already on "
+                    f"({eige} on {f[1]}). Use NAT (router mode) instead - "
+                    f"the traffic cannot be routed as it stands.")
     return ""
 
 
@@ -252,14 +252,14 @@ def bruk_ruter(nett: list = None) -> list:
         nett = konfig["nett"]
     if not konfig["aktivert"]:
         return [{"subnett": n["subnett"], "ok": False,
-                 "melding": "Instrument-ruting er slått av"} for n in nett]
+                 "melding": "Instrument routing is turned off"} for n in nett]
 
     bru = bru_grensesnitt()
     if not bru:
         return [{"subnett": n["subnett"], "ok": False,
-                 "melding": ("Containeren har ikkje noko bridge-nett. Legg til "
-                             "instrumentnett-nettverket i docker-compose.yml og "
-                             "køyr «docker compose up -d» på verten.")}
+                 "melding": ("The container has no bridge network yet. Rebuild it "
+                             "to add one - use the button above, or run "
+                             "'docker compose up -d' on the host.")}
                 for n in nett]
 
     ut = []
@@ -329,9 +329,8 @@ def status() -> dict:
         "bru_tilgjengeleg": bool(bru),
         "aktive_ruter": gjeldande_ruter(),
         "melding": ("" if bru else
-                    "Containeren manglar bridge-nettet. Krev éin gong "
-                    "«docker compose up -d» på verten etter at "
-                    "instrumentnett-nettverket er lagt inn i compose."),
+                    "The container has no bridge network yet. Rebuild it "
+                    "once to add one."),
     }
 
 
@@ -340,12 +339,12 @@ def test_naa(host: str, port: int = 80, timeout: float = 4.0) -> dict:
     import socket
     host = (host or "").strip()
     if not host:
-        return {"ok": False, "melding": "Manglar adresse"}
+        return {"ok": False, "melding": "Address is required"}
     s = socket.socket()
     s.settimeout(timeout)
     try:
         s.connect((host, int(port)))
-        return {"ok": True, "melding": f"{host}:{port} svarar"}
+        return {"ok": True, "melding": f"{host}:{port} responds"}
     except Exception as e:
         return {"ok": False,
                 "melding": f"{host}:{port} — {type(e).__name__}: {e}"}

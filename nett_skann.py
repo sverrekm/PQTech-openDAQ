@@ -235,7 +235,7 @@ def _kjoer(nett, timeout: float, traadar: int) -> None:
                     break
 
             if not _stopp.is_set():
-                _sett(melding=f"Fann {len(oppdaga)} vertar — les portar")
+                _sett(melding=f"Found {len(oppdaga)} hosts - reading ports")
                 ferdige = list(pool.map(lambda f: _detaljer(f, timeout), oppdaga))
                 with _lock:
                     _tilstand["funn"] = sorted(
@@ -248,12 +248,12 @@ def _kjoer(nett, timeout: float, traadar: int) -> None:
 
     brukt = round(time.time() - start, 1)
     if _stopp.is_set():
-        _sett(tilstand="stoppa", melding="Skannet vart stoppa", brukt_s=brukt)
+        _sett(tilstand="stoppa", melding="Scan stopped", brukt_s=brukt)
     else:
         n = len(status()["funn"])
         _lagre_resultat(str(nett), status()["funn"])
         _sett(tilstand="ferdig", brukt_s=brukt,
-              melding=f"{n} {'vert' if n == 1 else 'vertar'} funne på "
+              melding=f"{n} {'device' if n == 1 else 'devices'} found in "
                       f"{brukt:.0f} s")
 
 
@@ -315,20 +315,20 @@ def start(subnett: str, timeout: float = 0.6, traadar: int = 64) -> tuple:
     try:
         nett = ipaddress.ip_network(str(subnett).strip(), strict=False)
     except Exception as e:
-        return False, f"Ugyldig subnett: {e}"
+        return False, f"Invalid subnet: {e}"
     if nett.num_addresses > MAKS_VERTAR:
-        return False, (f"{nett} har {nett.num_addresses} adresser. Grensa er "
-                       f"{MAKS_VERTAR} — skann eit mindre område.")
+        return False, (f"{nett} has {nett.num_addresses} addresses. The limit "
+                       f"is {MAKS_VERTAR} - scan a smaller range.")
     with _lock:
         if _tilstand["tilstand"] == "koeyrer":
-            return False, f"Eit skann av {_tilstand['subnett']} pågår alt."
+            return False, f"A scan of {_tilstand['subnett']} is already running."
     _stopp.clear()
     _sett(subnett=str(nett))
     threading.Thread(target=_kjoer, args=(nett, timeout, traadar),
                      daemon=True, name="nett-skann").start()
-    return True, f"Skannar {nett} …"
+    return True, f"Scanning {nett} ..."
 
 
 def stopp() -> tuple:
     _stopp.set()
-    return True, "Stoppar skannet"
+    return True, "Stopping the scan"
