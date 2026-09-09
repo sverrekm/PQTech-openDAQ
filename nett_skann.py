@@ -73,6 +73,14 @@ MAKS_VERTAR = 1024          # /22. Større skann er nesten alltid ein tastefeil
 # tomt ut. Justerbar per skann.
 STANDARD_TIMEOUT = 1.2
 
+# Parallellitet. 64 druknar nabotabellen paa eit macvlan-grensesnitt:
+# eit /24 er 254 ARP-oppslag der dei fleste aldri blir svara paa, og da
+# blir dei gyldige oppfoeringane kasta ut. Da fann vi NULL vertar paa eit
+# nett med tjue. Lavare tal er tregare, men finn faktisk noko.
+STANDARD_TRAADAR = 16
+BOLK = 32                    # adresser per bolk i oppdagingsfasen
+BOLK_PUST = 0.3              # sekund mellom bolkar
+
 _lock = threading.Lock()
 _stopp = threading.Event()
 _tilstand = {
@@ -266,18 +274,25 @@ def _kjoer(nett, timeout: float, traadar: int) -> None:
     try:
         with ThreadPoolExecutor(max_workers=traadar) as pool:
             oppdaga = []
-            for res in pool.map(lambda h: _skann_vert(str(h), timeout), vertar):
-                with _lock:
-                    _tilstand["ferdig"] += 1
-                if res:
-                    oppdaga.append(res)
-                    # Vis treff etter kvart, so brukaren ser framdrift
-                    with _lock:
-                        _tilstand["funn"] = sorted(
-                            oppdaga + [], key=lambda f: tuple(
-                                int(x) for x in f["ip"].split(".")))
+            # Bolkvis: heile lista paa ein gong druknar nabotabellen.
+            for i in range(0, len(vertar), BOLK):
                 if _stopp.is_set():
                     break
+                bolk = vertar[i:i + BOLK]
+                for res in pool.map(lambda h: _skann_vert(str(h), timeout),
+                                    bolk):
+                    with _lock:
+                        _tilstand["ferdig"] += 1
+                    if res:
+                        oppdaga.append(res)
+                        # Vis treff etter kvart, so brukaren ser framdrift
+                        with _lock:
+                            _tilstand["funn"] = sorted(
+                                oppdaga + [], key=lambda f: tuple(
+                                    int(x) for x in f["ip"].split(".")))
+                    if _stopp.is_set():
+                        break
+                time.sleep(BOLK_PUST)
 
             if not _stopp.is_set():
                 _sett(melding=f"Found {len(oppdaga)} hosts - reading ports")
@@ -364,7 +379,8 @@ def start_auto(hent_subnett, intervall_min: float = 30.0) -> None:
     log.info(f"Autoskann av instrumentnett kvart {intervall_min:.0f} min")
 
 
-def start(subnett: str, timeout: float = STANDARD_TIMEOUT, traadar: int = 64,
+def start(subnett: str, timeout: float = STANDARD_TIMEOUT,
+          traadar: int = STANDARD_TRAADAR,
           grensesnitt: str = "") -> tuple:
     """Start eit skann i bakgrunnen. Returnerer (ok, melding).
 
