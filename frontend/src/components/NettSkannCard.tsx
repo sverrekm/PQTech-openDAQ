@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { fetchSkann, startSkann, stoppSkann, fetchSisteSkann } from '../api/nettskann'
-import type { SkannStatus, SkannFunn, SisteFunn } from '../api/nettskann'
+import { fetchSkann, startSkann, stoppSkann, fetchSisteSkann, fetchSkannMaal } from '../api/nettskann'
+import type { SkannStatus, SkannFunn, SisteFunn, SkannMaal } from '../api/nettskann'
 import { useI18n } from '../i18n'
 
 /**
@@ -13,6 +13,7 @@ import { useI18n } from '../i18n'
 export default function NettSkannCard() {
   const { t } = useI18n()
   const [subnett, setSubnett] = useState('')
+  const [dev, setDev] = useState('')
   const [feil, setFeil] = useState<string | null>(null)
 
   const fetcher = useCallback(() => fetchSkann(), [])
@@ -22,6 +23,17 @@ export default function NettSkannCard() {
 
   // Autoskannet held desse oppdaterte i bakgrunnen, so kortet viser kva som
   // staar paa instrumentnettet utan at nokon maa trykkje "skann".
+  // Kva som er verdt aa skanne, henta frae noden sjoelv - so ein slepp aa
+  // skrive subnett for hand og gjette kva alias som hoeyrer til kva.
+  const maalFetcher = useCallback(() => fetchSkannMaal(), [])
+  const { data: maal } = usePolling<{ maal: SkannMaal[] }>(maalFetcher, 30000)
+
+  const velMaal = (subn: string) => {
+    setSubnett(subn)
+    const m = (maal?.maal ?? []).find((x) => x.subnett === subn)
+    setDev(m?.grensesnitt ?? '')
+  }
+
   const sisteFetcher = useCallback(() => fetchSisteSkann(), [])
   const { data: lagra } = usePolling<{ subnett: Record<string, SisteFunn> }>(
     sisteFetcher, 20000)
@@ -31,7 +43,7 @@ export default function NettSkannCard() {
     if (!s) { setFeil(t('Enter a subnet, e.g. 192.168.50.0/24')); return }
     setFeil(null)
     try {
-      const res = await startSkann(s)
+      const res = await startSkann(s, dev || undefined)
       if (!res.suksess) setFeil(res.melding)
       refresh()
     } catch (e) {
@@ -100,8 +112,26 @@ export default function NettSkannCard() {
         <div className="p-2 mb-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{feil}</div>
       )}
 
-      <div className="flex gap-2 items-end mb-3">
-        <div className="flex-1">
+      <div className="flex gap-2 items-end mb-3 flex-wrap">
+        {(maal?.maal ?? []).length > 0 && (
+          <div className="flex-1 min-w-[11rem]">
+            <label className="block text-xs font-medium text-gray-600 mb-1">{t('Network')}</label>
+            <select
+              value={subnett}
+              onChange={(e) => velMaal(e.target.value)}
+              disabled={koeyrer}
+              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50"
+            >
+              <option value="">{t('Choose or type below')}</option>
+              {(maal?.maal ?? []).map((m) => (
+                <option key={m.subnett} value={m.subnett}>
+                  {m.namn} — {m.subnett}{m.grensesnitt ? ` (${m.grensesnitt})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex-1 min-w-[9rem]">
           <label className="block text-xs font-medium text-gray-600 mb-1">{t('Subnet')}</label>
           <input
             type="text"
@@ -111,6 +141,19 @@ export default function NettSkannCard() {
             disabled={koeyrer}
             className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50"
           />
+        </div>
+        <div className="flex-1 min-w-[9rem]">
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Interface')}</label>
+          <select
+            value={dev}
+            onChange={(e) => setDev(e.target.value)}
+            disabled={koeyrer}
+            className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50"
+          >
+            <option value="">{t('Follow routing')}</option>
+            {Array.from(new Set((maal?.maal ?? []).filter((m) => m.kan_binde).map((m) => m.grensesnitt)))
+              .map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
         {koeyrer ? (
           <button
@@ -135,7 +178,7 @@ export default function NettSkannCard() {
             <div className="h-full bg-[#D76428] transition-all" style={{ width: `${prosent}%` }} />
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {data?.subnett} — {data?.ferdig}/{data?.totalt} ({prosent}%)
+            {data?.subnett}{data?.grensesnitt ? ` (${data.grensesnitt})` : ''} — {data?.ferdig}/{data?.totalt} ({prosent}%)
             {data?.melding ? ` · ${data.melding}` : ''}
           </div>
         </div>

@@ -58,6 +58,7 @@ _stopp = threading.Event()
 _tilstand = {
     "tilstand": "",         # koeyrer | ferdig | stoppa | feil
     "subnett": "",
+    "grensesnitt": "",
     "ferdig": 0,
     "totalt": 0,
     "funn": [],
@@ -82,9 +83,31 @@ def _sett(**kv) -> None:
 # ---------------------------------------------------------------
 #  Probar
 # ---------------------------------------------------------------
+# Grensesnittet skannet skal gaa ut. Tomt = la rutinga velje.
+_bind_dev = ""
+
+
+def _bind(s) -> None:
+    """Bind ein socket til eit gjeve grensesnitt.
+
+    Naar to nettverk har same subnett - og det er heile grunnen til at
+    instrument-NAT finst - kan ikkje rutinga aleine avgjere kva nett vi
+    meiner. Da maa vi seie det eksplisitt. Krev NET_RAW, som containeren
+    har; feilar det, skannar vi via rutinga i staden for aa gi opp.
+    """
+    if not _bind_dev:
+        return
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE,
+                     _bind_dev.encode() + b"\0")
+    except Exception:
+        pass
+
+
 def _tcp(ip: str, port: int, timeout: float) -> bool:
     s = socket.socket()
     s.settimeout(timeout)
+    _bind(s)
     try:
         return s.connect_ex((ip, port)) == 0
     except Exception:
@@ -108,6 +131,7 @@ def _icmp(ip: str, timeout: float = 1.0) -> bool:
         return False
     try:
         s.settimeout(timeout)
+        _bind(s)
         ident = threading.get_ident() & 0xFFFF
         hode = struct.pack("!BBHHH", 8, 0, 0, ident, 1)
         data = b"pqtech-skann"
@@ -150,6 +174,7 @@ def _http_banner(ip: str, port: int, timeout: float = 3.0) -> dict:
     ut = {}
     s = socket.socket()
     s.settimeout(timeout)
+    _bind(s)
     try:
         s.connect((ip, port))
         s.sendall(f"GET / HTTP/1.1\r\nHost: {ip}\r\n"
@@ -310,8 +335,14 @@ def start_auto(hent_subnett, intervall_min: float = 30.0) -> None:
     log.info(f"Autoskann av instrumentnett kvart {intervall_min:.0f} min")
 
 
-def start(subnett: str, timeout: float = 0.6, traadar: int = 64) -> tuple:
-    """Start eit skann i bakgrunnen. Returnerer (ok, melding)."""
+def start(subnett: str, timeout: float = 0.6, traadar: int = 64,
+          grensesnitt: str = "") -> tuple:
+    """Start eit skann i bakgrunnen. Returnerer (ok, melding).
+
+    `grensesnitt` bind skannet til eit av containeren sine eigne
+    grensesnitt. Tomt = foelg rutinga, som er rett i dei fleste tilfelle.
+    """
+    global _bind_dev
     try:
         nett = ipaddress.ip_network(str(subnett).strip(), strict=False)
     except Exception as e:
@@ -323,10 +354,40 @@ def start(subnett: str, timeout: float = 0.6, traadar: int = 64) -> tuple:
         if _tilstand["tilstand"] == "koeyrer":
             return False, f"A scan of {_tilstand['subnett']} is already running."
     _stopp.clear()
-    _sett(subnett=str(nett))
+    _bind_dev = (grensesnitt or "").strip()
+    _sett(subnett=str(nett), grensesnitt=_bind_dev)
     threading.Thread(target=_kjoer, args=(nett, timeout, traadar),
                      daemon=True, name="nett-skann").start()
     return True, f"Scanning {nett} ..."
+
+
+def maal() -> list:
+    """Nett det gir meining aa skanne, med grensesnittet dei ligg bak.
+
+    Sett saman av containeren sine eigne grensesnitt og dei konfigurerte
+    instrumentnetta, so brukaren slepp aa skrive subnett for hand - og
+    slepp aa gjette kva alias som hoeyrer til kva instrument.
+    """
+    ut = []
+    try:
+        import instrument_ruter as ir
+        mv = ir.macvlan_dev()
+        for dev, cidr in ir.grensesnitt():
+            try:
+                nett = str(ipaddress.ip_interface(cidr).network)
+            except Exception:
+                continue
+            ut.append({
+                "namn": "Local network" if dev == mv else "Container bridge",
+                "subnett": nett, "grensesnitt": dev, "kan_binde": True})
+        for n in ir.les_konfig()["nett"] + ir.alias_nett():
+            if not any(x["subnett"] == n["subnett"] for x in ut):
+                ut.append({"namn": n.get("namn") or "Instrument network",
+                           "subnett": n["subnett"], "grensesnitt": "",
+                           "kan_binde": False})
+    except Exception:
+        pass
+    return ut
 
 
 def stopp() -> tuple:

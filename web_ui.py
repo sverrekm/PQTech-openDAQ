@@ -2183,6 +2183,16 @@ def api_nettskann_siste():
         return jsonify({"subnett": {}, "feil": str(e)}), 500
 
 
+@app.route("/api/nettskann/maal")
+def api_nettskann_maal():
+    """Nett det gir meining å skanne, med grensesnittet dei ligg bak."""
+    try:
+        import nett_skann
+        return jsonify({"maal": nett_skann.maal()})
+    except Exception as e:
+        return jsonify({"maal": [], "feil": str(e)}), 500
+
+
 @app.route("/api/nettskann/start", methods=["POST"])
 def api_nettskann_start():
     """Start skann av eit subnett. Returnerer straks — skannet tek titals
@@ -2190,7 +2200,9 @@ def api_nettskann_start():
     data = request.get_json(silent=True) or {}
     try:
         import nett_skann
-        ok, melding = nett_skann.start(str(data.get("subnett", "")))
+        ok, melding = nett_skann.start(
+            str(data.get("subnett", "")),
+            grensesnitt=str(data.get("grensesnitt", "") or ""))
         return jsonify({"suksess": ok, "melding": melding,
                         **nett_skann.status()}), 200 if ok else 400
     except Exception as e:
