@@ -2193,6 +2193,21 @@ def api_nettskann_maal():
         return jsonify({"maal": [], "feil": str(e)}), 500
 
 
+@app.route("/api/nettskann/naboar")
+def api_nettskann_naboar():
+    """ARP-tabellen per grensesnitt.
+
+    Når to nett deler subnett, er MAC-en per grensesnitt einaste måten å
+    sjå kven som eigentleg svarar kvar — t.d. om .1 på wifi er instrumentet
+    eller LAN-ruteren.
+    """
+    try:
+        import nett_skann
+        return jsonify({"naboar": nett_skann.naboar()})
+    except Exception as e:
+        return jsonify({"naboar": [], "feil": str(e)}), 500
+
+
 @app.route("/api/nettskann/start", methods=["POST"])
 def api_nettskann_start():
     """Start skann av eit subnett. Returnerer straks — skannet tek titals

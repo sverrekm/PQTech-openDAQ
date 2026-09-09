@@ -416,6 +416,38 @@ def _mac_tabell() -> dict:
     return ut
 
 
+def naboar() -> list:
+    """[{ip, mac, dev, produsent}] - ARP per GRENSESNITT.
+
+    Same IP kan finnast paa fleire grensesnitt naar to nett deler subnett.
+    Da er det MAC-en per grensesnitt som fortel kven som eigentleg svarar
+    kvar - og det er einaste maaten aa skilje eit instrument frae ein ruter
+    som begge kallar seg .1.
+    """
+    import subprocess
+    ut, sett = [], set()
+    for cmd in (["ip", "neigh", "show"],
+                ["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
+                 "ip", "neigh", "show"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        except Exception:
+            continue
+        if r.returncode != 0:
+            continue
+        for ln in (r.stdout or "").splitlines():
+            f = ln.split()
+            if len(f) >= 5 and f[1] == "dev" and f[3] == "lladdr":
+                nokkel = (f[0], f[2], f[4].lower())
+                if nokkel in sett:
+                    continue
+                sett.add(nokkel)
+                ut.append({"ip": f[0], "dev": f[2], "mac": f[4].lower(),
+                           "produsent": _produsent(f[4]),
+                           "tilstand": f[-1]})
+    return sorted(ut, key=lambda d: (d["dev"], d["ip"]))
+
+
 def _produsent(mac: str) -> str:
     return OUI.get((mac or "")[:8].lower(), "")
 
