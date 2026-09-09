@@ -666,30 +666,38 @@ def _parse_rapport(lokalsti: str) -> tuple:
 
 # Tidsstempel i eit rapportnamn: "2022_11_01 12_00_00" (start og/eller slutt).
 _TS = re.compile(r"(\d{4})_(\d{2})_(\d{2}) (\d{2})_(\d{2})_(\d{2})")
+# Sluttidspunktet spesifikt: det som kjem etter " to ".
+_SLUTT = re.compile(r" to (\d{4})_(\d{2})_(\d{2}) (\d{2})_(\d{2})_(\d{2})")
+
+
+def _ts(m) -> float:
+    import calendar
+    try:
+        return float(calendar.timegm(tuple(int(x) for x in m.groups())
+                                     + (0, 0, 0)))
+    except Exception:
+        return -1.0
 
 
 def _rapport_slutt(base: str) -> float:
     """Rangeringsnøkkel for kor fersk ein rapport er, frå filnamnet.
 
     Vi kan IKKJE bruke mtime: synken lastar ned heile mappa på ein gong, so
-    alle filene får same mtime og "nyaste" blir tilfeldig. Vi tek det
-    SEINASTE tidsstempelet i namnet: ein lukka rapport "A to B" rangerer på
-    slutten B, medan ein open/aktiv logg "A to" (utan sluttdato enno)
-    rangerer på starten A. Slik vinn ein logg som nettopp er starta over ein
-    eldre lukka rapport, men ein gammal foreldrelaus stubb (gammal A) taper
-    framleis mot ferske rapportar.
+    alle filene får same mtime og "nyaste" blir tilfeldig.
+
+    Ein rapport "A to B" rangerer på SLUTTEN B — perioden han dekkjer. Ein
+    open/aktiv logg "A to" (utan sluttdato enno) rangerer på starten A, so
+    ein logg som nettopp er starta vinn over ein eldre lukka rapport. Vi
+    tek slutten spesifikt (etter " to "), ikkje berre "seinaste tal i
+    namnet": ei korrupt fil "2023_03 to 2021_01" (slutt før start) skal
+    rangere på 2021, ikkje lurast fram av start-2023.
     """
-    import calendar
-    seinast = -1.0
-    for m in _TS.finditer(base):
-        try:
-            t = float(calendar.timegm(tuple(int(x) for x in m.groups())
-                                      + (0, 0, 0)))
-        except Exception:
-            continue
-        if t > seinast:
-            seinast = t
-    return seinast
+    m = _SLUTT.search(base)
+    if m:
+        return _ts(m)
+    # Ingen sluttdato: open logg. Bruk starten (første tidsstempel).
+    m = _TS.search(base)
+    return _ts(m) if m else -1.0
 
 
 def _nyaste_per_type(maalkat: str) -> list:
