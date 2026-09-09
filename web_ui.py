@@ -2364,6 +2364,66 @@ def api_hub_logg():
 
 # --- Modbus API ---
 
+# --- Instrument-proxy: naa instrumentet sitt web-GUI gjennom noden ----
+
+@app.route("/instrument/<vert>/", defaults={"sub": ""},
+           methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+@app.route("/instrument/<vert>/<path:sub>",
+           methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+def instrument_proxy(vert, sub):
+    """Vidareformidle til eit instrument sitt web-GUI.
+
+    Naadd gjennom hubben som
+    /node-proxy/<node>/instrument/<adresse>/ - so hub-sesjonen gjeld
+    foran, og ingen portar blir opna mot internett.
+
+    Berre private adresser: elles ville noden vore ein open proxy for alle
+    med hub-tilgang.
+    """
+    import instrument_proxy as ip
+
+    vert_del, _, havn_del = vert.partition(":")
+    try:
+        havn = int(havn_del) if havn_del else 80
+    except ValueError:
+        return jsonify({"feil": "Ugyldig port"}), 400
+    if not ip.tillat_vert(vert_del):
+        return jsonify({"feil": f"{vert_del} er ikkje ei privat adresse - "
+                                f"proxyen tek berre instrument paa lokale "
+                                f"nett."}), 403
+
+    pre = ip.prefiks(request.headers.get("X-Forwarded-Prefix", ""),
+                     vert_del, havn)
+    url = f"http://{vert_del}:{havn}/{sub}"
+
+    fwd = {k: v for k, v in request.headers if k.lower() not in ip.HOPP}
+    # Be om ukomprimert svar - vi skal skrive om adressene i HTML-en.
+    fwd["Accept-Encoding"] = "identity"
+
+    try:
+        opp = _http_proxy.request(
+            method=request.method, url=url, headers=fwd,
+            data=request.get_data(), params=request.query_string,
+            cookies=request.cookies, allow_redirects=False,
+            timeout=(4.0, 30.0))
+    except _http_proxy.exceptions.RequestException as e:
+        return jsonify({"feil": f"Naadde ikkje {vert_del}:{havn}: {e}"}), 502
+
+    kropp = opp.content
+    ct = opp.headers.get("Content-Type", "")
+    if ip.skal_skrive_om(ct):
+        kropp = ip.skriv_om_html(kropp, pre)
+
+    hodar = []
+    for k, v in opp.raw.headers.items():
+        if k.lower() in ip.HOPP:
+            continue
+        if k.lower() == "location":
+            v = ip.skriv_om_location(v, pre)
+        hodar.append((k, v))
+    return Response(kropp, status=opp.status_code, headers=hodar)
+
+
 @app.route("/api/sunspec/oppdag", methods=["POST"])
 def api_sunspec_oppdag():
     """Er dette ei SunSpec-eining, og kva modellar har han?

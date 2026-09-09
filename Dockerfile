@@ -728,6 +728,7 @@ COPY nett_skann.py .
 COPY instrument_nat.py .
 COPY vert_compose.py .
 COPY sunspec.py .
+COPY instrument_proxy.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
 # Modular lagt til etter at COPY-lista sist vart oppdatert. Utan desse

@@ -82,6 +82,20 @@ export default function NettSkannCard() {
           </span>
         )}
       </td>
+      <td className="py-1.5 pr-3">
+        {f.portar.some((p) => [80, 8080, 443, 8443].includes(p.port)) && (
+          // Relativ lenkje: sida blir servert under /node-proxy/<id>/, so
+          // browseren set prefikset sjoelv og proxyen hamnar rett.
+          <a
+            href={`instrument/${f.ip}${f.portar.some((p) => p.port === 80) ? '' : ':8080'}/`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-[#D76428] hover:underline whitespace-nowrap"
+          >
+            {t('Open')} →
+          </a>
+        )}
+      </td>
       <td className="py-1.5 text-xs text-gray-600">
         {f.produsent && (
           <div className="font-medium text-[#D76428]">{f.produsent}</div>
@@ -97,6 +111,7 @@ export default function NettSkannCard() {
     <tr className="text-left text-xs text-gray-500 border-b border-gray-200">
       <th className="py-1.5 pr-3 font-medium">{t('Address')}</th>
       <th className="py-1.5 pr-3 font-medium">{t('Open ports')}</th>
+      <th className="py-1.5 pr-3 font-medium"></th>
       <th className="py-1.5 font-medium">{t('Identification')}</th>
     </tr>
   )
