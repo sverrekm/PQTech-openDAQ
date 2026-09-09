@@ -221,31 +221,73 @@ def _compose_har(repo: str, naal: str) -> bool:
     return _ok(r) and "ja" in (r.stdout or "")
 
 
-def oppdater_compose_fil(repo: str) -> str:
-    """Kopier /app/docker-compose.yml til verten, med backup."""
-    kjelde = "/app/docker-compose.yml"
-    if not os.path.exists(kjelde):
-        return ("docker-compose.yml is not in /app - run a normal update "
-                "first.")
-    try:
-        with open(kjelde, "r", encoding="utf-8") as f:
-            innhald = f.read()
-    except Exception as e:
-        return str(e)
+SERVICE_SNUTT = "      instrumentnett: {}\n"
+
+NETT_SNUTT = """  instrumentnett:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${INSTRUMENT_BRU_SUBNETT:-172.30.0.0/24}
+
+"""
+
+
+def sikre_instrumentnett_i_compose(repo: str) -> str:
+    """Legg instrumentnett-nettverket inn i vertens compose-fil.
+
+    Vi SKRIV IKKJE OVER heile fila. Nodane har ikkje same oppsett - Edel
+    koeyrer t.d. bridge-modus fordi macvlan ikkje er mogleg over wifi - og
+    ei blind overskriving med standardfila ville teke ned den noden. Difor
+    set vi berre inn dei to blokkene som manglar, og seier frae om
+    strukturen ikkje er som venta.
+    """
+    r = _host(["sh", "-c", f"cat '{repo}/docker-compose.yml' 2>/dev/null"])
+    innhald = r.stdout or ""
+    if not innhald.strip():
+        return f"Could not read {repo}/docker-compose.yml"
+    if "instrumentnett" in innhald:
+        return ""                       # alt paa plass
+
+    linjer = innhald.splitlines(keepends=True)
+
+    # 1) Kople nettet paa tenesta: etter `    networks:` (6 innrykk under
+    #    services). Vi tek den FOERSTE, som er tenesta vaar.
+    i_tenestenett = None
+    for i, ln in enumerate(linjer):
+        if ln.rstrip("\n") == "    networks:":
+            i_tenestenett = i
+            break
+    # 2) Toppnivaa `networks:`
+    i_toppnett = None
+    for i, ln in enumerate(linjer):
+        if ln.rstrip("\n") == "networks:":
+            i_toppnett = i
+            break
+
+    if i_tenestenett is None or i_toppnett is None:
+        return ("The compose file on this node is structured differently "
+                "than expected (no service-level and top-level 'networks:' "
+                "block). Add the instrumentnett network by hand, or rebuild "
+                "on the host.")
+
+    # Set inn bakfrae so indeksane held
+    linjer.insert(i_toppnett + 1, NETT_SNUTT)
+    linjer.insert(i_tenestenett + 1, SERVICE_SNUTT)
+    nytt = "".join(linjer)
+
     stempel = time.strftime("%Y%m%d-%H%M%S")
-    r = _host(["sh", "-c",
-               f"cp -p '{repo}/docker-compose.yml' "
-               f"'{repo}/docker-compose.yml.bak-{stempel}' 2>/dev/null; true"])
-    # Skriv via stdin so vi slepp shell-siteringsproblem med YAML-innhald
+    _host(["sh", "-c",
+           f"cp -p '{repo}/docker-compose.yml' "
+           f"'{repo}/docker-compose.yml.bak-{stempel}' 2>/dev/null; true"])
     try:
-        p = subprocess.run(_HOST_NS + ["sh", "-c",
-                                       f"cat > '{repo}/docker-compose.yml'"],
-                           input=innhald, capture_output=True, text=True,
-                           timeout=30)
+        pr = subprocess.run(_HOST_NS + ["sh", "-c",
+                                        f"cat > '{repo}/docker-compose.yml'"],
+                            input=nytt, capture_output=True, text=True,
+                            timeout=30)
     except Exception as e:
         return str(e)
-    if p.returncode != 0:
-        return (p.stderr or p.stdout or "could not write compose file").strip()
+    if pr.returncode != 0:
+        return (pr.stderr or pr.stdout or "could not write compose file").strip()
     return ""
 
 
@@ -303,7 +345,7 @@ def bygg_om() -> tuple:
         if feil:
             return False, f"Could not update .env: {feil}"
 
-    feil = oppdater_compose_fil(repo)
+    feil = sikre_instrumentnett_i_compose(repo)
     if feil:
         return False, feil
 
