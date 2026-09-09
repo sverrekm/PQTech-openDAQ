@@ -1,27 +1,38 @@
 import type { ReactNode } from 'react'
 
 interface Props {
-  /** Redaksjonell serif-overskrift */
+  /** Overskrift (Barlow Condensed) */
   title: ReactNode
-  /** Liten versal etikett over tittelen (t.d. "TOUR 1 · FIELD ONBOARDING") */
+  /** Liten versal accent-etikett over tittelen */
   kicker?: ReactNode
   /** Kort forklaring under tittelen */
   sub?: ReactNode
   /** Innhald til høgre for tittelen (status, badge, knapp) */
   right?: ReactNode
+  /** Registreringsmerke i hjørna (blueprint-ramme). På som standard. */
+  corners?: boolean
   className?: string
   children: ReactNode
 }
 
 /**
- * Instrumentpanel — den flate kort-shellen i designspråket.
+ * Blueprint-panel — den kvadratiske, hårfine kort-ramma i designspråket.
  *
- * Hårfin kantlinje i staden for skugge, serif-tittel med valfri versal
- * kicker over. Fargane er dagens palett; sjå `global.css` for klassene.
+ * Gjennomsiktig botn, 1px divider-kant, og små registreringsmerke i hjørna
+ * (som eit teknisk teikningsark). Overskrift i Barlow Condensed, valfri
+ * versal accent-kicker over. Fargane er dagens palett.
  */
-export default function Panel({ title, kicker, sub, right, className = '', children }: Props) {
+export default function Panel({
+  title, kicker, sub, right, corners = true, className = '', children,
+}: Props) {
   return (
     <div className={`panel mb-4 ${className}`}>
+      {corners && (
+        <>
+          <i className="bp-corner tl" /><i className="bp-corner tr" />
+          <i className="bp-corner bl" /><i className="bp-corner br" />
+        </>
+      )}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
           {kicker && <span className="panel-kicker">{kicker}</span>}

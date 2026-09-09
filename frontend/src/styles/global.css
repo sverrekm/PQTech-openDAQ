@@ -3,133 +3,204 @@
 @tailwind utilities;
 
 /*
- * Designspråk: "instrumentpanel".
+ * Designspråk: "blueprint" — frå felt-onboarding-designet (Claude Design).
  *
- * Henta frå felt-onboarding-mockupen (Claude Design): hårfine kantlinjer i
- * staden for tunge skuggar, redaksjonelle serif-overskrifter med ein liten
- * versal "kicker" over, tette datatabellar med monospace-verdiar, og ein
- * tydeleg botn-actionrad. FARGANE er uendra — brand-oransje #D76428 og
- * dagens gråtoner.
+ * Komponentane er wireframe-objekt: KVADRATISKE (radius 0), gjennomsiktige,
+ * med HÅRFINE kantliner og små registreringsmerke i hjørna. Typografi:
+ * Barlow (brødtekst) + Barlow Condensed (overskrifter), self-hosta så
+ * felt-nodar utan internett får rett skrift.
  *
- * Serif-overskriftene brukar ein SYSTEM-stack, ikkje Google Fonts: nodane
- * står på kundenett (5G/CGNAT) utan garantert internett, so ei nett-lasta
- * skrift ville blinka eller aldri kome. Georgia/serif finst overalt.
+ * FARGANE er dine: designet sin blå accent (#5980a6) er bytt mot
+ * brand-oransje #D76428; bakgrunn/tekst er dagens palett.
  */
 
+/* --- Self-hosta skrift (latin dekkjer æ ø å) ----------------------- */
+@font-face {
+  font-family: 'Barlow'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('../assets/fonts/barlow-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('../assets/fonts/barlow-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('../assets/fonts/barlow-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow Condensed'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('../assets/fonts/barlow-condensed-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow Condensed'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url('../assets/fonts/barlow-condensed-600.woff2') format('woff2');
+}
+
 :root {
+  /* Fargar — dagens profil, accent = brand-oransje */
   --brand: #D76428;
-  --brand-dark: #b8541f;
-  --brand-soft: rgba(215, 100, 40, 0.10);
+  --color-accent: #D76428;
+  --color-accent-100: #fbeee6;
+  --color-accent-200: #f6d9c6;
+  --color-accent-600: #b8541f;
+  --color-accent-700: #954217;
+  --color-accent-800: #6b2f10;
 
-  --ink: #1a1a1a;
-  --muted: #6b7280;      /* gray-500 */
-  --faint: #9ca3af;      /* gray-400 */
-  --line: #e5e7eb;       /* gray-200 */
-  --line-strong: #d1d5db;/* gray-300 */
-  --panel: #ffffff;
-  --bg: #f5f5f5;
+  --color-bg: #f5f5f5;
+  --color-surface: #ececec;
+  --color-text: #1a1a1a;
+  --color-divider: rgba(26, 26, 26, 0.16);
+  --color-line-soft: rgba(26, 26, 26, 0.08);
 
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia,
-                Cambria, 'Times New Roman', serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono',
-               Consolas, 'Liberation Mono', monospace;
+  /* Type */
+  --font-heading: 'Barlow Condensed', system-ui, sans-serif;
+  --font-body: 'Barlow', system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* Rom + form (blueprint = kvadratisk) */
+  --radius: 0px;
+  --shadow-sm: 0 1px 2px rgba(26, 26, 26, 0.14);
 }
 
 body {
-  font-family: var(--font-sans);
-  background: var(--bg);
-  color: var(--ink);
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 15px;
+  line-height: 1.55;
   min-height: 100vh;
 }
 
+/* Overskrifter → Barlow Condensed. Berre skrift/tettleik, IKKJE storleik,
+   so eksisterande Tailwind-storleikar (text-base o.l.) står. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 @layer components {
-  /* --- Panel: den flate kort-shellen --------------------------------- */
+  /* --- Blueprint-panel: kvadratisk, hårfin kant, gjennomsiktig ------- */
   .panel {
-    @apply bg-white border border-gray-200 rounded-md p-4;
+    @apply relative border p-4 bg-transparent;
+    border-color: var(--color-divider);
+    border-radius: var(--radius);
   }
-  /* Liten versal etikett over ei overskrift: "TOUR 1 · FIELD ONBOARDING" */
+  /* Registreringsmerke i hjørna (sett inn av Panel-komponenten) */
+  .bp-corner {
+    position: absolute; width: 10px; height: 10px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  }
+  .bp-corner::before, .bp-corner::after { content: ""; position: absolute; background: currentColor; }
+  .bp-corner::before { left: 4px; top: 0; width: 1px; height: 100%; }
+  .bp-corner::after  { top: 4px; left: 0; width: 100%; height: 1px; }
+  .bp-corner.tl { top: -5px; left: -5px; }
+  .bp-corner.tr { top: -5px; right: -5px; }
+  .bp-corner.bl { bottom: -5px; left: -5px; }
+  .bp-corner.br { bottom: -5px; right: -5px; }
+
   .panel-kicker {
-    font-family: var(--font-mono);
-    @apply block text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-1;
+    @apply block text-[10px] uppercase tracking-[0.1em] mb-1;
+    color: var(--color-accent);
   }
-  /* Redaksjonell serif-overskrift: "Who is allowed to see this data?" */
   .panel-title {
-    font-family: var(--font-serif);
-    @apply text-[1.35rem] leading-tight font-semibold text-gray-900;
+    font-family: var(--font-heading);
+    @apply text-[20px] leading-tight font-semibold;
+    color: var(--color-text);
+    letter-spacing: -0.01em;
   }
   .panel-sub {
-    @apply text-xs text-gray-500 mt-1;
+    @apply text-[13px] mt-1;
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
   }
 
-  /* --- Versal mikro-etikett for felt/undergrupper -------------------- */
+  /* --- Etikettar --------------------------------------------------- */
   .ui-label {
-    @apply block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1;
+    @apply block text-[12px] mb-1;
+    color: color-mix(in srgb, var(--color-text) 70%, transparent);
   }
 
-  /* --- Skjemafelt --------------------------------------------------- */
+  /* --- Skjemafelt (kvadratisk, surface-botn, hårfin kant) ----------- */
   .ui-input,
   .ui-select {
-    @apply block w-full rounded border border-gray-300 px-2 py-1.5 text-sm
-           focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50;
+    @apply block w-full text-[14px] px-2.5 py-1.5 outline-none;
+    min-height: 36px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius);
+    caret-color: var(--color-accent);
   }
+  .ui-input:focus-visible,
+  .ui-select:focus-visible { border-color: var(--color-accent); }
+  .ui-input:disabled, .ui-select:disabled { opacity: 0.55; }
 
-  /* --- Datatabell: tett, hårfine liner, monospace-verdiar ----------- */
-  .ui-table {
-    @apply w-full text-sm border-collapse;
-  }
+  /* --- Datatabell -------------------------------------------------- */
+  .ui-table { @apply w-full text-[14px] border-collapse; }
   .ui-table thead th {
-    @apply text-left text-[11px] font-semibold uppercase tracking-wider
-           text-gray-500 border-b border-gray-200 py-1.5 pr-3;
+    @apply text-left text-[11px] uppercase tracking-[0.08em] py-1.5 pr-3;
+    color: color-mix(in srgb, var(--color-text) 60%, transparent);
+    border-bottom: 1px solid var(--color-divider);
   }
   .ui-table tbody td {
-    @apply border-b border-gray-100 py-1.5 pr-3 align-top;
+    @apply py-1.5 pr-3 align-top;
+    border-bottom: 1px solid var(--color-line-soft);
   }
-  .ui-num {
-    font-family: var(--font-mono);
-    @apply tabular-nums;
-  }
+  .ui-table tbody tr:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+  .ui-num { font-family: var(--font-mono); @apply tabular-nums; }
 
-  /* --- Knappar ------------------------------------------------------ */
+  /* --- Knappar (kvadratisk, Barlow Condensed) ---------------------- */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 text-sm px-3 py-1.5
-           rounded font-medium transition-colors disabled:opacity-50
-           disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 text-[14px] px-3 py-1.5
+           transition-colors disabled:opacity-45 disabled:cursor-not-allowed;
+    font-family: var(--font-heading); font-weight: 600; line-height: 1.2;
+    border: 1px solid var(--color-divider); border-radius: var(--radius);
+    color: var(--color-text); background: transparent;
   }
   .btn-primary {
-    @apply btn bg-[#D76428] text-white hover:bg-[#b8541f];
+    @apply btn;
+    background: var(--color-accent); color: #fff;
+    border-color: var(--color-accent);
   }
-  .btn-ghost {
-    @apply btn border border-gray-300 text-gray-700 hover:bg-gray-50;
-  }
+  .btn-primary:hover { background: var(--color-accent-600); border-color: var(--color-accent-600); }
+  .btn-ghost { @apply btn; }
+  .btn-ghost:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 
-  /* --- Option-card: stort klikkbart val (Node vs Hub, synlegheit) --- */
+  /* --- Option-card / segmentval ------------------------------------ */
   .option-card {
-    @apply w-full text-left border border-gray-300 rounded-md p-3
-           hover:border-[#D76428] transition-colors cursor-pointer;
+    @apply relative w-full text-left p-3 cursor-pointer transition-colors;
+    border: 1px solid var(--color-divider); border-radius: var(--radius);
+    background: transparent;
   }
+  .option-card:hover { border-color: var(--color-accent); }
   .option-card[data-valgt="true"] {
-    @apply border-[#D76428] ring-1 ring-[#D76428] bg-[#D76428]/[0.04];
+    border-color: var(--color-accent);
+    box-shadow: inset 0 0 0 1px var(--color-accent);
+    background: var(--color-accent-100);
   }
 
-  /* --- Meta-panel: liten boks i sidespalta ("AT THE CURSOR" ...) ----- */
-  .meta-panel {
-    @apply border border-gray-200 rounded-md p-2;
+  /* --- Tags -------------------------------------------------------- */
+  .tag {
+    @apply inline-flex items-center text-[11px] px-2 py-0.5;
+    border-radius: var(--radius);
   }
+  .tag-accent { background: var(--color-accent-100); color: var(--color-accent-800); }
+
+  /* --- Meta-panel + actionrad -------------------------------------- */
+  .meta-panel { @apply p-2; border: 1px solid var(--color-divider); border-radius: var(--radius); }
   .meta-label {
     font-family: var(--font-mono);
-    @apply block text-[10px] uppercase tracking-[0.12em] text-gray-400;
+    @apply block text-[10px] uppercase tracking-[0.1em];
+    color: color-mix(in srgb, var(--color-text) 45%, transparent);
   }
-  .meta-value {
-    @apply text-sm text-gray-800;
-  }
+  .meta-value { @apply text-[14px]; }
 
-  /* --- Actionrad i botn: hint til venstre, knappar til høgre --------- */
   .action-row {
-    @apply flex items-center justify-between gap-3 pt-3 mt-3
-           border-t border-gray-100;
+    @apply flex items-center justify-between gap-3 pt-3 mt-3;
+    border-top: 1px solid var(--color-line-soft);
   }
   .hint {
-    @apply text-xs text-gray-500;
+    @apply text-[12px];
+    color: color-mix(in srgb, var(--color-text) 55%, transparent);
   }
 }
