@@ -2392,8 +2392,13 @@ def instrument_proxy(vert, sub):
                                 f"proxyen tek berre instrument paa lokale "
                                 f"nett."}), 403
 
-    pre = ip.prefiks(request.headers.get("X-Forwarded-Prefix", ""),
-                     vert_del, havn)
+    # To prefiks, med vilje. Hubben sin node-proxy skriv sjoelv om
+    # Location-headerar og legg paa /node-proxy/<id> - so gjer vi det same,
+    # kjem det to gonger. Kroppen rører hubben derimot ikkje, so der maa vi
+    # ta heile vegen sjoelv.
+    pre_kropp = ip.prefiks(request.headers.get("X-Forwarded-Prefix", ""),
+                           vert_del, havn)
+    pre_loc = ip.prefiks("", vert_del, havn)
     url = f"http://{vert_del}:{havn}/{sub}"
 
     fwd = {k: v for k, v in request.headers if k.lower() not in ip.HOPP}
@@ -2414,14 +2419,14 @@ def instrument_proxy(vert, sub):
     # Redirect-kroppar er html, men nokre serverar sender dei utan
     # content-type. Skriv om ogsaa naar det er ei omdirigering.
     if ip.skal_skrive_om(ct) or 300 <= opp.status_code < 400:
-        kropp = ip.skriv_om_html(kropp, pre, vert_del, havn)
+        kropp = ip.skriv_om_html(kropp, pre_kropp, vert_del, havn)
 
     hodar = []
     for k, v in opp.raw.headers.items():
         if k.lower() in ip.HOPP:
             continue
         if k.lower() == "location":
-            v = ip.skriv_om_location(v, pre, vert_del, havn)
+            v = ip.skriv_om_location(v, pre_loc, vert_del, havn)
         hodar.append((k, v))
     return Response(kropp, status=opp.status_code, headers=hodar)
 
