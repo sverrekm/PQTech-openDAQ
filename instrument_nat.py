@@ -327,6 +327,13 @@ def bruk_frå_konfig() -> list:
 # ---------------------------------------------------------------
 #  Status
 # ---------------------------------------------------------------
+def _foerste_vert(subnett: str) -> str:
+    try:
+        return str(next(ipaddress.ip_network(subnett, strict=False).hosts()))
+    except Exception:
+        return ""
+
+
 def status() -> dict:
     konfig = les_konfig()
     ut = {"aktivert": konfig["aktivert"], "nett": [], "vert_ok": False}
@@ -337,16 +344,45 @@ def status() -> dict:
 
     r = _host(["iptables", "-t", "nat", "-S", "PREROUTING"])
     natreglar = r.stdout if _ok(r) else ""
+    r = _host(["iptables", "-t", "mangle", "-S", "PREROUTING"])
+    mangle = r.stdout if _ok(r) else ""
 
     for n in konfig["nett"]:
         n = normaliser(n)
-        aktiv = (f"lookup {n['tabell']}" in reglar
-                 and n["alias"] in natreglar)
+        har_regel = f"lookup {n['tabell']}" in reglar
+        har_netmap = n["alias"] in natreglar
+        # Merkinga er like naudsynt som dei to andre. Utan henne blir
+        # pakkene omsette og so rutte ut FEIL grensesnitt - dei naar LAN-et
+        # i staden for instrumentnettet, og alt ser vellukka ut.
+        har_merke = (n["alias"] in mangle
+                     and ("MARK" in mangle or "mark" in mangle))
         r2 = _host(["ip", "route", "show", "table", str(n["tabell"])])
+        bord = r2.stdout.strip().splitlines() if _ok(r2) else []
+
+        # Kjernen sitt eige svar paa kva veg pakken tek. Dette er fasiten.
+        maal = _foerste_vert(n["ekte"])
+        rute_med, rute_utan = "", ""
+        if maal:
+            rm = _host(["ip", "route", "get", maal, "mark", str(n["merke"])])
+            if _ok(rm):
+                rute_med = (rm.stdout or "").strip().splitlines()[:1]
+                rute_med = rute_med[0] if rute_med else ""
+            ru = _host(["ip", "route", "get", maal])
+            if _ok(ru):
+                rute_utan = (ru.stdout or "").strip().splitlines()[:1]
+                rute_utan = rute_utan[0] if rute_utan else ""
+
+        rett_veg = bool(rute_med) and f"dev {n['grensesnitt']}" in rute_med
         ut["nett"].append({
             **n,
-            "aktiv": aktiv,
-            "bord": (r2.stdout.strip().splitlines() if _ok(r2) else []),
+            "aktiv": har_regel and har_netmap and har_merke and rett_veg,
+            "har_ip_rule": har_regel,
+            "har_netmap": har_netmap,
+            "har_merke": har_merke,
+            "rett_veg": rett_veg,
+            "rute_med_merke": rute_med,
+            "rute_utan_merke": rute_utan,
+            "bord": bord,
         })
     return ut
 
