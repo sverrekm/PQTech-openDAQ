@@ -331,6 +331,39 @@ def _kjoer(nett, timeout: float, traadar: int) -> None:
 # maa trykkje "skann" foerst.
 _siste = {}
 
+# Lagra paa disk: resultata laag berre i minnet, so kvar restart (og kvar
+# oppdatering) tomte lista. Da forsvann bade oversikta og "Opne web-GUI"-
+# lenkjene til neste autoskann - opptil ein halvtime seinare.
+LAGER_FIL = "/data/konfig/nettskann.json"
+
+
+def _last_frå_disk() -> None:
+    import json
+    try:
+        with open(LAGER_FIL, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return
+    if not isinstance(d, dict):
+        return
+    with _lock:
+        for sub, res in d.items():
+            if isinstance(res, dict) and isinstance(res.get("funn"), list):
+                _siste[sub] = {"tid": float(res.get("tid") or 0),
+                               "funn": res["funn"]}
+
+
+def _skriv_til_disk() -> None:
+    import json, os
+    try:
+        os.makedirs(os.path.dirname(LAGER_FIL), exist_ok=True)
+        with _lock:
+            d = {k: dict(v) for k, v in _siste.items()}
+        with open(LAGER_FIL, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception:
+        pass
+
 
 def siste() -> dict:
     with _lock:
@@ -340,6 +373,7 @@ def siste() -> dict:
 def _lagre_resultat(subnett: str, funn: list) -> None:
     with _lock:
         _siste[subnett] = {"tid": time.time(), "funn": list(funn)}
+    _skriv_til_disk()
 
 
 def _auto_loop(hent_subnett, intervall_min: float) -> None:
@@ -370,6 +404,12 @@ def _auto_loop(hent_subnett, intervall_min: float) -> None:
 
 
 def start_auto(hent_subnett, intervall_min: float = 30.0) -> None:
+    """Start bakgrunns-autoskann, og hent fram det vi fann sist."""
+    _last_frå_disk()
+    return _start_auto(hent_subnett, intervall_min)
+
+
+def _start_auto(hent_subnett, intervall_min: float = 30.0) -> None:
     """Start bakgrunns-autoskann. `hent_subnett` er ein callable som gir
     lista over subnett som skal skannast (typisk alias-netta)."""
     if intervall_min <= 0:
