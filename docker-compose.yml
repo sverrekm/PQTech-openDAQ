@@ -105,10 +105,10 @@ services:
 
 networks:
   instrumentnett:
+    # Med vilje UTAN pinna subnett: Docker finn sjoelv eit ledig omraade.
+    # Ei pinning her kolliderer med andre docker-prosjekt paa verten, og da
+    # nektar Docker aa lage nettet - etter at containeren er fjerna.
     driver: bridge
-    ipam:
-      config:
-        - subnet: ${INSTRUMENT_BRU_SUBNETT:-172.30.0.0/24}
 
   daqnet:
     driver: macvlan

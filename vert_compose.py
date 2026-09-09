@@ -39,6 +39,10 @@ _HOST_NS = ["nsenter", "-t", "1", "-m", "-u", "-n", "-i"]
 
 UT_FIL = "/data/konfig/compose_ut.txt"
 
+# Namnet er fast i compose (container_name), so vakta kan sjekke
+# om han faktisk kom opp att.
+KONTEINAR = "pqtech-opendaq"
+
 
 def _host(cmd: list, timeout: float = 30.0):
     try:
@@ -234,14 +238,12 @@ SERVICE_SNUTT = "      instrumentnett: {}\n"
 
 NETT_SNUTT = """  instrumentnett:
     driver: bridge
-    ipam:
-      config:
-        - subnet: ${INSTRUMENT_BRU_SUBNETT:-172.30.0.0/24}
 
 """
 
 
-def sikre_instrumentnett_i_compose(repo: str) -> str:
+def sikre_instrumentnett_i_compose(repo: str):
+    """-> (feilmelding, backup-sti). Backupen er vegen tilbake."""
     """Legg instrumentnett-nettverket inn i vertens compose-fil.
 
     Vi SKRIV IKKJE OVER heile fila. Nodane har ikkje same oppsett - Edel
@@ -253,9 +255,9 @@ def sikre_instrumentnett_i_compose(repo: str) -> str:
     r = _host(["sh", "-c", f"cat '{repo}/docker-compose.yml' 2>/dev/null"])
     innhald = r.stdout or ""
     if not innhald.strip():
-        return f"Could not read {repo}/docker-compose.yml"
+        return f"Could not read {repo}/docker-compose.yml", ""
     if "instrumentnett" in innhald:
-        return ""                       # alt paa plass
+        return "", ""                   # alt paa plass
 
     linjer = innhald.splitlines(keepends=True)
 
@@ -277,7 +279,7 @@ def sikre_instrumentnett_i_compose(repo: str) -> str:
         return ("The compose file on this node is structured differently "
                 "than expected (no service-level and top-level 'networks:' "
                 "block). Add the instrumentnett network by hand, or rebuild "
-                "on the host.")
+                "on the host."), ""
 
     # Set inn bakfrae so indeksane held
     linjer.insert(i_toppnett + 1, NETT_SNUTT)
@@ -285,19 +287,20 @@ def sikre_instrumentnett_i_compose(repo: str) -> str:
     nytt = "".join(linjer)
 
     stempel = time.strftime("%Y%m%d-%H%M%S")
-    _host(["sh", "-c",
-           f"cp -p '{repo}/docker-compose.yml' "
-           f"'{repo}/docker-compose.yml.bak-{stempel}' 2>/dev/null; true"])
+    backup = f"{repo}/docker-compose.yml.bak-{stempel}"
+    _host(["sh", "-c", f"cp -p '{repo}/docker-compose.yml' '{backup}' "
+                       f"2>/dev/null; true"])
     try:
         pr = subprocess.run(_HOST_NS + ["sh", "-c",
                                         f"cat > '{repo}/docker-compose.yml'"],
                             input=nytt, capture_output=True, text=True,
                             timeout=30)
     except Exception as e:
-        return str(e)
+        return str(e), ""
     if pr.returncode != 0:
-        return (pr.stderr or pr.stdout or "could not write compose file").strip()
-    return ""
+        return (pr.stderr or pr.stdout
+                or "could not write compose file").strip(), ""
+    return "", backup
 
 
 # ---------------------------------------------------------------
@@ -354,7 +357,7 @@ def bygg_om() -> tuple:
         if feil:
             return False, f"Could not update .env: {feil}"
 
-    feil = sikre_instrumentnett_i_compose(repo)
+    feil, backup = sikre_instrumentnett_i_compose(repo)
     if feil:
         return False, feil
 
@@ -373,9 +376,35 @@ def bygg_om() -> tuple:
         return False, ("Could not find the host path for /data/konfig, so "
                        "the rebuild output would be lost. Aborting.")
     ut_vert = f"{ut_vert}/compose_ut.txt"
-    kommando = (f"cd '{repo}' && docker compose up -d "
-                f">> '{ut_vert}' 2>&1; "
-                f"echo '--- ferdig' >> '{ut_vert}'")
+    # Validering FOER vi roerer noko, og ei vakt som rullar tilbake om
+    # containeren ikkje kjem opp. Utan den er ein feil her ein node som er
+    # borte til nokon reiser dit - det skjedde med node1.
+    rull = ""
+    if backup:
+        rull = (f"cp '{backup}' '{repo}/docker-compose.yml'; "
+                f"docker compose up -d >> '{ut_vert}' 2>&1; "
+                f"echo '--- RULLA TILBAKE til {backup}' >> '{ut_vert}'")
+    else:
+        rull = f"echo '--- ingen backup aa rulle tilbake til' >> '{ut_vert}'"
+
+    kommando = (
+        f"cd '{repo}' || exit 1; "
+        f"if ! docker compose config -q >> '{ut_vert}' 2>&1; then "
+        f"  echo '--- AVBROTE: compose-fila er ugyldig' >> '{ut_vert}'; "
+        f"  {rull}; exit 1; "
+        f"fi; "
+        f"docker compose up -d >> '{ut_vert}' 2>&1; "
+        f"oppe=''; "
+        f"i=0; while [ $i -lt 30 ]; do "
+        f"  sleep 5; "
+        f"  if [ \"$(docker inspect -f '{{{{.State.Running}}}}' "
+        f"{KONTEINAR} 2>/dev/null)\" = true ]; then oppe=1; break; fi; "
+        f"  i=$((i+1)); "
+        f"done; "
+        f"if [ -z \"$oppe\" ]; then "
+        f"  echo '--- containeren kom ikkje opp - rullar tilbake' "
+        f">> '{ut_vert}'; {rull}; "
+        f"else echo '--- ferdig, containeren koeyrer' >> '{ut_vert}'; fi")
     try:
         subprocess.Popen(_HOST_NS + ["setsid", "sh", "-c", kommando],
                          stdin=subprocess.DEVNULL,
@@ -387,6 +416,7 @@ def bygg_om() -> tuple:
 
     endra = ", ".join(f"{k}={v}" for k, v in st["manglar"].items())
     return True, ("Rebuilding the container - it is down for about half a "
-                  "minute. "
+                  "minute. If it does not come back, the previous compose "
+                  "file is restored automatically. "
                   + (f"Filled in .env: {endra}. " if endra else "")
                   + "Reload the page shortly.")
