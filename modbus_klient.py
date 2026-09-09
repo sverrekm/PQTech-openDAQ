@@ -267,6 +267,33 @@ class ModbusKlient:
             "feil": None,
         }
 
+    def les_blokk(self, adresse: int, tal: int,
+                  funksjon: str = "holding") -> Optional[List[int]]:
+        """Les `tal` samanhengande 16-bits ord i EI foresporsel.
+
+        les_alle() gjer ei foresporsel per register - trygt naar registera
+        ligg spreidde, men 60 rundturar for ein SunSpec-modell. Her ber vi
+        om heile blokka. Kallaren fell tilbake til enkeltlesing om eininga
+        har hol i akkurat det omraadet.
+
+        Vi markerer IKKJE tilkoplinga som daud ved feil her: ei avvist
+        blokk er eit heilt vanleg svar frae ei eining som ikkje vil gje ut
+        so mange register om gongen.
+        """
+        if self._klient is None or not self.tilkobla or tal < 1:
+            return None
+        les = (self._klient.read_input_registers if funksjon == "input"
+               else self._klient.read_holding_registers)
+        try:
+            rr = self._les_med_kompat(les, adresse, tal)
+            if rr is None or rr.isError():
+                self.siste_feil = f"Modbus-feil paa blokk {adresse}+{tal}: {rr}"
+                return None
+            return list(rr.registers)
+        except Exception as e:
+            self.siste_feil = f"Modbus-lesefeil blokk {adresse}+{tal}: {e}"
+            return None
+
     def les_alle(self, registers: List[ModbusRegister]) -> dict:
         """Les alle register i sekvens. Returnerer dict adresse -> verdi (None ved feil)."""
         resultat = {}

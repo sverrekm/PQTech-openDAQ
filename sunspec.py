@@ -107,6 +107,15 @@ def _les_ord(klient, adresse, tal=1):
     med 50 register ville da blitt forkasta fordi eitt av dei var tomt.
     Returnerer None berre om HEILE lesinga feila.
     """
+    try:
+        blokk = klient.les_blokk(adresse, tal)
+    except Exception:
+        blokk = None
+    if blokk and len(blokk) == tal:
+        return [int(x) for x in blokk]
+
+    # Blokka vart avvist - les eitt og eitt, so hol ikkje tek med seg
+    # resten. les_alle() nøklar paa ADRESSE, ikkje namn.
     from hub_konfig import ModbusRegister
     regs = [ModbusRegister(namn="r%d" % (adresse + i), adresse=adresse + i,
                            funksjon="holding", datatype="uint16")
@@ -115,7 +124,7 @@ def _les_ord(klient, adresse, tal=1):
         verdiar = klient.les_alle(regs)
     except Exception:
         return None
-    ut = [None if verdiar.get(r.namn) is None else int(verdiar[r.namn])
+    ut = [None if verdiar.get(r.adresse) is None else int(verdiar[r.adresse])
           for r in regs]
     return None if all(x is None for x in ut) else ut
 
