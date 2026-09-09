@@ -95,8 +95,25 @@ def les_konfig() -> dict:
         base.update({k: v for k, v in n.items() if v not in (None, "")})
         base["tabell"] = int(base["tabell"])
         base["merke"] = int(base["merke"])
-        nett.append(base)
+        nett.append(normaliser(base))
     return {"aktivert": bool(d.get("aktivert", True)), "nett": nett}
+
+
+def normaliser(nett: dict) -> dict:
+    """Gjer vertsadresser om til nettadresser.
+
+    Ein skriv gjerne inn `192.168.1.1/24` fordi det er adressa ein tenkjer
+    paa. iptables normaliserer sjoelv, men da samanliknar statussjekken raa
+    streng mot iptables si normaliserte utskrift og finn aldri treff - so
+    oppsettet ser inaktivt ut sjoelv naar regelen ligg inne.
+    """
+    ut = dict(nett)
+    for k in ("ekte", "alias"):
+        try:
+            ut[k] = str(ipaddress.ip_network(ut.get(k, ""), strict=False))
+        except Exception:
+            pass
+    return ut
 
 
 def valider(nett: dict) -> str:
@@ -125,6 +142,7 @@ def lagre_konfig(konfig: dict) -> tuple:
         base.update({k: v for k, v in n.items() if v not in (None, "")})
         base["tabell"] = int(base["tabell"])
         base["merke"] = int(base["merke"])
+        base = normaliser(base)
         feil = valider(base)
         if feil:
             return False, feil
@@ -205,6 +223,7 @@ def sett_opp(nett: dict) -> dict:
     if feil:
         return {"namn": nett.get("namn", ""), "ok": False, "melding": feil}
 
+    nett = normaliser(nett)
     dev = nett["grensesnitt"]
     ekte, alias = nett["ekte"], nett["alias"]
     tabell, merke = int(nett["tabell"]), int(nett["merke"])
@@ -261,8 +280,20 @@ def sett_opp(nett: dict) -> dict:
     _host(["sysctl", "-w", "net.ipv4.ip_forward=1"])
 
     log.info(f"Instrument-NAT oppe: {alias} → {ekte} via {dev} (bord {tabell})")
-    return {"namn": nett.get("namn", ""), "ok": True,
-            "alias": alias, "ekte": ekte, "melding": ", ".join(steg)}
+    # NAT-en paa verten er berre halve vegen: containeren maa ogsaa ha rute
+    # til alias-nettet, og den gaar via bridge-nettet. Manglar det, blir
+    # ingenting naabart - og da skal vi seie det, ikkje melde suksess.
+    mangel = ""
+    try:
+        import instrument_ruter
+        if not instrument_ruter.bru_grensesnitt():
+            mangel = (" - but the container has no bridge network yet, so "
+                      "nothing can reach it. Rebuild the container first.")
+    except Exception:
+        pass
+    return {"namn": nett.get("namn", ""), "ok": not mangel,
+            "alias": alias, "ekte": ekte,
+            "melding": ", ".join(steg) + mangel}
 
 
 def riv_ned(nett: dict) -> dict:
@@ -308,6 +339,7 @@ def status() -> dict:
     natreglar = r.stdout if _ok(r) else ""
 
     for n in konfig["nett"]:
+        n = normaliser(n)
         aktiv = (f"lookup {n['tabell']}" in reglar
                  and n["alias"] in natreglar)
         r2 = _host(["ip", "route", "show", "table", str(n["tabell"])])

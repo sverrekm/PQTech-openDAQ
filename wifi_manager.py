@@ -297,9 +297,16 @@ def _nett_i_bruk(unnta_dev: str = "") -> dict:
             if dev == "lo" or dev == unnta_dev:
                 continue
             try:
-                ut[str(ipaddress.ip_interface(cidr).network)] = dev
+                nett = str(ipaddress.ip_interface(cidr).network)
             except Exception:
                 continue
+            # FLEIRE grensesnitt kan ligge paa same subnett - det er nettopp
+            # den situasjonen vi er ute etter aa oppdage. Ein dict keya paa
+            # nett ville skjult den siste bak den foerste.
+            if nett in ut and dev not in ut[nett].split(", "):
+                ut[nett] = ut[nett] + ", " + dev
+            else:
+                ut.setdefault(nett, dev)
     except Exception:
         return None
     return ut
