@@ -60,26 +60,35 @@ def _ok(r) -> bool:
 # ---------------------------------------------------------------
 #  Finn repoet paa verten
 # ---------------------------------------------------------------
-def finn_repo() -> str:
-    """Host-stien til compose-prosjektet, utleidd frå bind-mountet.
+def konfig_paa_vert() -> str:
+    """Host-stien til /data/konfig, lese ut av bind-mountet.
 
-    `./konfig:/data/konfig` i compose tyder at kjelda til /data/konfig ligg
-    i repo-katalogen. mountinfo gir oss kjeldestien; foreldrekatalogen er
-    repoet.
+    Denne skil seg frae container-stien, og det er ei felle: kommandoar vi
+    koeyrer via nsenter lever i VERTENS filsystem. Skriv ein da til
+    /data/konfig, finst ikkje katalogen, omdirigeringa feilar, og heile
+    kommandoen stoppar foer han har gjort noko.
     """
     try:
         with open("/proc/self/mountinfo", "r", encoding="utf-8") as f:
             for ln in f:
                 felt = ln.split()
-                if len(felt) < 5:
-                    continue
-                if felt[4] == "/data/konfig":
+                if len(felt) >= 5 and felt[4] == "/data/konfig":
                     kjelde = felt[3]
                     if kjelde and kjelde != "/":
-                        return os.path.dirname(kjelde.rstrip("/"))
+                        return kjelde.rstrip("/")
     except Exception:
         pass
     return ""
+
+
+def finn_repo() -> str:
+    """Host-stien til compose-prosjektet.
+
+    `./konfig:/data/konfig` i compose tyder at kjelda til /data/konfig ligg
+    i repo-katalogen, so foreldrekatalogen er repoet.
+    """
+    k = konfig_paa_vert()
+    return os.path.dirname(k) if k else ""
 
 
 def _har_docker() -> tuple:
@@ -357,9 +366,16 @@ def bygg_om() -> tuple:
     except Exception:
         pass
 
+    # MAA vere host-stien: kommandoen koeyrer i vertens namespace, der
+    # /data/konfig ikkje finst. Same fila, sett frae andre sida.
+    ut_vert = konfig_paa_vert()
+    if not ut_vert:
+        return False, ("Could not find the host path for /data/konfig, so "
+                       "the rebuild output would be lost. Aborting.")
+    ut_vert = f"{ut_vert}/compose_ut.txt"
     kommando = (f"cd '{repo}' && docker compose up -d "
-                f">> '{UT_FIL}' 2>&1; "
-                f"echo '--- ferdig' >> '{UT_FIL}'")
+                f">> '{ut_vert}' 2>&1; "
+                f"echo '--- ferdig' >> '{ut_vert}'")
     try:
         subprocess.Popen(_HOST_NS + ["setsid", "sh", "-c", kommando],
                          stdin=subprocess.DEVNULL,

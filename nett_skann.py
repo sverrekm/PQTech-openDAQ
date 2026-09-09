@@ -353,12 +353,43 @@ def start(subnett: str, timeout: float = 0.6, traadar: int = 64,
     with _lock:
         if _tilstand["tilstand"] == "koeyrer":
             return False, f"A scan of {_tilstand['subnett']} is already running."
+    # Eit skann utan rute gir "0 einingar", som ser ut som eit tomt nett.
+    # Det er noko heilt anna enn at vi ikkje kom oss ut, og skilnaden er
+    # akkurat den brukaren treng for aa vite kva han skal gjere.
+    mangel = _manglar_rute(str(nett))
+    if mangel:
+        return False, mangel
+
     _stopp.clear()
     _bind_dev = (grensesnitt or "").strip()
     _sett(subnett=str(nett), grensesnitt=_bind_dev)
     threading.Thread(target=_kjoer, args=(nett, timeout, traadar),
                      daemon=True, name="nett-skann").start()
     return True, f"Scanning {nett} ..."
+
+
+def _manglar_rute(subnett: str) -> str:
+    """Tom streng om nettet er naabart, elles forklaring.
+
+    Er nettet konfigurert som instrumentnett, men ikkje aktivt rutt, kjem
+    pakkene aldri ut - da skal vi seie det i staden for aa rapportere eit
+    tomt resultat.
+    """
+    try:
+        import instrument_ruter as ir
+        konfigurert = {n["subnett"] for n in
+                       ir.les_konfig()["nett"] + ir.alias_nett()}
+        if subnett not in konfigurert:
+            return ""                       # eit vanleg nett - berre skann
+        if subnett in set(ir.gjeldande_ruter()):
+            return ""
+        if not ir.bru_grensesnitt():
+            return ("No route to %s: the container has no bridge network "
+                    "yet. Rebuild the container first (step 1)." % subnett)
+        return ("No route to %s. It is configured as an instrument network, "
+                "but no route is active for it." % subnett)
+    except Exception:
+        return ""
 
 
 def maal() -> list:
