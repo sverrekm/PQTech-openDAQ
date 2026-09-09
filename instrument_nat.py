@@ -217,6 +217,33 @@ def _iptables(tabell: str, kjede: str, regel: list, dev_sjekk=True) -> str:
     return (r.stderr or r.stdout or "").strip()
 
 
+def _rydd_gamle_reglar(tabell: str, kjede: str, alias: str,
+                       behald: str = "") -> int:
+    """Slett alle reglar i kjeda som gjeld `alias`, unnateke `behald`.
+
+    `iptables -C` hindrar duplikat av SAME regel, men ikkje ein annan
+    merkeverdi paa same destinasjon. To MARK-reglar paa same nett tyder at
+    den siste vinn - og da hamnar trafikken i feil rutingbord utan at noko
+    ser gale ut. Difor ryddar vi eksplisitt foer vi legg inn.
+    """
+    r = _host(["iptables", "-t", tabell, "-S", kjede])
+    if not _ok(r):
+        return 0
+    fjerna = 0
+    for ln in (r.stdout or "").splitlines():
+        if not ln.startswith(f"-A {kjede} ") or alias not in ln:
+            continue
+        if behald and ln.strip() == behald.strip():
+            continue
+        argv = ln.split()
+        argv[0] = "-D"
+        d = _host(["iptables", "-t", tabell] + argv)
+        if _ok(d):
+            fjerna += 1
+            log.warning(f"Fjerna gammal regel i {tabell}/{kjede}: {ln}")
+    return fjerna
+
+
 def sett_opp(nett: dict) -> dict:
     """Set opp NAT-ruting for eitt instrumentnett. Returnerer resultat-dict."""
     feil = valider(nett)
@@ -252,6 +279,9 @@ def sett_opp(nett: dict) -> dict:
 
     # 4. Merk trafikk mot aliaset. Må skje i mangle, som køyrer FØR nat —
     #    elles er destinasjonen alt omskriven når vi vil kjenne han att.
+    #    Rydd først: ein gammal MARK-regel med eit anna merke på same
+    #    destinasjon overskriv vårt, og då hamnar trafikken i feil bord.
+    _rydd_gamle_reglar("mangle", "PREROUTING", alias)
     m = _iptables("mangle", "PREROUTING",
                   ["-d", alias, "-j", "MARK", "--set-mark", str(merke)])
     if m:
@@ -259,6 +289,7 @@ def sett_opp(nett: dict) -> dict:
                 "melding": f"mangle rule failed: {m}"}
 
     # 5. NETMAP: heile aliasnettet 1:1 over på det ekte
+    _rydd_gamle_reglar("nat", "PREROUTING", alias)
     m = _iptables("nat", "PREROUTING",
                   ["-d", alias, "-j", "NETMAP", "--to", ekte])
     if m:
@@ -309,11 +340,38 @@ def riv_ned(nett: dict) -> dict:
     return {"namn": nett.get("namn", ""), "ok": True, "melding": "Removed"}
 
 
+def _rydd_ubrukte_ip_rules(brukte: set) -> None:
+    """Fjern fwmark-reglar for rutingbord vi ikkje har lenger.
+
+    Ein regel som peikar på eit tomt bord er ikkje uskuldig: har han lågare
+    prioritetstal enn den rette, vinn han, og trafikken fell gjennom til
+    hovudbordet.
+    """
+    r = _host(["ip", "rule", "show"])
+    if not _ok(r):
+        return
+    import re as _re
+    for ln in (r.stdout or "").splitlines():
+        m = _re.search(r"fwmark\s+(\S+)\s+lookup\s+(\S+)", ln)
+        if not m:
+            continue
+        try:
+            merke = int(m.group(1), 16 if m.group(1).startswith("0x") else 10)
+            bord = int(m.group(2))
+        except Exception:
+            continue
+        if bord in brukte or not (FOERSTE_TABELL <= bord < FOERSTE_TABELL + 32):
+            continue
+        _host(["ip", "rule", "del", "fwmark", str(merke), "lookup", str(bord)])
+        log.warning(f"Fjerna ubrukt ip-regel: fwmark {merke} -> bord {bord}")
+
+
 def bruk_frå_konfig() -> list:
     """Kallast ved oppstart — reglar på verten overlever ikkje reboot."""
     konfig = les_konfig()
     if not konfig["aktivert"] or not konfig["nett"]:
         return []
+    _rydd_ubrukte_ip_rules({int(n["tabell"]) for n in konfig["nett"]})
     ut = []
     for n in konfig["nett"]:
         try:
