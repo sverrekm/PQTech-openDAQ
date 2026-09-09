@@ -2347,6 +2347,46 @@ def api_hub_logg():
 
 # --- Modbus API ---
 
+@app.route("/api/sunspec/oppdag", methods=["POST"])
+def api_sunspec_oppdag():
+    """Er dette ei SunSpec-eining, og kva modellar har han?
+
+    SunSpec er ein open standard, så vi treng ikkje produsent-dokumentasjon
+    for å lese ein omformar eller målar.
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        import sunspec
+        return jsonify(sunspec.oppdag(
+            str(data.get("host", "")).strip(),
+            int(data.get("port", 502)), int(data.get("unit_id", 1)),
+            int(data.get("timeout_ms", 3000)),
+            int(data.get("base", sunspec.BASE))))
+    except Exception as e:
+        return jsonify({"sunspec": False, "melding": str(e)}), 500
+
+
+@app.route("/api/sunspec/kanalar", methods=["POST"])
+def api_sunspec_kanalar():
+    """Bygg ferdige kanalar for alt vi forstår på eininga.
+
+    Skaleringsfaktorane vert lesne av eininga og baka inn, og punkt som er
+    merkte «ikkje implementert» vert hoppa over.
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        import sunspec
+        return jsonify(sunspec.lag_kanalar(
+            str(data.get("host", "")).strip(),
+            int(data.get("port", 502)), int(data.get("unit_id", 1)),
+            int(data.get("timeout_ms", 3000)),
+            int(data.get("base", sunspec.BASE)),
+            str(data.get("prefiks", "") or "")))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e),
+                        "registers": []}), 500
+
+
 @app.route("/api/modbus/test", methods=["POST"])
 def api_modbus_test():
     """Test modbus-tilkobling og les register.
