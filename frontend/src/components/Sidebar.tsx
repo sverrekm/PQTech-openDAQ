@@ -14,6 +14,7 @@ export type View =
   | { page: 'hub' }
   | { page: 'admin' }
   | { page: 'onboarding' }
+  | { page: 'correlation' }
 
 interface Props {
   view: View
@@ -196,6 +197,12 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
           onClick={() => onNavigate({ page: 'onboarding' })}
         >
           {t('First-time setup')}
+        </div>
+        <div
+          className={`${baseNavItemClass} ${view.page === 'correlation' ? activeNavItemClass : inactiveNavItemClass}`}
+          onClick={() => onNavigate({ page: 'correlation' })}
+        >
+          {t('Correlation explorer')}
         </div>
         <div
           className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}

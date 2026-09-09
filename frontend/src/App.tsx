@@ -19,6 +19,7 @@ import MqttChannelPage from './pages/MqttChannelPage'
 import HubPage from './pages/HubPage'
 import AdminPage from './pages/AdminPage'
 import OnboardingPage from './pages/OnboardingPage'
+import CorrelationPage from './pages/CorrelationPage'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 
@@ -121,6 +122,8 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     content = <AdminPage />
   } else if (view.page === 'onboarding') {
     content = <OnboardingPage onDone={() => setView({ page: 'dashboard' })} />
+  } else if (view.page === 'correlation') {
+    content = <CorrelationPage />
   } else if (view.page === 'mqttChannel') {
     content = <MqttChannelPage topic={view.topic} mqttStatus={mqttStatus ?? null} onBack={() => setView({ page: 'dashboard' })} />
   } else if (view.page === 'hubChannel') {
