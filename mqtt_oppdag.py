@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 
@@ -39,11 +40,26 @@ _KATEGORIAR: list = [
 ]
 
 
+def _passar(nokkelord: str, blob: str, tokens: set) -> bool:
+    """Match eit nøkkelord mot topic-/felt-teksten.
+
+    Korte, tvetydige ord ("var", "hz", "amp") må matche eit HEILT ord — elles
+    slår "var" til på "Varme" og "amp" på "example". Lengre ord og ord med
+    skiljeteikn (u_l, cos_phi) får delstreng-match.
+    """
+    if any(c in nokkelord for c in "_-."):
+        return nokkelord in blob
+    if len(nokkelord) >= 5:
+        return nokkelord in blob
+    return nokkelord in tokens
+
+
 def _klassifiser(*tekstar: str):
     """(interessant, kvantitet, eining) frå topic-/felt-namn."""
     blob = " ".join(t.lower() for t in tekstar if t)
+    tokens = set(re.split(r"[^a-z0-9]+", blob))
     for ord_, kvant, eining in _KATEGORIAR:
-        if any(o in blob for o in ord_):
+        if any(_passar(o, blob, tokens) for o in ord_):
             return True, kvant, eining
     return False, "", ""
 
