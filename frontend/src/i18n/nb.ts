@@ -55,6 +55,7 @@ export const nb: Record<string, string> = {
   'A free range, same size as above. The last part is kept, so': 'Eit ledig omraade, same storleik som over. Siste delen blir behalde, so',
   'is': 'er',
   'Devices found': 'Einingar funne',
+  'Open web UI': 'Opne web-GUI',
   'Scanned automatically. Highlighted ports are the ones you can read measurements from.': 'Skanna automatisk. Uthevа portar er dei du kan lese maaledata frae.',
   'Nothing found yet.': 'Ingenting funne enno.',
   'Check one address': 'Sjekk éi adresse',

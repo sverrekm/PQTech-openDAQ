@@ -296,22 +296,44 @@ export default function InstrumentNettverkCard() {
                 {res.tid ? ` · ${new Date(res.tid * 1000).toLocaleTimeString()}` : ''}
               </div>
               <div className="space-y-1">
-                {res.funn.map((f) => (
-                  <div key={f.ip} className="text-sm flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-mono text-xs w-28 flex-none">{f.ip}</span>
-                    {f.portar.filter((p) => p.interessant).map((p) => (
-                      <span key={p.port}
-                        className="text-xs px-1.5 py-0.5 rounded bg-[#D76428]/10 text-[#D76428] font-medium">
-                        {p.port} {p.namn}
-                      </span>
-                    ))}
-                    {(f.server || f.tittel) && (
-                      <span className="text-xs text-gray-500">
-                        {f.server}{f.server && f.tittel ? ' · ' : ''}{f.tittel}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                {res.funn.map((f) => {
+                  // Ein webserver tyder at eininga har eit GUI vi kan
+                  // vidareformidle. Relativ lenkje: sida blir servert under
+                  // /node-proxy/<id>/, so browseren set prefikset sjoelv.
+                  const web = f.portar.find(
+                    (p) => [80, 8080, 443, 8443].includes(p.port))
+                  return (
+                    <div key={f.ip}
+                         className="text-sm flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-mono text-xs w-28 flex-none">{f.ip}</span>
+                      {f.portar.filter((p) => p.interessant).map((p) => (
+                        <span key={p.port}
+                          className="text-xs px-1.5 py-0.5 rounded bg-[#D76428]/10 text-[#D76428] font-medium">
+                          {p.port} {p.namn}
+                        </span>
+                      ))}
+                      {(f.produsent || f.server || f.tittel) && (
+                        <span className="text-xs text-gray-500">
+                          {f.produsent && (
+                            <span className="text-[#D76428] font-medium">{f.produsent} </span>
+                          )}
+                          {f.server}
+                          {f.tittel ? ` ${f.tittel}` : ''}
+                        </span>
+                      )}
+                      {web && (
+                        <a
+                          href={`instrument/${f.ip}${web.port === 80 ? '' : ':' + web.port}/`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-[#D76428] hover:underline whitespace-nowrap ml-auto"
+                        >
+                          {t('Open web UI')} &rarr;
+                        </a>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           ))
