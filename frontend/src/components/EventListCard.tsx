@@ -19,12 +19,12 @@ export default function EventListCard() {
   if (hendingar.length === 0) return null
 
   return (
-    <div className="panel mb-4">
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h3 className="card-head">
         {t('Events')}
       </h3>
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+        <table className="ui-table">
           <thead>
             <tr>
               <th className="text-left px-1 py-1.5 border-b-2 border-gray-200 text-gray-500 text-xs uppercase font-semibold">{t('Time')}</th>

@@ -26,9 +26,9 @@ export default function NodeOverviewCard() {
   const nodar = hub?.nodar ?? []
 
   return (
-    <div className="panel mb-4">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{t('Nodes')}</h2>
+        <h2 className="card-head">{t('Nodes')}</h2>
         <span className="text-sm text-gray-500">
           {hub?.tilkobla_nodar ?? 0}/{hub?.totalt_nodar ?? nodar.length} {t('connected')}
         </span>

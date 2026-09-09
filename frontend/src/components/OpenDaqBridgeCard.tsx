@@ -71,8 +71,8 @@ export default function OpenDaqBridgeCard() {
   const alleOppe = s.alle_portar_oppe === true
 
   return (
-    <div className="panel mb-3">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('openDAQ Network Servers')}</h2>
+    <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('openDAQ Network Servers')}</h2>
 
       <div className={`flex items-center gap-2 p-2 rounded-lg mb-3 ${alleOppe ? 'bg-green-100 border border-green-500' : s.aktiv ? 'bg-yellow-100 border border-yellow-500' : 'bg-red-100 border border-red-500'}`}>
         <span className={`inline-block w-3.5 h-3.5 rounded-full ${alleOppe ? 'bg-green-500 shadow-lg shadow-green-500/50' : s.aktiv ? 'bg-yellow-500' : 'bg-red-500'}`} />

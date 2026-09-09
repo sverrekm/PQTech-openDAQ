@@ -18,8 +18,8 @@ export default function LogViewer() {
   const lines = data?.linjer ?? []
 
   return (
-    <div className="panel mb-3">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Log')}</h2>
+    <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('Log')}</h2>
       {loading && !data ? (
         <div className="flex justify-center items-center h-24">
           <svg className="animate-spin h-6 w-6 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

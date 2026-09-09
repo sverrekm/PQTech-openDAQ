@@ -37,8 +37,8 @@ export default function SiriusStatusCard() {
   }
 
   return (
-    <div className="panel mb-3">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Direct USB connection')}</h2>
+    <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('Direct USB connection')}</h2>
       <InfoGrid items={[
         {
           label: t('Connection'),

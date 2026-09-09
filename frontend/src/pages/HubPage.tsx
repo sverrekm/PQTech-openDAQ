@@ -75,7 +75,7 @@ export default function HubPage() {
   return (
     <>
       {/* Summary */}
-      <div className="panel mb-4">
+      <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900">openDAQ Hub</h2>
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -135,7 +135,7 @@ export default function HubPage() {
 
       {/* Node-list med "Open UI"-knappar */}
       {hubAktiv && hub?.nodar && hub.nodar.length > 0 && (
-        <div className="panel mb-4">
+        <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
           <h3 className="text-sm font-semibold text-gray-900 mb-3">{t('Nodes')}</h3>
           <div className="space-y-2">
             {hub.nodar.map(n => {
@@ -288,8 +288,8 @@ function HubKanalTabell() {
   }
 
   return (
-    <div className="panel mb-4">
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">{t('Hub channels (table)')}</h3>
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h3 className="card-head">{t('Hub channels (table)')}</h3>
       {feil && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-2 mb-2">{feil}</div>
       )}
@@ -298,7 +298,7 @@ function HubKanalTabell() {
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
+            <table className="ui-table">
               <thead>
                 <tr>
                   <th className="text-center px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 40 }}>
@@ -387,7 +387,7 @@ function HubLogViewer() {
 
   return (
     <div className="panel">
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">{t('Hub log')}</h3>
+      <h3 className="card-head">{t('Hub log')}</h3>
       <div className="bg-gray-900 text-gray-300 text-xs font-mono p-3 rounded-lg max-h-48 overflow-y-auto">
         {linjer.slice(-50).map((l, i) => (
           <div key={i} className="whitespace-pre-wrap">{l}</div>

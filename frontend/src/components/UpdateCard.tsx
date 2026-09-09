@@ -152,8 +152,8 @@ export default function UpdateCard() {
       : ferdig ? t('Updated — reloading...')
       : t('The box did not come back. Check it manually.')
     return (
-      <div className="panel mb-3">
-        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Update')}</h2>
+      <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+        <h2 className="card-head">{t('Update')}</h2>
         <div className="flex items-center gap-3 py-4">
           {ferdig ? (
             <span className="text-green-600 text-xl leading-none">✓</span>
@@ -182,9 +182,9 @@ export default function UpdateCard() {
   }
 
   return (
-    <div className="panel mb-3">
+    <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{t('Update')}</h2>
+        <h2 className="card-head">{t('Update')}</h2>
         {sjekk && (
           <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
             sjekk.oppdatering_tilgjengeleg
@@ -204,7 +204,7 @@ export default function UpdateCard() {
 
       {/* Update source (repository) */}
       <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
-        <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{t('Update source')}</div>
+        <div className="card-head">{t('Update source')}</div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">{t('Repository URL')}</label>
           <input

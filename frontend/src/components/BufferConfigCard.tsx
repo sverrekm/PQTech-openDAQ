@@ -52,8 +52,8 @@ export default function BufferConfigCard() {
   const ramMB = ((konfig.sample_rate * konfig.ram_buffer_sekund * 8 * 8) / 1e6).toFixed(0)
 
   return (
-    <div className="panel mb-4">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">
         {t('Measurement buffer')}
       </h2>
       <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Stores measurements locally and forwards them to the hub, so no data is lost if the network drops.')}</p>
@@ -125,7 +125,7 @@ export default function BufferConfigCard() {
 
       {/* RAM ringbuffer */}
       <div className="border-t border-gray-200 pt-3 mt-3 mb-3">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">
+        <h3 className="card-head">
           {t('RAM ring buffer')}
         </h3>
         <div className="grid grid-cols-2 gap-4">
@@ -148,7 +148,7 @@ export default function BufferConfigCard() {
 
       {/* Hendingsdeteksjon */}
       <div className="border-t border-gray-200 pt-3 mt-3 mb-3">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">
+        <h3 className="card-head">
           {t('Event detection')}
         </h3>
         <label className="flex items-center gap-2 mb-2">
@@ -239,7 +239,7 @@ export default function BufferConfigCard() {
 
       {/* Hub sync settings */}
       <div className="border-t border-gray-200 pt-3 mt-3 mb-3">
-        <h3 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">
+        <h3 className="card-head">
           Hub sync
         </h3>
         <div className="grid grid-cols-2 gap-4">

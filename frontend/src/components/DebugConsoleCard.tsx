@@ -31,7 +31,7 @@ export default function DebugConsoleCard() {
   }
 
   return (
-    <div className="panel mb-4">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Debug console')}</h2>
       <p className="text-gray-500 text-xs mb-2">
         {t('Advanced: send raw USB commands to SIRIUS for troubleshooting. Not needed in normal use.')}

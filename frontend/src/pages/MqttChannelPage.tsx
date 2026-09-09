@@ -16,7 +16,7 @@ export default function MqttChannelPage({ topic, mqttStatus, onBack }: Props) {
 
   if (!info) {
     return (
-      <div className="panel mb-4">
+      <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
         {t('Channel not found.')}
       </div>
     )
@@ -30,7 +30,7 @@ export default function MqttChannelPage({ topic, mqttStatus, onBack }: Props) {
 
   return (
     <>
-      <div className="panel mb-4">
+      <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
         <div className="flex items-center gap-3 mb-4">
           {onBack && (
             <button className="text-sm text-gray-500 hover:text-[#D76428] cursor-pointer bg-transparent border-none" onClick={onBack}>
@@ -54,7 +54,7 @@ export default function MqttChannelPage({ topic, mqttStatus, onBack }: Props) {
         <LiveSparkline value={info.verdi} color="#8b5cf6" />
       </div>
 
-      <div className="panel mb-4">
+      <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
         <h2>{t('Configuration')}</h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
           <Cell label={t('Source')} value="MQTT" />

@@ -34,8 +34,8 @@ export default function EmcCard() {
   const felt = "w-full text-sm px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
 
   return (
-    <div className="panel mb-4">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">{t('EMC / spectral analysis')}</h2>
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('EMC / spectral analysis')}</h2>
       <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Compute harmonics, THD and spectrum from the raw SIRIUS waveform and send to InfluxDB/Grafana. Requires Share to Grafana to be set up.')}</p>
 
       <label className="flex items-center gap-2 mb-3 text-sm text-gray-700">

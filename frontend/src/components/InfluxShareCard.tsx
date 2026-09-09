@@ -58,8 +58,8 @@ export default function InfluxShareCard() {
   const felt = "w-full text-sm px-3 py-1.5 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
 
   return (
-    <div className="panel mb-4">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">{t('Share to Grafana (InfluxDB)')}</h2>
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('Share to Grafana (InfluxDB)')}</h2>
       <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Write channel values to InfluxDB so they can be graphed in Grafana.')}</p>
 
       <label className="flex items-center gap-2 mb-3 text-sm text-gray-700">

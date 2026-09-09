@@ -103,6 +103,13 @@ h1, h2, h3, h4, h5, h6 {
     @apply block text-[10px] uppercase tracking-[0.1em] mb-1;
     color: var(--color-accent);
   }
+  /* Kompakt korthovud (dashboard o.l.) — Barlow Condensed, ikkje versal */
+  .card-head {
+    font-family: var(--font-heading);
+    @apply text-[16px] font-semibold mb-2;
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+  }
   .panel-title {
     font-family: var(--font-heading);
     @apply text-[20px] leading-tight font-semibold;

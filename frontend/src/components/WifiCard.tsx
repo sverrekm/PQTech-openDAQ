@@ -109,7 +109,7 @@ export default function WifiCard() {
   }
 
   return (
-    <div className="panel mb-4">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-base font-semibold text-gray-900">{t('WiFi')}</h2>

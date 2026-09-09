@@ -146,9 +146,9 @@ export default function HubNodeConfigCard() {
   }
 
   return (
-    <div className="panel mb-4">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">{t('Remote nodes')}</h3>
+        <h3 className="card-head">{t('Remote nodes')}</h3>
         <button
           onClick={() => setLeggTilOpen(!leggTilOpen)}
           className="text-xs font-medium px-3 py-1.5 rounded-md bg-[#D76428] text-white hover:bg-[#c55a23] transition-colors"

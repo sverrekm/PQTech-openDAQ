@@ -41,7 +41,7 @@ export default function DeviceConnectionCard() {
   }
 
   return (
-    <div className="panel mb-4">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Connect to device')}</h2>
       <p className="text-sm text-gray-500 -mt-3 mb-4 leading-snug">{t('Find and connect to the SIRIUS hardware over USB.')}</p>
       <div className="flex gap-2 mt-3">

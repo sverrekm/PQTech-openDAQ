@@ -38,8 +38,8 @@ export function RemoteBufferStatusCard() {
     : 0
 
   return (
-    <div className="panel mb-4">
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h3 className="card-head">
         {t('Measurement buffer')}
       </h3>
 
@@ -112,8 +112,8 @@ export default function BufferStatusCard() {
   if (!status || !status.aktivert) return null
 
   return (
-    <div className="panel mb-4">
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">
+    <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h3 className="card-head">
         {t('Hub measurement buffer')}
       </h3>
 
@@ -129,10 +129,10 @@ export default function BufferStatusCard() {
       {/* Per-node sync status */}
       {status.nodar && status.nodar.length > 0 && (
         <div>
-          <h4 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">
+          <h4 className="card-head">
             {t('Node sync status')}
           </h4>
-          <table className="w-full border-collapse text-sm">
+          <table className="ui-table">
             <thead>
               <tr>
                 <th className="text-left px-1 py-1 border-b-2 border-gray-200 text-gray-500 text-xs uppercase font-semibold">{t('Node')}</th>

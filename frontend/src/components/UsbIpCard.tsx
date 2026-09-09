@@ -55,8 +55,8 @@ export default function UsbIpCard({ ip }: Props) {
   }
 
   return (
-    <div className="panel mb-3">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('USB/IP — Share instrument')}</h2>
+    <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('USB/IP — Share instrument')}</h2>
       <div className="flex items-center gap-2 mb-3 text-sm">
         <span className={`w-2 h-2 rounded-full ${u.deling_aktiv ? 'bg-green-500' : 'bg-red-500'}`} />
         <span>
@@ -101,7 +101,7 @@ export default function UsbIpCard({ ip }: Props) {
       </div>
       {u.deling_aktiv && (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-4">
-          <h3 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('On Windows PC')}</h3>
+          <h3 className="card-head">{t('On Windows PC')}</h3>
           <ol className="list-decimal pl-5 text-sm text-gray-700">
             <li>
               {t('Install')}{' '}

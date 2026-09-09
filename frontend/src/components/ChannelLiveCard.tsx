@@ -50,9 +50,9 @@ export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, s
   }
 
   return (
-    <div className="panel mb-3">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Channels - Live')}</h2>
-      <table className="w-full border-collapse text-sm mt-3">
+    <div className="panel mb-3"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
+      <h2 className="card-head">{t('Channels - Live')}</h2>
+      <table className="ui-table">
         <thead>
           <tr>
             <th className="text-left px-1 py-2 border-b-2 border-gray-200 text-gray-500 text-xs uppercase tracking-wider font-semibold" style={{ width: 30 }}>#</th>
