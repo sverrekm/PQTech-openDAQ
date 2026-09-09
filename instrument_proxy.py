@@ -187,3 +187,61 @@ def skal_skrive_om(content_type: str) -> bool:
     ct = (content_type or "").lower()
     return ("text/html" in ct or "text/css" in ct
             or "application/xhtml" in ct)
+
+# Strengar i JS som er absolutte stiar. Krev ein BOKSTAV etter "/" so vi
+# ikkje roerer "/" brukt som skiljeteikn i strengbygging - aa skrive om det
+# ville broten koden.
+_JS_STI = re.compile(
+    rb"""(?P<q>["'])(?P<v>/[A-Za-z][A-Za-z0-9_\-./]*)(?P=q)""")
+
+JS_TYPAR = ("javascript", "ecmascript")
+
+
+def er_js(content_type: str) -> bool:
+    ct = (content_type or "").lower()
+    return any(t in ct for t in JS_TYPAR)
+
+
+def skriv_om_js(kropp: bytes, pre: str) -> bytes:
+    """Legg prefikset paa absolutte sti-strengar i JavaScript."""
+    if not kropp:
+        return kropp
+    b = pre.encode("utf-8")
+
+    def bytt(m):
+        v = m.group("v")
+        if v.startswith(b):                 # alt omskrive
+            return m.group(0)
+        return m.group("q") + b + v + m.group("q")
+
+    return _JS_STI.sub(bytt, kropp)
+
+
+# Shim: fangar adresser som blir SETT SAMAN i JS, der tekstomskriving ikkje
+# rekk til. Absolutte stiar i XHR, fetch og skjema faar prefikset paa seg.
+_SHIM = """<script>(function(){var P=%s;
+function f(u){if(typeof u!=='string')return u;
+if(u.charAt(0)==='/'&&u.charAt(1)!=='/'&&u.indexOf(P)!==0)return P+u;return u;}
+var o=XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open=function(){arguments[1]=f(arguments[1]);
+return o.apply(this,arguments);};
+if(window.fetch){var g=window.fetch;window.fetch=function(i,x){
+if(typeof i==='string')i=f(i);return g.call(this,i,x);};}
+document.addEventListener('submit',function(e){var t=e.target;if(!t)return;
+try{var a=t.getAttribute('action')||'';
+if(a.charAt(0)==='/'&&a.indexOf(P)!==0)t.setAttribute('action',P+a);}catch(_){}
+},true);})();</script>"""
+
+
+def sproeyt_shim(kropp: bytes, pre: str) -> bytes:
+    """Legg shimen foerst i <head>, so han er paa plass foer sida sin kode."""
+    import json as _json
+    if not kropp or b"<head" not in kropp.lower():
+        return kropp
+    skript = (_SHIM % _json.dumps(pre)).encode("utf-8")
+    lav = kropp.lower()
+    i = lav.find(b"<head")
+    j = kropp.find(b">", i)
+    if j < 0:
+        return kropp
+    return kropp[:j + 1] + skript + kropp[j + 1:]

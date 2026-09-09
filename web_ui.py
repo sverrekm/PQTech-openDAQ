@@ -2424,6 +2424,12 @@ def instrument_proxy(vert, sub):
     # content-type. Skriv om ogsaa naar det er ei omdirigering.
     if ip.skal_skrive_om(ct) or 300 <= opp.status_code < 400:
         kropp = ip.skriv_om_html(kropp, pre_kropp, vert_del, havn, sub)
+        # Shimen fangar adresser som blir sett saman i JS, der
+        # tekstomskriving ikkje rekk til.
+        if "html" in (ct or "").lower():
+            kropp = ip.sproeyt_shim(kropp, pre_kropp)
+    elif ip.er_js(ct):
+        kropp = ip.skriv_om_js(kropp, pre_kropp)
 
     hodar = []
     for k, v in opp.raw.headers.items():
