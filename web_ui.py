@@ -2446,6 +2446,88 @@ def instrument_proxy(vert, sub):
     return Response(kropp, status=opp.status_code, headers=hodar)
 
 
+@app.route("/api/instrument-ftp")
+def api_instrument_ftp_hent():
+    """Konfig + synk-status. Passordet foelgjer aldri med ut."""
+    try:
+        import instrument_ftp
+        return jsonify({**instrument_ftp.konfig_offentleg(),
+                        "status": instrument_ftp.status()})
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/instrument-ftp", methods=["PUT"])
+def api_instrument_ftp_lagre():
+    """Lagre konfig. Tomt passord tyder «ikkje endra»."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_ftp
+        ok, melding = instrument_ftp.lagre_konfig(data)
+        if ok:
+            instrument_ftp.start_synk()
+        return jsonify({"suksess": ok, "melding": melding,
+                        **instrument_ftp.konfig_offentleg()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/instrument-ftp/test", methods=["POST"])
+def api_instrument_ftp_test():
+    """Kjem vi inn, og kva svarar serveren?"""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_ftp
+        return jsonify(instrument_ftp.test(str(data.get("vert", "")).strip()))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/instrument-ftp/liste", methods=["POST"])
+def api_instrument_ftp_liste():
+    """Bla i katalogane paa instrumentet."""
+    data = request.get_json(silent=True) or {}
+    try:
+        import instrument_ftp
+        return jsonify(instrument_ftp.liste(
+            str(data.get("sti", "") or ""), str(data.get("vert", "")).strip()))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e),
+                        "oppforingar": []}), 500
+
+
+@app.route("/api/instrument-ftp/fil", methods=["POST"])
+def api_instrument_ftp_fil():
+    """Titt paa starten av ei fil - kva format er ho eigentleg i?"""
+    data = request.get_json(silent=True) or {}
+    sti = str(data.get("sti", "") or "").strip()
+    if not sti:
+        return jsonify({"suksess": False, "melding": "Missing path"}), 400
+    try:
+        import instrument_ftp
+        return jsonify(instrument_ftp.hent_bytes(
+            sti, int(data.get("maks", 65536)),
+            str(data.get("vert", "")).strip()))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/instrument-ftp/synk", methods=["POST"])
+def api_instrument_ftp_synk():
+    """Hent nye filer no. Koeyrer i bakgrunnen: eit FTP-arkiv kan vere
+    stort, og hub-proxyen gir opp etter 30 s."""
+    try:
+        import instrument_ftp, threading as _t
+        if instrument_ftp.status().get("tilstand") == "koeyrer":
+            return jsonify({"suksess": False,
+                            "melding": "A sync is already running"}), 409
+        _t.Thread(target=instrument_ftp.synk_ein_gong,
+                  name="ftp-synk-manuell", daemon=True).start()
+        return jsonify({"suksess": True, "melding": "Sync started"})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/sunspec/oppdag", methods=["POST"])
 def api_sunspec_oppdag():
     """Er dette ei SunSpec-eining, og kva modellar har han?

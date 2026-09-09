@@ -573,6 +573,17 @@ def start_server(args):
     except Exception:
         log.warning(f"Autoskann: {traceback.format_exc(limit=1).strip()}")
 
+    # FTP-henting frae instrument som ikkje stroeymer. Elspec G4500 har
+    # korkje Modbus TCP eller ein serieport i Modbus-modus - maaledata
+    # ligg som filer paa FTP-en hans og maa hentast med jamne mellomrom.
+    # Loekka startar alltid og gaar i tomgang til nokon slaar henne paa,
+    # so ein slepp aa restarte containeren for aa ta funksjonen i bruk.
+    try:
+        import instrument_ftp
+        instrument_ftp.start_synk()
+    except Exception:
+        log.warning(f"Instrument-FTP: {traceback.format_exc(limit=1).strip()}")
+
     # Berge-serveren startar FOER Flask og er uavhengig av han: doeyr
     # web-traaden, er noden framleis naabar via hubben paa berge-porten,
     # med traceback og ein oppdater-og-restart-knapp. Utan denne er ein node
