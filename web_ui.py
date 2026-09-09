@@ -2512,6 +2512,23 @@ def api_instrument_ftp_fil():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/instrument-ftp/kanalar")
+def api_instrument_ftp_kanalar():
+    """Kanalane vi har trekt ut av dei ferskaste rapportane."""
+    try:
+        import instrument_ftp
+        # Les rapportane på nytt so lista er fersk om nokon nyleg synka.
+        try:
+            instrument_ftp.oppdater_kanalar()
+        except Exception:
+            pass
+        st = instrument_ftp.status()
+        return jsonify({"kanalar": instrument_ftp.siste_kanalverdiar(),
+                        "detaljar": st.get("kanal_detaljar", {})})
+    except Exception as e:
+        return jsonify({"feil": str(e), "kanalar": {}}), 500
+
+
 @app.route("/api/instrument-ftp/synk", methods=["POST"])
 def api_instrument_ftp_synk():
     """Hent nye filer no. Koeyrer i bakgrunnen: eit FTP-arkiv kan vere

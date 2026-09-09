@@ -29,7 +29,14 @@ export interface FtpKonfig {
   intervall_min: number
   maalkatalog: string
   monster: string
+  kanal_prefiks: string
   status?: FtpSynkStatus
+}
+
+export interface FtpKanalar {
+  kanalar: Record<string, number>
+  detaljar: Record<string, { fil: string; tid: string; kanalar: number }>
+  feil?: string
 }
 
 export interface FtpOppforing {
@@ -78,3 +85,6 @@ export const filFtp = (sti: string, vert?: string) =>
 
 export const synkFtp = () =>
   apiPost<{ suksess: boolean; melding: string }>('/api/instrument-ftp/synk')
+
+export const kanalarFtp = () =>
+  apiGet<FtpKanalar>('/api/instrument-ftp/kanalar')

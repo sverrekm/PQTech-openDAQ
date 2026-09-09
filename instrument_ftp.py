@@ -38,6 +38,9 @@ STANDARD = {
     "maalkatalog": "/data/maalingar/instrument",
     # Tomt = alle filer. Elles eit enkelt glob-mønster, t.d. "*.csv".
     "monster": "",
+    # Prefiks framfor kanalnamna frå CSV-en. Fleire instrument på same node
+    # ville elles fått same kanalnamn ("Frequency_Avg" osv.).
+    "kanal_prefiks": "",
     # Kor mange nedlasta filer vi hugsar, so vi ikkje hentar same fila om
     # att. Instrumentet har ikkje noko "ny sidan"-omgrep.
     "hugs_filer": 5000,
@@ -108,6 +111,7 @@ def lagre_konfig(data: dict) -> tuple:
         "intervall_min": intervall,
         "maalkatalog": str(data.get("maalkatalog", k["maalkatalog"])),
         "monster": str(data.get("monster", k["monster"])),
+        "kanal_prefiks": str(data.get("kanal_prefiks", k["kanal_prefiks"])),
     })
     # Tomt passord frå GUI-et tyder «ikkje endra» — elles ville kvar lagring
     # av eit skjema som ikkje viser passordet, slette det.
@@ -332,6 +336,8 @@ _tilstand = {
     "nye_sist": 0,
     "totalt_henta": 0,
     "neste_om_s": None,
+    "kanalar": 0,
+    "kanal_detaljar": {},
 }
 _stopp = threading.Event()
 _traad = None
@@ -438,9 +444,133 @@ def synk_ein_gong() -> dict:
             _lukk(f)
     _skriv_henta(henta)
     _tilstand["totalt_henta"] += len(nye)
+    # Oppdater kanalane frå dei ferskaste rapportane. Gjer det alltid, ikkje
+    # berre når noko nytt kom: ei rapportfil VEKS mellom synkane (same namn,
+    # ny siste rad), og den nye storleiken kjem inn som ei "ny" fil uansett.
+    try:
+        oppdater_kanalar()
+    except Exception:
+        pass
     return {"suksess": True, "nye": nye, "feila": feila, "sett": len(filer),
             "melding": "%d new file(s)%s"
                        % (len(nye), ", %d failed" % len(feila) if feila else "")}
+
+
+# --- CSV -> kanalverdiar ---------------------------------------------
+# Elspec-rapportane er reine CSV: ei valfri "Device Name:"-linje, so ei
+# hovudlinje som byrjar med "UTC Time", so datarader. Siste rad er ferdige
+# 15-min-verdiar. Kvar talkolonne (utanom tid) blir ein kanal.
+#
+# PQZIP-arkivet er lukka og let vi vere - CSV-rapportane har det vi treng
+# for kanalar: effekt, frekvens, energiteljarar.
+_siste_kanalar: dict = {}
+_kanal_las = threading.Lock()
+_TID_KOLONNAR = ("utc time", "local time", "time", "date", "timestamp")
+
+
+def _tal(s: str):
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_rapport(lokalsti: str) -> tuple:
+    """(tidsstempel_tekst, {kolonne: verdi}) frå siste rad i ein CSV-rapport.
+
+    Vi les heile fila - rapportane er nokre hundre kB, og vi vil ha SISTE
+    rad. Ei linje som ikkje har like mange felt som hovudet (ei halvskriven
+    siste linje) blir hoppa over.
+    """
+    try:
+        import csv
+        with open(lokalsti, "r", encoding="utf-8", errors="replace",
+                  newline="") as f:
+            rader = list(csv.reader(f))
+    except Exception:
+        return "", {}
+    # Finn hovudlinja (kan ha ei "Device Name:"-linje foer)
+    hovud_i = None
+    for i, rad in enumerate(rader[:5]):
+        if rad and rad[0].strip().lower() in _TID_KOLONNAR:
+            hovud_i = i
+            break
+    if hovud_i is None:
+        return "", {}
+    hovud = [c.strip() for c in rader[hovud_i]]
+    siste = None
+    for rad in rader[hovud_i + 1:]:
+        if len(rad) == len(hovud) and any(c.strip() for c in rad):
+            siste = rad
+    if siste is None:
+        return "", {}
+    tid = siste[0].strip()
+    ut = {}
+    for kol, verdi in zip(hovud, siste):
+        if kol.lower() in _TID_KOLONNAR:
+            continue
+        t = _tal(verdi)
+        if t is not None:
+            ut[kol] = t
+    return tid, ut
+
+
+def _nyaste_per_type(maalkat: str) -> list:
+    """Nyaste lokale fil for kvar rapport-type (DL/MR/…).
+
+    Filnamna byrjar med typen ("DL log …", "MR log …"). Vi vil ha éin
+    kanalsett per type, frå den ferskaste fila. Nyaste = høgast mtime, som
+    òg er den fila synken nettopp la ned.
+    """
+    import glob
+    beste: dict = {}
+    for sti in glob.glob(os.path.join(maalkat, "**", "*.csv"),
+                         recursive=True):
+        base = os.path.basename(sti)
+        # "DL log 2022_… .csv" -> "DL log", elles heile namnet
+        type_ = base.split(" 20", 1)[0].strip() or base
+        try:
+            mtid = os.path.getmtime(sti)
+        except OSError:
+            continue
+        if type_ not in beste or mtid > beste[type_][1]:
+            beste[type_] = (sti, mtid)
+    return [(t, v[0]) for t, v in beste.items()]
+
+
+def oppdater_kanalar() -> dict:
+    """Les nyaste rapportar og oppdater kanal-cachen. Returnerer verdiane."""
+    k = les_konfig()
+    prefiks = str(k.get("kanal_prefiks", "") or "")
+    nye = {}
+    detaljar = {}
+    for type_, sti in _nyaste_per_type(k["maalkatalog"]):
+        tid, verdiar = _parse_rapport(sti)
+        if not verdiar:
+            continue
+        detaljar[type_] = {"fil": os.path.basename(sti), "tid": tid,
+                           "kanalar": len(verdiar)}
+        for kol, verdi in verdiar.items():
+            nye[prefiks + kol] = verdi
+    with _kanal_las:
+        _siste_kanalar.clear()
+        _siste_kanalar.update(nye)
+    _tilstand["kanal_detaljar"] = detaljar
+    _tilstand["kanalar"] = len(nye)
+    return dict(nye)
+
+
+def siste_kanalverdiar() -> dict:
+    """Siste kanalverdiar frå rapportane. Brukt av push-straumen.
+
+    Namna er kolonnenamna frå CSV-en (t.d. "kW_Total_Avg", "kWh in"),
+    eventuelt med eit konfigurert prefiks.
+    """
+    with _kanal_las:
+        return dict(_siste_kanalar)
 
 
 def _loop() -> None:
@@ -448,6 +578,12 @@ def _loop() -> None:
     # Vent litt ved oppstart: nettet (og NAT-en) er ikkje nødvendigvis klart
     # i det containeren startar.
     _stopp.wait(45)
+    # Rapportar frå ein tidlegare synk kan alt ligge på disk - fyll cachen
+    # med ein gong so kanalane finst før første nye nedlasting.
+    try:
+        oppdater_kanalar()
+    except Exception:
+        pass
     while not _stopp.is_set():
         k = les_konfig()
         if not k["aktivert"] or not k["vert"]:

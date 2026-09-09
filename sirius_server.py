@@ -752,12 +752,20 @@ def _start_hub_pusher():
         return
 
     def _hent():
-        if _opendaq_bro is None:
-            return {}
+        verdiar = {}
+        if _opendaq_bro is not None:
+            try:
+                verdiar.update(_opendaq_bro.hent_siste_verdiar())
+            except Exception:
+                pass
+        # Kanalar henta frae eit instrument sin FTP (Elspec G4500 o.l. som
+        # ikkje stroeymer). Slow-rate, men same push-straum som resten.
         try:
-            return _opendaq_bro.hent_siste_verdiar()
+            import instrument_ftp
+            verdiar.update(instrument_ftp.siste_kanalverdiar())
         except Exception:
-            return {}
+            pass
+        return verdiar
 
     def _hent_samples(n):
         if _opendaq_bro is None:

@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import {
-  fetchFtp, lagreFtp, testFtp, listeFtp, filFtp, synkFtp,
+  fetchFtp, lagreFtp, testFtp, listeFtp, filFtp, synkFtp, kanalarFtp,
 } from '../api/instrumentftp'
-import type { FtpKonfig, FtpListe, FtpFil } from '../api/instrumentftp'
+import type { FtpKonfig, FtpListe, FtpFil, FtpKanalar } from '../api/instrumentftp'
 import { useI18n } from '../i18n'
 
 /**
@@ -29,6 +29,10 @@ export default function InstrumentFtpCard() {
   const [sti, setSti] = useState('/')
   const [liste, setListe] = useState<FtpListe | null>(null)
   const [fil, setFil] = useState<FtpFil | null>(null)
+
+  // Kanalar trekte ut av rapportane
+  const kanalFetcher = useCallback(() => kanalarFtp(), [])
+  const { data: kanalar } = usePolling<FtpKanalar>(kanalFetcher, 15000)
 
   // Verdien frå utkastet om brukaren har rørt feltet, elles frå serveren.
   const v = <K extends keyof FtpKonfig>(felt: K): FtpKonfig[K] =>
@@ -169,6 +173,11 @@ export default function InstrumentFtpCard() {
             value={v('intervall_min') ?? 10}
             onChange={(e) => sett('intervall_min', Number(e.target.value))} />
         </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Channel prefix (optional)')}</label>
+          <input className={inn} value={v('kanal_prefiks') ?? ''} placeholder="BB1_"
+            onChange={(e) => sett('kanal_prefiks', e.target.value)} />
+        </div>
         <div className="flex items-end">
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" className="rounded"
@@ -210,6 +219,28 @@ export default function InstrumentFtpCard() {
           {st.melding ? ` — ${st.melding}` : ''}
           {` · ${t('fetched total')}: ${st.totalt_henta}`}
           {` · ${t('known files')}: ${st.henta_kjende}`}
+        </div>
+      )}
+
+      {/* Kanalar frå rapportane — det som blir pusha til hubben */}
+      {kanalar && Object.keys(kanalar.kanalar ?? {}).length > 0 && (
+        <div className="border-t border-gray-100 pt-2 mb-3">
+          <div className="text-xs font-medium text-gray-600 mb-1">
+            {t('Channels from reports (pushed to the hub)')}
+          </div>
+          {Object.entries(kanalar.detaljar ?? {}).map(([typ, d]) => (
+            <div key={typ} className="text-xs text-gray-400 mb-0.5">
+              {typ}: {d.fil} — {t('last row')} {d.tid}
+            </div>
+          ))}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 mt-1">
+            {Object.entries(kanalar.kanalar).map(([namn, verdi]) => (
+              <div key={namn} className="text-xs flex justify-between gap-2">
+                <span className="text-gray-600 truncate">{namn}</span>
+                <span className="font-mono text-gray-800">{verdi}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

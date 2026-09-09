@@ -638,4 +638,7 @@ export const nb: Record<string, string> = {
   'up': 'opp',
   'empty': 'tom',
   'first bytes': 'første bytes',
+  'Channel prefix (optional)': 'Kanalprefiks (valfritt)',
+  'Channels from reports (pushed to the hub)': 'Kanalar frå rapportane (pusha til hubben)',
+  'last row': 'siste rad',
 }
