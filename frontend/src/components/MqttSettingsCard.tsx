@@ -102,7 +102,7 @@ export default function MqttSettingsCard() {
 
   if (!lasta) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2 className="text-base font-semibold text-gray-900 mb-3">{t('MQTT channels')}</h2>
         <p className="text-sm text-gray-500">{t('Loading...')}</p>
       </div>
@@ -110,7 +110,7 @@ export default function MqttSettingsCard() {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+    <div className="panel mb-4">
       <h2 className="text-base font-semibold text-gray-900 mb-1">{t('MQTT channels')}</h2>
       <p className="text-xs text-gray-500 mb-4">
         {t('Subscribe to MQTT topics and display them as extra channels in the system.')}

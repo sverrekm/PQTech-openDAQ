@@ -121,7 +121,7 @@ export default function TailscaleCard() {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+    <div className="panel mb-4">
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-base font-semibold text-gray-900">{t('Tailscale VPN')}</h2>

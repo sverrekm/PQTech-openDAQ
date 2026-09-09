@@ -19,7 +19,7 @@ export default function EventListCard() {
   if (hendingar.length === 0) return null
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+    <div className="panel mb-4">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">
         {t('Events')}
       </h3>

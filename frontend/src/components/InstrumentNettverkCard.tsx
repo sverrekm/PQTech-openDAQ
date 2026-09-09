@@ -117,7 +117,7 @@ export default function InstrumentNettverkCard() {
   const funne = Object.entries(skann?.subnett ?? {})
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
+    <div className="panel">
       <h2 className="text-base font-semibold text-gray-800 mb-1">
         {t('Instrument networks')}
       </h2>

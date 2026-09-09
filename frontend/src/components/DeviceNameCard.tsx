@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { fetchPushKonfig, oppdaterPushKonfig } from '../api/push'
 import type { PushKonfig } from '../api/push'
 import { useI18n } from '../i18n'
+import Panel from './ui/Panel'
 
 /** Enhetsnamn: namnet som identifiserer denne boksen (node/hub) og taggar
  *  alle målingane (Grafana, hub, rapportar). Read-modify-write mot push-
@@ -28,35 +29,32 @@ export default function DeviceNameCard() {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
-      <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">{t('Device name')}</h2>
-      <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('A clear name for this box (node or hub). It tags all measurements from here, so you can see the source in Grafana, the hub and reports.')}</p>
-
+    <Panel
+      kicker={t('Identity')}
+      title={t('Name this box')}
+      sub={t('A clear name for this box (node or hub). It tags all measurements from here, so you can see the source in Grafana, the hub and reports.')}
+    >
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Name')}</label>
+          <label className="ui-label">{t('Name')}</label>
           <input
             type="text"
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+            className="ui-input"
             value={namn}
             onChange={e => setNamn(e.target.value)}
             placeholder={t('e.g. Sundet, Tavle 3, Kunde A – hovudtavle')}
           />
         </div>
-        <button
-          onClick={lagre}
-          disabled={busy || !konfig}
-          className="px-4 py-2 bg-[#D76428] text-white text-sm font-medium rounded-md hover:bg-[#c0571f] disabled:opacity-50 transition-colors"
-        >
+        <button onClick={lagre} disabled={busy || !konfig} className="btn-primary">
           {busy ? t('Saving...') : t('Save')}
         </button>
       </div>
 
       {melding && (
-        <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${melding.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+        <div className={`mt-3 px-3 py-2 rounded text-sm ${melding.ok ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
           {melding.text}
         </div>
       )}
-    </div>
+    </Panel>
   )
 }

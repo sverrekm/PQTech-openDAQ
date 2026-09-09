@@ -55,7 +55,7 @@ export default function AdminPage() {
   return (
     <>
       {/* Change password */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-4">{t('Change password')}</h2>
         <form onSubmit={handleEndrePassord} className="space-y-3 max-w-sm">
           <div>
@@ -101,7 +101,7 @@ export default function AdminPage() {
       </div>
 
       {/* Language selector */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('Language')}</h2>
         <select
           value={lang}
@@ -114,7 +114,7 @@ export default function AdminPage() {
       </div>
 
       {/* Support bundle */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('Support')}</h2>
         <p className="text-sm text-gray-500 mb-3">{t('Download logs and config to send to PQ Tech support. Secrets are removed.')}</p>
         <a
@@ -126,7 +126,7 @@ export default function AdminPage() {
       </div>
 
       {/* Restart */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">{t('System')}</h2>
         {restartDone ? (
           <div className="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-lg p-3">

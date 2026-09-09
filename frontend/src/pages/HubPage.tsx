@@ -75,7 +75,7 @@ export default function HubPage() {
   return (
     <>
       {/* Summary */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+      <div className="panel mb-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-gray-900">openDAQ Hub</h2>
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
@@ -135,7 +135,7 @@ export default function HubPage() {
 
       {/* Node-list med "Open UI"-knappar */}
       {hubAktiv && hub?.nodar && hub.nodar.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+        <div className="panel mb-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">{t('Nodes')}</h3>
           <div className="space-y-2">
             {hub.nodar.map(n => {
@@ -288,7 +288,7 @@ function HubKanalTabell() {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+    <div className="panel mb-4">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">{t('Hub channels (table)')}</h3>
       {feil && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg p-2 mb-2">{feil}</div>
@@ -386,7 +386,7 @@ function HubLogViewer() {
   if (linjer.length === 0) return null
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="panel">
       <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-2">{t('Hub log')}</h3>
       <div className="bg-gray-900 text-gray-300 text-xs font-mono p-3 rounded-lg max-h-48 overflow-y-auto">
         {linjer.slice(-50).map((l, i) => (

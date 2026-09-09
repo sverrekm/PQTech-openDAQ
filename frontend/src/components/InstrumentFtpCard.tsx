@@ -5,6 +5,7 @@ import {
 } from '../api/instrumentftp'
 import type { FtpKonfig, FtpListe, FtpFil, FtpKanalar } from '../api/instrumentftp'
 import { useI18n } from '../i18n'
+import Panel from './ui/Panel'
 
 /**
  * FTP-henting frå eit instrument som ikkje strøymer.
@@ -113,19 +114,16 @@ export default function InstrumentFtpCard() {
   }
 
   const st = data?.status
-  const inn = 'block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none'
-  const knapp = 'text-sm px-3 py-1.5 rounded bg-[#D76428] text-white hover:bg-[#b8541f] disabled:opacity-50'
-  const knappLys = 'text-sm px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50'
+  const inn = 'ui-input'
+  const knapp = 'btn-primary'
+  const knappLys = 'btn-ghost'
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h2 className="text-base font-semibold text-gray-800 mb-1">
-        {t('Instrument FTP retrieval')}
-      </h2>
-      <p className="text-xs text-gray-500 mb-3">
-        {t('For instruments that do not stream — the node fetches new files from the instrument’s FTP archive on a schedule.')}
-      </p>
-
+    <Panel
+      kicker={t('Retrieval')}
+      title={t('Instrument FTP retrieval')}
+      sub={t('For instruments that do not stream — the node fetches new files from the instrument’s FTP archive on a schedule.')}
+    >
       {feil && (
         <div className="p-2 mb-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{feil}</div>
       )}
@@ -136,45 +134,45 @@ export default function InstrumentFtpCard() {
       {/* Konfig */}
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div className="col-span-2 sm:col-span-1">
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('FTP host (IP)')}</label>
+          <label className="ui-label">{t('FTP host (IP)')}</label>
           <input className={inn} value={v('vert') ?? ''} placeholder="10.99.0.1"
             onChange={(e) => sett('vert', e.target.value)} />
         </div>
         <div className="col-span-1 sm:col-span-1">
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Port')}</label>
+          <label className="ui-label">{t('Port')}</label>
           <input className={inn} type="number" value={v('port') ?? 21}
             onChange={(e) => sett('port', Number(e.target.value))} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Username')}</label>
+          <label className="ui-label">{t('Username')}</label>
           <input className={inn} value={v('brukar') ?? ''}
             onChange={(e) => sett('brukar', e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Password')}</label>
+          <label className="ui-label">{t('Password')}</label>
           <input className={inn} type="password"
             placeholder={data?.passord_sett ? '••••••••' : ''}
             value={utkast.passord ?? ''}
             onChange={(e) => sett('passord', e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Remote root')}</label>
+          <label className="ui-label">{t('Remote root')}</label>
           <input className={inn} value={v('rot') ?? '/'}
             onChange={(e) => sett('rot', e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('File pattern (optional)')}</label>
+          <label className="ui-label">{t('File pattern (optional)')}</label>
           <input className={inn} value={v('monster') ?? ''} placeholder="*.csv"
             onChange={(e) => sett('monster', e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Interval (minutes)')}</label>
+          <label className="ui-label">{t('Interval (minutes)')}</label>
           <input className={inn} type="number" min={0.5} step={0.5}
             value={v('intervall_min') ?? 10}
             onChange={(e) => sett('intervall_min', Number(e.target.value))} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Channel prefix (optional)')}</label>
+          <label className="ui-label">{t('Channel prefix (optional)')}</label>
           <input className={inn} value={v('kanal_prefiks') ?? ''} placeholder="BB1_"
             onChange={(e) => sett('kanal_prefiks', e.target.value)} />
         </div>
@@ -308,6 +306,6 @@ export default function InstrumentFtpCard() {
           )}
         </div>
       )}
-    </div>
+    </Panel>
   )
 }

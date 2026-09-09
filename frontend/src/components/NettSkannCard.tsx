@@ -5,6 +5,7 @@ import type { SkannStatus, SkannFunn, SisteFunn, SkannMaal } from '../api/nettsk
 import { leggTilSunSpec } from '../api/sunspec'
 import type { SunSpecInfo, LeggTilSvar } from '../api/sunspec'
 import { useI18n } from '../i18n'
+import Panel from './ui/Panel'
 
 /**
  * Nett-skann — kva står på instrumentnettet.
@@ -122,14 +123,11 @@ export default function NettSkannCard() {
   const lagraRader = Object.entries(lagra?.subnett ?? {})
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h2 className="text-base font-semibold text-gray-800 mb-1">
-        {t('Network scan')}
-      </h2>
-      <p className="text-xs text-gray-500 mb-3">
-        {t('Scans from the node itself, through the same route the measurement polling uses.')}
-      </p>
-
+    <Panel
+      kicker={t('Discovery')}
+      title={t('Network scan')}
+      sub={t('Scans from the node itself, through the same route the measurement polling uses.')}
+    >
       {feil && (
         <div className="p-2 mb-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{feil}</div>
       )}
@@ -137,12 +135,12 @@ export default function NettSkannCard() {
       <div className="flex gap-2 items-end mb-3 flex-wrap">
         {(maal?.maal ?? []).length > 0 && (
           <div className="flex-1 min-w-[11rem]">
-            <label className="block text-xs font-medium text-gray-600 mb-1">{t('Network')}</label>
+            <label className="ui-label">{t('Network')}</label>
             <select
               value={subnett}
               onChange={(e) => velMaal(e.target.value)}
               disabled={koeyrer}
-              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50"
+              className="ui-select"
             >
               <option value="">{t('Choose or type below')}</option>
               {(maal?.maal ?? []).map((m) => (
@@ -154,23 +152,23 @@ export default function NettSkannCard() {
           </div>
         )}
         <div className="flex-1 min-w-[9rem]">
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Subnet')}</label>
+          <label className="ui-label">{t('Subnet')}</label>
           <input
             type="text"
             value={subnett}
             onChange={(e) => setSubnett(e.target.value)}
             placeholder="192.168.50.0/24"
             disabled={koeyrer}
-            className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50"
+            className="ui-select"
           />
         </div>
         <div className="flex-1 min-w-[9rem]">
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('Interface')}</label>
+          <label className="ui-label">{t('Interface')}</label>
           <select
             value={dev}
             onChange={(e) => setDev(e.target.value)}
             disabled={koeyrer}
-            className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#D76428] outline-none disabled:bg-gray-50"
+            className="ui-select"
           >
             <option value="">{t('Follow routing')}</option>
             {Array.from(new Set((maal?.maal ?? []).filter((m) => m.kan_binde).map((m) => m.grensesnitt)))
@@ -180,14 +178,14 @@ export default function NettSkannCard() {
         {koeyrer ? (
           <button
             onClick={stopp}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+            className="btn-ghost"
           >
             {t('Stop')}
           </button>
         ) : (
           <button
             onClick={start}
-            className="px-3 py-1.5 text-sm bg-[#D76428] text-white rounded hover:bg-[#c05520]"
+            className="btn-primary"
           >
             {t('Scan')}
           </button>
@@ -214,7 +212,7 @@ export default function NettSkannCard() {
 
       {data && data.funn.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="ui-table">
             <thead>{hovud}</thead>
             <tbody>{rader(data.funn)}</tbody>
           </table>
@@ -234,7 +232,7 @@ export default function NettSkannCard() {
               </div>
               {res.funn.length > 0 && (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="ui-table">
                     <thead>{hovud}</thead>
                     <tbody>{rader(res.funn)}</tbody>
                   </table>
@@ -244,7 +242,7 @@ export default function NettSkannCard() {
           ))}
         </div>
       )}
-    </div>
+    </Panel>
   )
 }
 

@@ -52,7 +52,7 @@ export default function BufferConfigCard() {
   const ramMB = ((konfig.sample_rate * konfig.ram_buffer_sekund * 8 * 8) / 1e6).toFixed(0)
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+    <div className="panel mb-4">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">
         {t('Measurement buffer')}
       </h2>

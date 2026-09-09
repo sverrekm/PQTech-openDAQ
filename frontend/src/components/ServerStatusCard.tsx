@@ -11,7 +11,7 @@ export default function ServerStatusCard({ status: s }: Props) {
   if (!s) return null
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+    <div className="panel mb-3">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Server')}</h2>
       <InfoGrid items={[
         { label: t('IP address'), value: s.ip || '-' },

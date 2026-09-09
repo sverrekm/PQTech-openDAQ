@@ -91,7 +91,7 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
   }, [cv?.value])
 
   if (!kanal) {
-    return <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">{t('Channel not found.')}</div>
+    return <div className="panel mb-4">{t('Channel not found.')}</div>
   }
 
   const typeLabel = kanal.type === 'voltage' ? t('Voltage') : kanal.type === 'current' ? t('Current') : kanal.type
@@ -103,7 +103,7 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
 
   return (
     <>
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <div className="flex items-center gap-3 mb-4">
           {onBack && (
             <button className="text-sm text-gray-500 hover:text-[#D76428] cursor-pointer bg-transparent border-none" onClick={onBack}>
@@ -135,7 +135,7 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2>{t('Configuration')}</h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
           <div className="bg-gray-50 rounded-lg p-3">
@@ -157,7 +157,7 @@ export default function ChannelPage({ index, kanalar, liveData, onBack }: Props)
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+      <div className="panel mb-4">
         <h2>{t('Settings')}</h2>
         <div className="text-sm text-gray-500">
           {t('Channel settings — use the Settings page to change channel configuration.')}

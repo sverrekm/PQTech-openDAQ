@@ -146,7 +146,7 @@ export default function HubNodeConfigCard() {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+    <div className="panel mb-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">{t('Remote nodes')}</h3>
         <button

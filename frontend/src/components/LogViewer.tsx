@@ -18,7 +18,7 @@ export default function LogViewer() {
   const lines = data?.linjer ?? []
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 shadow-sm">
+    <div className="panel mb-3">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-2">{t('Log')}</h2>
       {loading && !data ? (
         <div className="flex justify-center items-center h-24">

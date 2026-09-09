@@ -75,7 +75,7 @@ export default function ApiKeysCard() {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+    <div className="panel mb-4">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">{t('API keys (external read access)')}</h2>
       <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">
         {t('Let a client outside this network — for example a desktop widget — read measurement values over HTTPS. Keys are read-only and can be revoked one by one.')}

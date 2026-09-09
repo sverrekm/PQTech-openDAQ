@@ -103,7 +103,7 @@ export default function StorageCard() {
   ) : null
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4 shadow-sm">
+    <div className="panel mb-4">
       <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">{t('Storage')}</h2>
       <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Where measurement data is stored. Mount a NAS for capacity, archive raw files to it, and optionally keep a queryable database on the hub.')}</p>
 
