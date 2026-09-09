@@ -1,0 +1,16 @@
+# Avhengnader — skal aldri i repoet. Oppdateringa lastar ned repoet som
+# tarball til kvar node, so alt som ligg her blir sendt ut i flaaten.
+frontend/node_modules/
+node_modules/
+__pycache__/
+*.pyc
+frontend/tsconfig.tsbuildinfo
+
+# Lokale skript og eksperiment
+_t.py
+_deploy.py
+_check_mqtt.py
+_hent_live.py
+_opcua_check.py
+_pcapng_teds*.py
+.mcp.json
