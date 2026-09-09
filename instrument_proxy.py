@@ -43,7 +43,11 @@ HOPP = {
 # src="/x", href='/x', action="/x" - men ikkje //host (protokoll-relativ)
 _ABSOLUTT = re.compile(rb"""(\s(?:src|href|action|data-src)\s*=\s*["'])/(?!/)""",
                        re.I)
-_CSS_URL = re.compile(rb"""(url\(\s*["']?)/(?!/)""", re.I)
+_CSS_URL = re.compile(
+    rb"""(?P<pre>url\(\s*)(?P<q>["']?)(?P<v>[^)"']+)(?P=q)(?P<post>\s*\))""",
+    re.I)
+_IMPORT = re.compile(
+    rb"""(?P<pre>@import\s+)(?P<q>["'])(?P<v>[^"']+)(?P=q)""", re.I)
 
 
 def tillat_vert(vert: str) -> bool:
@@ -144,7 +148,24 @@ def skriv_om_html(kropp: bytes, pre: str, vert: str = "", havn: int = 80,
         return m.group("pre") + m.group("q") + b + ny.encode("utf-8") + m.group("q")
 
     kropp = _ATTR.sub(bytt, kropp)
-    kropp = _CSS_URL.sub(rb"\1" + b + b"/", kropp)
+    def bytt_css(m):
+        v = m.group("v").strip()
+        lav = v.lower()
+        if (not v or lav.startswith((b"http://", b"https://", b"//", b"data:"))
+                or lav.startswith(b"#")):
+            return m.group(0)
+        try:
+            ny_sti = loys_sti(gjeldande, v.decode("utf-8", "replace"))
+        except Exception:
+            return m.group(0)
+        bit = b + ny_sti.encode("utf-8")
+        if m.re is _IMPORT:
+            return m.group("pre") + m.group("q") + bit + m.group("q")
+        return (m.group("pre") + m.group("q") + bit + m.group("q")
+                + m.group("post"))
+
+    kropp = _CSS_URL.sub(bytt_css, kropp)
+    kropp = _IMPORT.sub(bytt_css, kropp)
     for u in eigne:                          # rest i skript o.l.
         kropp = kropp.replace(u, b)
     return kropp
