@@ -346,6 +346,14 @@ def status() -> dict:
     natreglar = r.stdout if _ok(r) else ""
     r = _host(["iptables", "-t", "mangle", "-S", "PREROUTING"])
     mangle = r.stdout if _ok(r) else ""
+    # Teljarar: ein regel som finst men aldri blir treft er like ubrukeleg
+    # som ein som manglar - og det er einaste maaten aa sjaa skilnaden.
+    r = _host(["iptables", "-t", "mangle", "-L", "PREROUTING", "-v", "-n", "-x"])
+    ut["mangle_teljarar"] = (r.stdout or "").strip().splitlines() if _ok(r) else []
+    r = _host(["iptables", "-t", "nat", "-L", "PREROUTING", "-v", "-n", "-x"])
+    ut["nat_teljarar"] = (r.stdout or "").strip().splitlines() if _ok(r) else []
+    r = _host(["ip", "rule", "show"])
+    ut["ip_rule"] = (r.stdout or "").strip().splitlines() if _ok(r) else []
 
     for n in konfig["nett"]:
         n = normaliser(n)
