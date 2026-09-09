@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { fetchStatus } from '../api/status'
 import { fetchSiriusStatus } from '../api/sirius'
 import { fetchPushKonfig, oppdaterPushKonfig } from '../api/push'
 import type { PushKonfig } from '../api/push'
-import { fetchKanalar, fetchKanalLive } from '../api/kanalar'
+import { fetchKanalar, fetchKanalLive, oppdaterKanalar } from '../api/kanalar'
 import type { KanalKonfig, ServerStatus, SiriusStatus, KanalLive, BufferStatus } from '../api/types'
 import { fetchBufferStatus } from '../api/buffer'
 import { fetchSisteSkann, startSkann } from '../api/nettskann'
@@ -294,17 +294,126 @@ function FunnKort({ valt, onVel, tittel, detalj, svar }:
   )
 }
 
-// --- Steg 4: Channels (lettvekt-oversyn) -----------------------------
+// --- Steg 4: Channels (full redigering) -----------------------------
+// Storleik (quantity) -> standard eining. "Eininga følgjer storleiken —
+// du vel aldri begge": vel du Voltage, blir eininga V av seg sjølv.
+const KVANTITET: { verdi: string; namn: string; enhet: string; min: number; max: number }[] = [
+  { verdi: 'voltage', namn: 'Voltage', enhet: 'V', min: -400, max: 400 },
+  { verdi: 'current', namn: 'Current', enhet: 'A', min: 0, max: 100 },
+  { verdi: 'acceleration', namn: 'Acceleration', enhet: 'm/s²', min: -50, max: 50 },
+  { verdi: 'temperature', namn: 'Temperature', enhet: '°C', min: -40, max: 150 },
+  { verdi: 'generic', namn: 'Generic', enhet: '', min: 0, max: 10 },
+]
+const enhetFor = (type: string) => KVANTITET.find((q) => q.verdi === type)?.enhet ?? ''
+
+// Sensor-bibliotek: to-punkts lineær skalering (0 V/spenn → 0, full spenn → verdi)
+const SENSORBIBLIOTEK: { namn: string; enhet: string; inn1: number; ut1: number; inn2: number; ut2: number }[] = [
+  { namn: 'Rogowski 6 kA', enhet: 'A', inn1: 0, ut1: 0, inn2: 10, ut2: 6000 },
+  { namn: 'Rogowski 3 kA', enhet: 'A', inn1: 0, ut1: 0, inn2: 10, ut2: 3000 },
+  { namn: 'Rogowski 1 kA', enhet: 'A', inn1: 0, ut1: 0, inn2: 10, ut2: 1000 },
+  { namn: 'CT 100 A / 1 V', enhet: 'A', inn1: 0, ut1: 0, inn2: 1, ut2: 100 },
+  { namn: 'Shunt 50 A / 50 mV', enhet: 'A', inn1: 0, ut1: 0, inn2: 0.05, ut2: 50 },
+]
+
+// Wiring-patterns: fyller dei første kanalane, slår resten av.
+type Rad = { namn: string; type: string }
+const MONSTER: Record<string, Rad[]> = {
+  '3-phase V + I': [
+    { namn: 'Spenning L1', type: 'voltage' }, { namn: 'Spenning L2', type: 'voltage' },
+    { namn: 'Spenning L3', type: 'voltage' }, { namn: 'Straum L1', type: 'current' },
+    { namn: 'Straum L2', type: 'current' }, { namn: 'Straum L3', type: 'current' },
+  ],
+  '3-phase voltage': [
+    { namn: 'Spenning L1', type: 'voltage' }, { namn: 'Spenning L2', type: 'voltage' },
+    { namn: 'Spenning L3', type: 'voltage' },
+  ],
+  'Single phase': [{ namn: 'Spenning L1', type: 'voltage' }, { namn: 'Straum L1', type: 'current' }],
+  'Blank': [],
+}
+
+function sensorSlope(k: KanalKonfig): number {
+  if (k.sensor_inn_2 === k.sensor_inn_1) return 0
+  return (k.sensor_ut_2 - k.sensor_ut_1) / (k.sensor_inn_2 - k.sensor_inn_1)
+}
+
 function StegChannels({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { t } = useI18n()
-  const kanalFetcher = useCallback(() => fetchKanalar(), [])
-  const { data: kanalar } = usePolling<KanalKonfig[]>(kanalFetcher, 0)
-  const aktive = (kanalar ?? []).filter((k) => k.aktiv)
+  const [kanalar, setKanalar] = useState<KanalKonfig[]>([])
+  const [opna, setOpna] = useState<Set<number>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [melding, setMelding] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const hent = useCallback(async () => {
+    try { setKanalar(await fetchKanalar()) } catch { /* tomt */ }
+  }, [])
+  useEffect(() => { hent() }, [hent])
+
+  const oppdater = (i: number, felt: keyof KanalKonfig, verdi: string | number | boolean) =>
+    setKanalar((prev) => prev.map((k, j) => (j === i ? { ...k, [felt]: verdi } : k)))
+
+  // Endrar quantity → set eininga og eit fornuftig område med.
+  const settType = (i: number, type: string) => {
+    const q = KVANTITET.find((x) => x.verdi === type)
+    setKanalar((prev) => prev.map((k, j) => j === i ? {
+      ...k, type,
+      enhet: k.sensor_aktiv ? k.sensor_enhet : (q?.enhet ?? k.enhet),
+      range_min: q?.min ?? k.range_min, range_max: q?.max ?? k.range_max,
+    } : k))
+  }
+
+  const brukMonster = (namn: string) => {
+    const rader = MONSTER[namn] ?? []
+    setKanalar((prev) => prev.map((k, i) => {
+      const r = rader[i]
+      if (!r) return { ...k, aktiv: false }
+      const q = KVANTITET.find((x) => x.verdi === r.type)
+      return {
+        ...k, aktiv: true, namn: r.namn, type: r.type,
+        enhet: q?.enhet ?? '', range_min: q?.min ?? k.range_min, range_max: q?.max ?? k.range_max,
+        sensor_aktiv: false,
+      }
+    }))
+  }
+
+  const brukSensor = (i: number, s: typeof SENSORBIBLIOTEK[number]) =>
+    setKanalar((prev) => prev.map((k, j) => j === i ? {
+      ...k, sensor_aktiv: true, sensor_namn: s.namn, sensor_enhet: s.enhet,
+      sensor_inn_1: s.inn1, sensor_ut_1: s.ut1, sensor_inn_2: s.inn2, sensor_ut_2: s.ut2,
+      enhet: s.enhet, range_max: Math.max(k.range_max, s.ut2),
+    } : k))
+
+  const toggleSensor = (i: number) => setOpna((p) => {
+    const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n
+  })
+
+  const lagre = async () => {
+    setBusy(true); setMelding(null)
+    try {
+      const res = await oppdaterKanalar(kanalar)
+      setMelding({ ok: res.suksess, text: res.melding })
+      if (res.suksess) onNext()
+    } catch (e) {
+      setMelding({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally { setBusy(false) }
+  }
+
+  const aktive = kanalar.filter((k) => k.aktiv).length
 
   return (
     <div>
       <Tittel kicker={t('Step 4 · Channels')} title={t('Name what you’re measuring')}
-        sub={t('The unit follows the quantity — you never pick both. Names can be edited later without restarting the bridge.')} />
+        sub={t('Start from a wiring pattern, then correct the names. The unit follows the quantity — you never pick both.')} />
+
+      {/* Wiring-pattern */}
+      <div className="mb-3">
+        <span className="ui-label">{t('Wiring')}</span>
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(MONSTER).map((m) => (
+            <button key={m} className="btn-ghost" onClick={() => brukMonster(m)}>{t(m)}</button>
+          ))}
+        </div>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="ui-table">
           <thead>
@@ -314,21 +423,105 @@ function StegChannels({ onNext, onBack }: { onNext: () => void; onBack: () => vo
             </tr>
           </thead>
           <tbody>
-            {(kanalar ?? []).map((k) => (
-              <tr key={k.indeks} style={{ opacity: k.aktiv ? 1 : 0.5 }}>
-                <td className="ui-num">{k.indeks + 1}</td>
-                <td>{k.namn || '—'}</td>
-                <td>{k.type || '—'}</td>
-                <td>{k.enhet || '—'}</td>
-                <td className="ui-num">{k.aktiv ? `${k.range_min} – ${k.range_max}` : '—'}</td>
-                <td>{k.aktiv ? <span className="tag tag-accent">{t('On')}</span> : <span className="hint">{t('Off')}</span>}</td>
-              </tr>
+            {kanalar.map((k, i) => (
+              <Fragment key={k.indeks}>
+                <tr style={{ opacity: k.aktiv ? 1 : 0.55 }}>
+                  <td className="ui-num">{k.indeks + 1}</td>
+                  <td>
+                    <input className="ui-input" style={{ minWidth: 130 }} value={k.namn}
+                      placeholder={t('unused')} onChange={(e) => oppdater(i, 'namn', e.target.value)} />
+                  </td>
+                  <td>
+                    <select className="ui-select" value={k.type} onChange={(e) => settType(i, e.target.value)}>
+                      {KVANTITET.map((q) => <option key={q.verdi} value={q.verdi}>{t(q.namn)}</option>)}
+                    </select>
+                    {k.type === 'current' && (
+                      <button className="btn-ghost mt-1 text-[12px]" onClick={() => toggleSensor(i)}>
+                        {k.sensor_aktiv ? `${k.sensor_namn || t('Sensor')} · ${sensorSlope(k).toFixed(0)} ${k.sensor_enhet}/V` : t('via sensor')}
+                      </button>
+                    )}
+                  </td>
+                  <td className="ui-num">{k.sensor_aktiv ? k.sensor_enhet : (k.enhet || enhetFor(k.type) || '—')}</td>
+                  <td className="ui-num" style={{ whiteSpace: 'nowrap' }}>
+                    <input className="ui-input inline-block" style={{ width: 64 }} type="number"
+                      value={k.range_min} onChange={(e) => oppdater(i, 'range_min', parseFloat(e.target.value) || 0)} />
+                    <span className="mx-1">–</span>
+                    <input className="ui-input inline-block" style={{ width: 72 }} type="number"
+                      value={k.range_max} onChange={(e) => oppdater(i, 'range_max', parseFloat(e.target.value) || 0)} />
+                  </td>
+                  <td>
+                    <button className="option-card" style={{ padding: '3px 10px', width: 'auto' }}
+                      data-valgt={k.aktiv} onClick={() => oppdater(i, 'aktiv', !k.aktiv)}>
+                      {k.aktiv ? t('On') : t('Off')}
+                    </button>
+                  </td>
+                </tr>
+                {k.type === 'current' && opna.has(i) && (
+                  <tr>
+                    <td colSpan={6} style={{ background: 'var(--color-accent-100)' }}>
+                      <div className="p-2 flex flex-wrap items-end gap-3">
+                        <label className="flex items-center gap-2 text-[13px]">
+                          <input type="checkbox" checked={k.sensor_aktiv}
+                            onChange={(e) => oppdater(i, 'sensor_aktiv', e.target.checked)} />
+                          {t('Scale via sensor')}
+                        </label>
+                        <div>
+                          <span className="meta-label">{t('From sensor library')}</span>
+                          <select className="ui-select" style={{ minWidth: 160 }} value=""
+                            onChange={(e) => { const s = SENSORBIBLIOTEK.find((x) => x.namn === e.target.value); if (s) brukSensor(i, s) }}>
+                            <option value="">{t('Choose…')}</option>
+                            {SENSORBIBLIOTEK.map((s) => <option key={s.namn} value={s.namn}>{s.namn}</option>)}
+                          </select>
+                        </div>
+                        {k.sensor_aktiv && (
+                          <>
+                            <div><span className="meta-label">{t('Name')}</span>
+                              <input className="ui-input" style={{ width: 130 }} value={k.sensor_namn}
+                                onChange={(e) => oppdater(i, 'sensor_namn', e.target.value)} placeholder="Rogowski 6kA" /></div>
+                            <div><span className="meta-label">{t('Sensor unit')}</span>
+                              <input className="ui-input" style={{ width: 60 }} value={k.sensor_enhet}
+                                onChange={(e) => oppdater(i, 'sensor_enhet', e.target.value)} placeholder="A" /></div>
+                            <div><span className="meta-label">{t('Point 1')} (V→{k.sensor_enhet || '?'})</span>
+                              <div className="flex items-center gap-1">
+                                <input className="ui-input" style={{ width: 56 }} type="number" value={k.sensor_inn_1}
+                                  onChange={(e) => oppdater(i, 'sensor_inn_1', parseFloat(e.target.value) || 0)} />
+                                <span>→</span>
+                                <input className="ui-input" style={{ width: 64 }} type="number" value={k.sensor_ut_1}
+                                  onChange={(e) => oppdater(i, 'sensor_ut_1', parseFloat(e.target.value) || 0)} />
+                              </div></div>
+                            <div><span className="meta-label">{t('Point 2')} (V→{k.sensor_enhet || '?'})</span>
+                              <div className="flex items-center gap-1">
+                                <input className="ui-input" style={{ width: 56 }} type="number" value={k.sensor_inn_2}
+                                  onChange={(e) => oppdater(i, 'sensor_inn_2', parseFloat(e.target.value) || 0)} />
+                                <span>→</span>
+                                <input className="ui-input" style={{ width: 64 }} type="number" value={k.sensor_ut_2}
+                                  onChange={(e) => oppdater(i, 'sensor_ut_2', parseFloat(e.target.value) || 0)} />
+                              </div></div>
+                            <span className="hint">{sensorSlope(k).toFixed(1)} {k.sensor_enhet}/V</span>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
       </div>
-      <ActionRad hint={`${aktive.length} ${t('of')} ${(kanalar ?? []).length} ${t('slots recording')} · ${t('edit in Channel setup')}`}
-        onBack={onBack} onNext={onNext} nextLabel={t('Continue')} />
+
+      {melding && <div className="mt-2 text-sm" style={{ color: melding.ok ? 'var(--color-accent-700)' : '#b45309' }}>{melding.text}</div>}
+
+      <div className="action-row">
+        <span className="hint">
+          {aktive} {t('of')} {kanalar.length} {t('slots recording')} · {t('unused slots stay off, so they never reach DewesoftX as noise.')}
+        </span>
+        <div className="flex gap-2">
+          <button className="btn-ghost" onClick={onBack}>{t('Back')}</button>
+          <button className="btn-ghost" onClick={hent}>{t('Revert')}</button>
+          <button className="btn-primary" onClick={lagre} disabled={busy}>{busy ? t('Working…') : t('Save & continue')}</button>
+        </div>
+      </div>
     </div>
   )
 }
