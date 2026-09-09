@@ -2409,12 +2409,17 @@ def instrument_proxy(vert, sub):
     # ligg i HOPP, so vi sender kroppen vidare upakka.
     fwd["Accept-Encoding"] = "gzip, deflate"
 
+    # Delt session med keep-alive, og semafor som slepp gjennom faa om
+    # gongen: instrumentet er ein liten innebygd webserver som sluttar aa
+    # svare naar browseren opnar 6+ samtidige.
+    okt, semafor = ip.okt_for(vert_del, havn)
     try:
-        opp = _http_proxy.request(
-            method=request.method, url=url, headers=fwd,
-            data=request.get_data(), params=request.query_string,
-            cookies=request.cookies, allow_redirects=False,
-            timeout=(4.0, 30.0))
+        with semafor:
+            opp = okt.request(
+                method=request.method, url=url, headers=fwd,
+                data=request.get_data(), params=request.query_string,
+                cookies=request.cookies, allow_redirects=False,
+                timeout=(6.0, 30.0))
     except _http_proxy.exceptions.RequestException as e:
         return jsonify({"feil": f"Naadde ikkje {vert_del}:{havn}: {e}"}), 502
 

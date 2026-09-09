@@ -245,3 +245,46 @@ def sproeyt_shim(kropp: bytes, pre: str) -> bytes:
     if j < 0:
         return kropp
     return kropp[:j + 1] + skript + kropp[j + 1:]
+
+# ---------------------------------------------------------------
+#  Tilkoplingar mot instrumentet
+# ---------------------------------------------------------------
+# Innebygde webserverar (GoAhead paa VxWorks hos Elspec) toler berre nokre
+# faa samtidige tilkoplingar. Ein browser opnar 6+ parallelt, og ei ny
+# TCP-tilkopling per fil fyller tabellen deira - da sluttar dei aa svare, og
+# alt kjem tilbake som 502. Vi gjenbrukar tilkoplingar og slepp gjennom faa
+# om gongen.
+SAMTIDIGE = 3
+
+_okter = {}
+_las = None
+
+
+def _sikre_las():
+    global _las
+    if _las is None:
+        import threading
+        _las = threading.Lock()
+    return _las
+
+
+def okt_for(vert: str, havn: int):
+    """(session, semafor) for eit instrument. Delt mellom alle foresporsler."""
+    import threading
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    nokkel = f"{vert}:{havn}"
+    with _sikre_las():
+        par = _okter.get(nokkel)
+        if par is None:
+            s = requests.Session()
+            # Faa tilkoplingar, gjenbrukte. Ein retry paa connect: eit
+            # instrument som akkurat slapp opp for plass svarar gjerne paa
+            # andre forsoek.
+            ad = HTTPAdapter(pool_connections=1, pool_maxsize=SAMTIDIGE,
+                             max_retries=1)
+            s.mount("http://", ad)
+            par = (s, threading.Semaphore(SAMTIDIGE))
+            _okter[nokkel] = par
+        return par
