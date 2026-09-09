@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { ServerStatus, KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import SiriusStatusCard from '../components/SiriusStatusCard'
 import UsbIpCard from '../components/UsbIpCard'
@@ -23,6 +24,20 @@ interface Props {
   isHubMode?: boolean
 }
 
+/**
+ * Responsivt kort-rutenett: to kolonnar frå xl og opp, éi under. Breie kort
+ * (tabellar, loggar, lister) spenner begge kolonnane; kompakte statuskort
+ * deler radene. Vertikal avstand kjem frå korta sin eigen mb; horisontal
+ * frå gap-x. Slik utnyttar dashbordet breidda i staden for å stable alt
+ * smalt midt på sida.
+ */
+function Rutenett({ children }: { children: ReactNode }) {
+  return <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-4 items-start">{children}</div>
+}
+function Vid({ children }: { children: ReactNode }) {
+  return <div className="xl:col-span-2">{children}</div>
+}
+
 export default function DashboardPage({ status, kanalar, liveData, mqttStatus, siriusTilkoblet, onChannelClick, onMqttClick, onHubClick, hubKanalar, isHubMode }: Props) {
   const channelCard = (
     <ChannelLiveCard
@@ -37,30 +52,31 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
     />
   )
 
-  // Hub-modus: fokus på node-oversikt (status per måleboks) + mottatte kanalar.
+  // Hub-modus: node-oversikt + mottatte kanalar er breie; server er kompakt.
   if (isHubMode) {
     return (
-      <>
-        <NodeOverviewCard />
-        {channelCard}
+      <Rutenett>
+        <Vid><NodeOverviewCard /></Vid>
+        <Vid>{channelCard}</Vid>
         <ServerStatusCard status={status} />
-        <LogViewer />
-      </>
+        <Vid><LogViewer /></Vid>
+      </Rutenett>
     )
   }
 
-  // Direkte-modus: fokus på SIRIUS-maskinvare, USB og lokale ADC-kanalar.
+  // Direkte-modus: kompakte statuskort deler radene; kanaltabell, hendingar,
+  // MQTT-logg og logg spenner full breidde.
   return (
-    <>
+    <Rutenett>
       <SiriusStatusCard />
       <UsbIpCard ip={status?.ip || '-'} />
-      {channelCard}
+      <Vid>{channelCard}</Vid>
       <OpenDaqBridgeCard />
       <RemoteBufferStatusCard />
-      <EventListCard />
-      <MqttLogCard />
+      <Vid><EventListCard /></Vid>
+      <Vid><MqttLogCard /></Vid>
       <ServerStatusCard status={status} />
-      <LogViewer />
-    </>
+      <Vid><LogViewer /></Vid>
+    </Rutenett>
   )
 }

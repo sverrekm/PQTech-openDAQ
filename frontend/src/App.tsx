@@ -23,6 +23,14 @@ import CorrelationPage from './pages/CorrelationPage'
 import LoginPage from './pages/LoginPage'
 import Layout from './components/Layout'
 
+// Sidebreidde per side: breie analyse-/dashboard-visingar får meir plass,
+// skjema-tunge sider held ei lesbar maks-breidde.
+function sidebredde(page: string): string {
+  if (page === 'correlation') return 'max-w-[1600px]'
+  if (page === 'dashboard' || page === 'hub') return 'max-w-[1400px]'
+  return 'max-w-5xl'
+}
+
 export default function App() {
   const [innlogga, setInnlogga] = useState<boolean | null>(null)
 
@@ -138,7 +146,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       <Layout>
         <Sidebar view={view} onNavigate={(v) => { setView(v); setMenyOpen(false) }} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} open={menyOpen} onClose={() => setMenyOpen(false)} />
         <div className="flex-1 overflow-y-auto p-3 md:p-6">
-          <div className={`max-w-4xl mx-auto transition-opacity duration-300 ${statusStale ? 'opacity-40' : ''}`}>
+          <div className={`${sidebredde(view.page)} mx-auto transition-opacity duration-300 ${statusStale ? 'opacity-40' : ''}`}>
             {content}
           </div>
         </div>
