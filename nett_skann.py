@@ -68,6 +68,11 @@ OPPDAGING = [80, 502, 443, 22, 4840, 8080, 23, 21]
 
 MAKS_VERTAR = 1024          # /22. Større skann er nesten alltid ein tastefeil
 
+# Kor lenge vi ventar per port. For kort, og treige einingar (eller eit
+# nett med kald ARP-cache) svarar ikkje i tide - da ser eit fullt nett
+# tomt ut. Justerbar per skann.
+STANDARD_TIMEOUT = 1.2
+
 _lock = threading.Lock()
 _stopp = threading.Event()
 _tilstand = {
@@ -359,7 +364,7 @@ def start_auto(hent_subnett, intervall_min: float = 30.0) -> None:
     log.info(f"Autoskann av instrumentnett kvart {intervall_min:.0f} min")
 
 
-def start(subnett: str, timeout: float = 0.6, traadar: int = 64,
+def start(subnett: str, timeout: float = STANDARD_TIMEOUT, traadar: int = 64,
           grensesnitt: str = "") -> tuple:
     """Start eit skann i bakgrunnen. Returnerer (ok, melding).
 

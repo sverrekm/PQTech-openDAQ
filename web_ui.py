@@ -2217,6 +2217,8 @@ def api_nettskann_start():
         import nett_skann
         ok, melding = nett_skann.start(
             str(data.get("subnett", "")),
+            timeout=max(0.2, min(5.0, float(data.get("timeout_s", 0) or 0)
+                                 or nett_skann.STANDARD_TIMEOUT)),
             grensesnitt=str(data.get("grensesnitt", "") or ""))
         return jsonify({"suksess": ok, "melding": melding,
                         **nett_skann.status()}), 200 if ok else 400
