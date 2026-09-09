@@ -13,6 +13,7 @@ export type View =
   | { page: 'mqttChannel'; topic: string }
   | { page: 'hub' }
   | { page: 'admin' }
+  | { page: 'onboarding' }
 
 interface Props {
   view: View
@@ -190,6 +191,12 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
 
       {/* Settings + Admin alltid synleg nederst */}
       <div className="flex-shrink-0 border-t border-gray-800 py-2">
+        <div
+          className={`${baseNavItemClass} ${view.page === 'onboarding' ? activeNavItemClass : inactiveNavItemClass}`}
+          onClick={() => onNavigate({ page: 'onboarding' })}
+        >
+          {t('First-time setup')}
+        </div>
         <div
           className={`${baseNavItemClass} ${view.page === 'settings' ? activeNavItemClass : inactiveNavItemClass}`}
           onClick={() => onNavigate({ page: 'settings' })}
