@@ -235,7 +235,7 @@ export default function WifiCard() {
                               <label
                                 className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap pb-1.5"
                                 onClick={(e) => e.stopPropagation()}
-                                title={t('For instruments with a built-in router. The node stays reachable on its wired network.')}
+                                title={t('Keeps this network in its own routing table, so it can use the same subnet as your LAN without breaking it. Give it a static IP.')}
                               >
                                 <input
                                   type="checkbox"

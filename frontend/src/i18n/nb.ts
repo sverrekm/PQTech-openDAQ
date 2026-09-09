@@ -34,6 +34,7 @@ export const nb: Record<string, string> = {
   'Network name (SSID)': 'Nettnamn (SSID)',
   'Enter the WiFi password': 'Skriv inn WiFi-passordet',
   'Instrument network only': 'Berre instrumentnett',
+  'Keeps this network in its own routing table, so it can use the same subnet as your LAN without breaking it. Give it a static IP.': 'Held dette nettet i eit eige rutingbord, so det kan bruke same subnett som LAN-et utan aa oedeleggje det. Gi det ein fast IP.',
   'Instrument networks': 'Instrumentnett',
   'Give the node access to instruments on a separate network — an instrument Wi-Fi, a spare ethernet port, or an isolated segment.': 'Gi noden tilgang til instrument paa eit eige nett — eit instrument-wifi, ein ledig ethernet-port, eller eit isolert segment.',
   'Container network': 'Container-nett',

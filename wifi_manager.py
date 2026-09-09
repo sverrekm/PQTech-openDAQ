@@ -26,6 +26,9 @@ import time
 
 log = logging.getLogger("wifi_manager")
 
+# Same bord som instrument_nat brukar for det foerste nettet.
+STANDARD_RUTEBORD = 99
+
 # Tilstand for den siste (asynkrone) tilkoplinga. WiFi-kortet pollar
 # /api/wifi/status og les denne, so brukaren ser kva som skjer.
 _op_lock = threading.Lock()
@@ -236,7 +239,8 @@ _NM_TILSTAND = {
     "50": "authenticating",
     "60": "waiting for authentication (wrong password?)",
     "70": ("associated with the network, but got no IP address - the DHCP "
-           "server is not answering. Try a static IP."),
+           "server is not answering. Use a static IP with "
+           "'Instrument network only' ticked."),
     "100": "connected",
 }
 
@@ -398,7 +402,7 @@ def _sett_berre_lokalt(ssid: str, dev: str) -> str:
 
 def koble_til(ssid: str, passord: str = "", skjult: bool = False,
               berre_lokalt: bool = False, statisk_ip: str = "",
-              gateway: str = "") -> tuple:
+              gateway: str = "", rutebord: int = 0) -> tuple:
     """Start tilkopling til eit WiFi-nett. Returnerer med ein gong.
 
     Tilkoplinga køyrer i bakgrunnen fordi ho er treg: `nmcli device wifi
@@ -425,19 +429,26 @@ def koble_til(ssid: str, passord: str = "", skjult: bool = False,
                            f"already in progress - wait for it to finish.")
 
     _sett_op("koeyrer", ssid, "Connecting ...")
+    # «Berre instrumentnett» tyder isolering: eit instrumentnett har som
+    # regel same subnett som LAN-et, og da MAA rutene ligge i eit eige bord
+    # for at NetworkManager skal klare aa konfigurere grensesnittet.
+    if berre_lokalt and not rutebord and statisk_ip:
+        rutebord = STANDARD_RUTEBORD
     threading.Thread(
         target=_koble_synk,
-        args=(ssid, passord, skjult, berre_lokalt, statisk_ip, gateway),
+        args=(ssid, passord, skjult, berre_lokalt, statisk_ip, gateway,
+              rutebord),
         daemon=True, name="wifi-koble").start()
     return True, f"Connecting to '{ssid}' ... watch the status."
 
 
 def _koble_synk(ssid: str, passord: str, skjult: bool, berre_lokalt: bool,
-                statisk_ip: str = "", gateway: str = "") -> None:
+                statisk_ip: str = "", gateway: str = "",
+                rutebord: int = 0) -> None:
     """Sjølve tilkoplinga. Køyrer i bakgrunnstråd; melder frå via _sett_op."""
     try:
         ok, melding = _koble_no(ssid, passord, skjult, berre_lokalt,
-                                statisk_ip, gateway)
+                                statisk_ip, gateway, rutebord)
     except Exception as e:
         _sett_op("feil", ssid, str(e))
         return
@@ -445,12 +456,18 @@ def _koble_synk(ssid: str, passord: str, skjult: bool, berre_lokalt: bool,
 
 
 def _koble_statisk(ssid: str, passord: str, skjult: bool, dev: str,
-                   statisk_ip: str, gateway: str) -> tuple:
+                   statisk_ip: str, gateway: str, rutebord: int = 0) -> tuple:
     """Lag profilen med fast IP og aktiver han.
 
     Går utanom `device wifi connect`, som ventar på DHCP. Eit instrument
     med innebygd ruter deler ikkje alltid ut leige i det heile — då står
     NetworkManager for evig i tilstand 70 (getting IP configuration).
+
+    `rutebord` legg profilen sine ruter i eit eige rutingbord. Det MÅ
+    setjast her, ved oppretting — ikkje etterpå. Har instrumentnettet same
+    subnett som LAN-et, nektar NetworkManager å konfigurere IP i det heile
+    («IP configuration could not be reserved»), så ei isolering som skjer
+    etter aktivering kjem aldri i bruk.
     """
     profil = _profil_for_ssid(ssid)
     _nmcli(["connection", "delete", "id", profil], timeout=15)
@@ -458,6 +475,12 @@ def _koble_statisk(ssid: str, passord: str, skjult: bool, dev: str,
     cmd = ["connection", "add", "type", "wifi", "ifname", dev,
            "con-name", ssid, "ssid", ssid,
            "ipv4.method", "manual", "ipv4.addresses", statisk_ip]
+    if rutebord:
+        cmd += ["ipv4.route-table", str(rutebord),
+                "ipv6.route-table", str(rutebord),
+                "ipv4.never-default", "yes",
+                "ipv4.ignore-auto-dns", "yes",
+                "ipv6.never-default", "yes"]
     if gateway:
         cmd += ["ipv4.gateway", gateway]
     if passord:
@@ -481,12 +504,15 @@ def _koble_statisk(ssid: str, passord: str, skjult: bool, dev: str,
         feil = (r.stderr or r.stdout or "").strip()
         _rydd_opp(dev)
         return False, f"{feil or 'Activation failed'}. {_forklar_tilstand(dev)}"
+    if rutebord:
+        return True, (f"Connected to '{ssid}' with static IP {statisk_ip}, "
+                      f"isolated in routing table {rutebord}")
     return True, f"Connected to '{ssid}' with static IP {statisk_ip}"
 
 
 def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
               berre_lokalt: bool = False, statisk_ip: str = "",
-              gateway: str = "") -> tuple:
+              gateway: str = "", rutebord: int = 0) -> tuple:
     """Blokkerande tilkopling. Returnerer (ok, melding)."""
     _radio_på()
     dev = _wifi_dev()
@@ -499,12 +525,16 @@ def _koble_no(ssid: str, passord: str = "", skjult: bool = False,
         if "/" not in statisk_ip:
             statisk_ip = f"{statisk_ip}/24"
             log.info(f"Statisk IP utan prefiks — tolkar som {statisk_ip}")
-        kol = _kollisjon(statisk_ip, unnta_dev=dev)
-        if kol:
-            return False, kol
+        # Kollisjon er berre eit problem naar nettet deler rutingbord med
+        # LAN-et. Isolerer vi det i eit eige bord, er identiske subnett
+        # heile poenget - da skal vi ikkje blokkere.
+        if not rutebord:
+            kol = _kollisjon(statisk_ip, unnta_dev=dev)
+            if kol:
+                return False, kol
         ok, melding = _koble_statisk(ssid, passord, skjult, dev,
-                                     statisk_ip, gateway)
-        if ok and berre_lokalt:
+                                     statisk_ip, gateway, rutebord)
+        if ok and berre_lokalt and not rutebord:
             feil = _sett_berre_lokalt(ssid, dev)
             if feil:
                 return True, f"{melding}, but locking it to instrument-only failed: {feil}"
