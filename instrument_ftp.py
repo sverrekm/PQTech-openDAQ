@@ -379,6 +379,30 @@ def _passar(namn: str, monster: str) -> bool:
     return fnmatch.fnmatch(namn.lower(), monster.lower())
 
 
+def _list_med_retry(f, mappe: str, forsok: int = 3):
+    """LIST med retry på reset.
+
+    Innebygde FTP-serverar (VxWorks hos Elspec) reset gjerne datakanalen
+    når dei er travle. Ei ny tilkopling og eit nytt forsøk hjelper som
+    oftast. Vi returnerer (linjer, klient) — klienten kan vere bytt ut.
+    """
+    for i in range(forsok):
+        linjer = []
+        try:
+            f.retrlines("LIST " + mappe if mappe != "/" else "LIST",
+                        linjer.append)
+            return linjer, f
+        except ftplib.all_errors as e:
+            if i == forsok - 1:
+                raise
+            time.sleep(1.0 + i)
+            try:
+                f = _opne()
+            except Exception:
+                raise e
+    return [], f
+
+
 def _finn_filer(f, mappe: str, monster: str, djup: int = 0,
                 maks_djup: int = 3) -> list:
     """Alle filer under `mappe`, rekursivt.
@@ -386,9 +410,8 @@ def _finn_filer(f, mappe: str, monster: str, djup: int = 0,
     Vi går ikkje djupare enn `maks_djup`: eit instrument med ein
     symlink-lykkje ville elles halde oss der til timeouten.
     """
-    linjer = []
     try:
-        f.retrlines("LIST " + mappe if mappe != "/" else "LIST", linjer.append)
+        linjer, _ = _list_med_retry(f, mappe)
     except Exception:
         return []
     ut = []
@@ -418,28 +441,50 @@ def synk_ein_gong() -> dict:
         f = _opne()
         try:
             filer = _finn_filer(f, k["rot"] or "/", k["monster"])
-            for fil in filer:
+            for n_gjort, fil in enumerate(filer):
                 nokkel = "%s|%d" % (fil["sti"], fil["storleik"])
                 if nokkel in henta:
                     continue
                 maal = os.path.join(maalkat, fil["sti"].lstrip("/"))
                 os.makedirs(os.path.dirname(maal) or ".", exist_ok=True)
                 mellom = maal + ".del"
-                try:
-                    with open(mellom, "wb") as ut:
-                        f.retrbinary("RETR " + fil["sti"], ut.write,
-                                     blocksize=32768)
-                    os.replace(mellom, maal)
-                except Exception as e:
+                # Innebygde FTP-serverar reset gjerne datakanalen når dei har
+                # gjort mange overføringar på rad. Vi prøver på nytt med ei
+                # frisk tilkopling i staden for å gje opp heile synken.
+                ok = False
+                siste_feil = "unknown error"
+                for forsok in range(3):
                     try:
-                        os.unlink(mellom)
-                    except Exception:
-                        pass
-                    feila.append({"sti": fil["sti"], "feil": str(e)})
+                        with open(mellom, "wb") as ut:
+                            f.retrbinary("RETR " + fil["sti"], ut.write,
+                                         blocksize=32768)
+                        os.replace(mellom, maal)
+                        ok = True
+                        break
+                    except ftplib.all_errors as e:
+                        try:
+                            os.unlink(mellom)
+                        except Exception:
+                            pass
+                        siste_feil = e
+                        if forsok < 2:
+                            time.sleep(1.5 + forsok)
+                            _lukk(f)
+                            try:
+                                f = _opne()
+                            except Exception:
+                                break
+                if not ok:
+                    feila.append({"sti": fil["sti"], "feil": str(siste_feil)})
                     continue
                 henta[nokkel] = [fil["storleik"], time.time()]
                 nye.append({"sti": fil["sti"], "maal": maal,
                             "bytes": fil["storleik"]})
+                # Pust litt mellom filene: hamrar vi på ein liten innebygd
+                # server, går han i kne. Ei kort pause kvar fjerde fil held
+                # han med.
+                if n_gjort % 4 == 3:
+                    time.sleep(0.4)
         finally:
             _lukk(f)
     _skriv_henta(henta)
