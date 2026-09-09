@@ -244,6 +244,49 @@ def _skann_vert(ip: str, timeout: float) -> dict:
     return {"ip": ip, "portar": treff, "svar": "TCP"}
 
 
+# --- SunSpec: kva slags Modbus-eining er dette eigentleg? -------------
+# Rekkjefoelgja er den vanlege: 40000 er standarden, 50000 og 0 er dei to
+# alternativa SunSpec-spesifikasjonen opnar for.
+SUNSPEC_BASAR = (40000, 50000, 0)
+
+
+def _sunspec(ip: str, timeout: float) -> dict:
+    """Kort SunSpec-sondering av ein vert med open 502. {} om ingen ting.
+
+    Vi prøver fleire basisadresser, men berre so lenge eininga faktisk
+    svarar paa Modbus: ein PQube eller ein annan rein Modbus-slave skal
+    kosta eitt forsoek, ikkje tre timeout-ar.
+    """
+    try:
+        import sunspec
+    except Exception:
+        return {}
+    ms = int(max(timeout, 2.0) * 1000)
+    for base in SUNSPEC_BASAR:
+        if _stopp.is_set():
+            return {}
+        try:
+            info = sunspec.oppdag(ip, 502, 1, ms, base)
+        except Exception:
+            return {}
+        if info.get("sunspec"):
+            modellar = info.get("modellar", [])
+            return {
+                "base": base,
+                "produsent": info.get("produsent", ""),
+                "modell": info.get("modell", ""),
+                "serienr": info.get("serienr", ""),
+                "firmware": info.get("firmware", ""),
+                "modellar": modellar,
+                "kan_lese": any(m.get("kan_lese") for m in modellar),
+            }
+        # Kom vi so langt som til aa lese, er det verdt aa prøve neste
+        # basisadresse. Naadde vi ikkje fram, er det ingen ting aa hente.
+        if not str(info.get("melding", "")).startswith("No SunSpec"):
+            return {}
+    return {}
+
+
 def _detaljer(funn: dict, timeout: float) -> dict:
     """Full portliste + HTTP-banner for ein vert som alt har svart."""
     ip = funn["ip"]
@@ -263,6 +306,14 @@ def _detaljer(funn: dict, timeout: float) -> dict:
             if banner:
                 funn.update(banner)
                 break
+    if any(o["port"] == 502 for o in opne) and not _stopp.is_set():
+        ss = _sunspec(ip, timeout)
+        if ss:
+            funn["sunspec"] = ss
+            # OUI-tabellen kjenner ikkje alle produsentar; eininga sitt
+            # eige namn er betre enn ingen ting.
+            if not funn.get("produsent") and ss.get("produsent"):
+                funn["produsent"] = ss["produsent"]
     return funn
 
 

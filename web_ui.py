@@ -2486,6 +2486,93 @@ def api_sunspec_kanalar():
                         "registers": []}), 500
 
 
+@app.route("/api/sunspec/legg-til", methods=["POST"])
+def api_sunspec_legg_til():
+    """Lag kanalane og legg dei inn som ein modbus_tcp-node.
+
+    Dette er steget som gjer «vi fann ein invertar» om til data. Utan det
+    maatte brukaren skrive av 20-30 registeradresser og skaleringsfaktorar
+    for hand.
+
+    Finst det alt ein modbus-node paa same adresse:port, byter vi ut
+    registera hans i staden for aa lage ein til - elles ville kvart trykk
+    gje endaa ein node med dei same kanalane.
+    """
+    data = request.get_json(silent=True) or {}
+    vert = str(data.get("host", "")).strip()
+    if not vert:
+        return jsonify({"suksess": False, "melding": "Missing host"}), 400
+    try:
+        havn = int(data.get("port", 502))
+        unit = int(data.get("unit_id", 1))
+        tid = int(data.get("timeout_ms", 3000))
+    except (TypeError, ValueError):
+        return jsonify({"suksess": False, "melding": "Invalid port/unit"}), 400
+
+    try:
+        import sunspec
+        bygg = sunspec.lag_kanalar(
+            vert, havn, unit, tid, int(data.get("base", sunspec.BASE)),
+            str(data.get("prefiks", "") or ""))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+    if not bygg.get("registers"):
+        return jsonify({"suksess": False,
+                        "melding": bygg.get("melding") or "No channels found"}), 400
+
+    info = bygg.get("info", {})
+    namn = str(data.get("namn", "")).strip() or (
+        "{} {}".format(info.get("produsent", ""), info.get("modell", "")).strip()
+        or vert)
+
+    gjeldande = (hent_hub_konfig_dict() if HUB_MODUS
+                 else les_hub_konfig().til_dict())
+    nodar = list(gjeldande.get("nodar", []))
+    ny = {
+        "namn": namn,
+        "adresse": vert,
+        "port": havn,
+        "aktivert": True,
+        "type": "modbus_tcp",
+        "modbus_unit_id": unit,
+        "modbus_poll_hz": float(data.get("poll_hz", 1.0)),
+        "modbus_timeout_ms": tid,
+        "modbus_base_adresse": 0,
+        "modbus_registers": bygg["registers"],
+    }
+    for i, n in enumerate(nodar):
+        if (str(n.get("adresse", "")) == vert
+                and int(n.get("port", 502) or 502) == havn
+                and str(n.get("type", "")) == "modbus_tcp"):
+            ny["id"] = n.get("id")
+            ny["namn"] = str(n.get("namn") or namn)
+            ny["lokasjon"] = n.get("lokasjon", "")
+            nodar[i] = ny
+            break
+    else:
+        nodar.append(ny)
+    gjeldande["nodar"] = nodar
+
+    konfig, feil = valider_hub_konfig(gjeldande)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    if HUB_MODUS:
+        ok, melding = oppdater_hub_konfig(konfig)
+    else:
+        ok = lagre_hub_konfig(konfig)
+        melding = "config saved" if ok else "could not save config"
+        if ok and SIRIUS_DIREKTE:
+            try:
+                _modbus_restart_etter_konfig()
+                melding = "config saved, Modbus manager restarting"
+            except Exception as e:
+                melding = "config saved, but restart failed: {}".format(e)
+    tal = len(bygg["registers"])
+    return jsonify({"suksess": ok, "namn": namn, "tal": tal,
+                    "hoppa": bygg.get("hoppa", []),
+                    "melding": "{} channels from {} - {}".format(tal, namn, melding)})
+
+
 @app.route("/api/modbus/test", methods=["POST"])
 def api_modbus_test():
     """Test modbus-tilkobling og les register.

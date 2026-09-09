@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { fetchSkann, startSkann, stoppSkann, fetchSisteSkann, fetchSkannMaal } from '../api/nettskann'
 import type { SkannStatus, SkannFunn, SisteFunn, SkannMaal } from '../api/nettskann'
+import { leggTilSunSpec } from '../api/sunspec'
+import type { SunSpecInfo, LeggTilSvar } from '../api/sunspec'
 import { useI18n } from '../i18n'
 
 /**
@@ -103,6 +105,7 @@ export default function NettSkannCard() {
         {f.server && <div>{f.server}</div>}
         {f.tittel && <div className="text-gray-500">{f.tittel}</div>}
         {f.mac && <div className="text-gray-400 font-mono">{f.mac}</div>}
+        {f.sunspec && <SunSpecFunn ip={f.ip} ss={f.sunspec} />}
       </td>
     </tr>
   ))
@@ -239,6 +242,60 @@ export default function NettSkannCard() {
               )}
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+/**
+ * Eit SunSpec-funn, med knappen som gjer det om til kanalar.
+ *
+ * Produsent og modell kjem frå eininga sjølv, ikkje frå OUI-tabellen: ein
+ * invertar som svarar «Ginlong / Solar inverter» har fortalt oss meir enn
+ * eit MAC-prefiks nokon gong kan.
+ */
+function SunSpecFunn({ ip, ss }: { ip: string; ss: SunSpecInfo }) {
+  const { t } = useI18n()
+  const [jobbar, setJobbar] = useState(false)
+  const [svar, setSvar] = useState<LeggTilSvar | null>(null)
+
+  const leggTil = async () => {
+    setJobbar(true)
+    setSvar(null)
+    try {
+      setSvar(await leggTilSunSpec(ip, ss.base))
+    } catch (e) {
+      setSvar({ suksess: false, melding: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setJobbar(false)
+    }
+  }
+
+  const namn = [ss.produsent, ss.modell].filter(Boolean).join(' ')
+
+  return (
+    <div className="mt-1.5 border-l-2 border-[#D76428] pl-2">
+      <div className="font-medium text-[#D76428]">
+        SunSpec{namn ? ` — ${namn}` : ''}
+      </div>
+      {ss.serienr && <div className="text-gray-500">s/n {ss.serienr}</div>}
+      {ss.kan_lese ? (
+        <button
+          onClick={leggTil}
+          disabled={jobbar}
+          className="mt-1 text-xs px-2 py-0.5 rounded bg-[#D76428] text-white
+            hover:bg-[#b8541f] disabled:opacity-50"
+        >
+          {jobbar ? t('Adding channels…') : t('Add channels')}
+        </button>
+      ) : (
+        <div className="text-gray-400">{t('No models we can read')}</div>
+      )}
+      {svar && (
+        <div className={'mt-1 ' + (svar.suksess ? 'text-green-600' : 'text-red-600')}>
+          {svar.melding}
         </div>
       )}
     </div>

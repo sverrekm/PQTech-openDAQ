@@ -1,4 +1,5 @@
 import { apiGet, apiPost } from './client'
+import type { SunSpecInfo } from './sunspec'
 
 export interface SkannPort {
   port: number
@@ -18,6 +19,8 @@ export interface SkannFunn {
   produsent?: string
   server?: string
   tittel?: string
+  /** Sett naar port 502 svarte med SunSpec-signaturen */
+  sunspec?: SunSpecInfo
 }
 
 export interface SkannMaal {
