@@ -78,27 +78,75 @@ def _eigne_url(vert: str, havn: int) -> list:
     return ut
 
 
-def skriv_om_html(kropp: bytes, pre: str, vert: str = "",
-                  havn: int = 80) -> bytes:
-    """Gjer adresser i svaret om til aa peike gjennom proxyen.
+def loys_sti(gjeldande: str, verdi: str) -> str:
+    """Gjer ei adresse absolutt, sett frae instrumentet si rot.
 
-    Baade absolutte stiar (/style.css) og heile URL-ar med instrumentet si
-    eiga adresse (http://10.99.0.1/login.asp). Det siste er vanleg i
-    innebygde webserverar, og utan omskriving fell brukaren ut av proxyen
-    og over paa ei adresse browseren hans ikkje naar.
+    `gjeldande` er stien vi henta (utan leiande /), `verdi` er slik han
+    staar i HTML-en. ".."-ar blir klemde mot rota - eit instrument kan
+    ikkje ha noko over rota si, og normpath gjer akkurat det.
+    """
+    import posixpath
+    base = "/" + (gjeldande or "")
+    if verdi.startswith("/"):
+        ny = verdi
+    else:
+        ny = posixpath.join(posixpath.dirname(base), verdi)
+    # Skil av spoerjestreng/fragment so normpath ikkje roerer dei
+    hale = ""
+    for teikn in ("?", "#"):
+        i = ny.find(teikn)
+        if i >= 0:
+            hale = ny[i:] + hale
+            ny = ny[:i]
+    ny = posixpath.normpath(ny)
+    if not ny.startswith("/"):
+        ny = "/" + ny
+    return ny + hale
+
+
+_HOPP_OVER = ("#", "javascript:", "mailto:", "data:", "tel:", "about:")
+
+_ATTR = re.compile(
+    rb"""(?P<pre>\s(?:src|href|action|data-src)\s*=\s*)(?P<q>["'])(?P<v>[^"']*)(?P=q)""",
+    re.I)
+
+
+def skriv_om_html(kropp: bytes, pre: str, vert: str = "", havn: int = 80,
+                  gjeldande: str = "") -> bytes:
+    """Gjer alle adresser i svaret absolutte og peikande gjennom proxyen.
+
+    Vi loyser opp SJOELVE, i staden for aa la browseren gjere det: gjennom
+    proxyen ligg sida eit hakk djupare enn paa instrumentet, so ein "../"
+    ville ete opp adressa til instrumentet.
     """
     if not kropp:
         return kropp
     b = pre.encode("utf-8")
-    # REKKJEFOELGJA er viktig. Tek vi URL-ane foerst, blir resultatet
-    # href="/<pre>/x" - og da matchar regexen for absolutte stiar det paa
-    # nytt og legg prefikset inn ein gong til. Difor stiane foerst: dei
-    # roerer ikkje "http://..."-formene, som so blir tekne etterpaa.
-    kropp = _ABSOLUTT.sub(rb"\1" + b + b"/", kropp)
+    eigne = [u.encode("utf-8") for u in _eigne_url(vert, havn)] if vert else []
+
+    def bytt(m):
+        v = m.group("v")
+        if not v:
+            return m.group(0)
+        for u in eigne:                     # http://<vert>/x -> /x
+            if v.startswith(u):
+                v = v[len(u):] or b"/"
+                break
+        else:
+            lav = v.lower()
+            if (lav.startswith((b"http://", b"https://", b"//"))
+                    or any(lav.startswith(x.encode()) for x in _HOPP_OVER)):
+                return m.group(0)           # peikar ut av instrumentet
+        try:
+            ny = loys_sti(gjeldande, v.decode("utf-8", "replace"))
+        except Exception:
+            return m.group(0)
+        return m.group("pre") + m.group("q") + b + ny.encode("utf-8") + m.group("q")
+
+    kropp = _ATTR.sub(bytt, kropp)
     kropp = _CSS_URL.sub(rb"\1" + b + b"/", kropp)
-    if vert:
-        for u in _eigne_url(vert, havn):
-            kropp = kropp.replace(u.encode("utf-8"), b)
+    for u in eigne:                          # rest i skript o.l.
+        kropp = kropp.replace(u, b)
     return kropp
 
 

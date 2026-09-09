@@ -2423,7 +2423,7 @@ def instrument_proxy(vert, sub):
     # Redirect-kroppar er html, men nokre serverar sender dei utan
     # content-type. Skriv om ogsaa naar det er ei omdirigering.
     if ip.skal_skrive_om(ct) or 300 <= opp.status_code < 400:
-        kropp = ip.skriv_om_html(kropp, pre_kropp, vert_del, havn)
+        kropp = ip.skriv_om_html(kropp, pre_kropp, vert_del, havn, sub)
 
     hodar = []
     for k, v in opp.raw.headers.items():
