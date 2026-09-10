@@ -179,7 +179,7 @@ class OpenDAQBro:
         try:
             channels = list(self._device.channels)
             for mi, mk in enumerate(self._mqtt_kanalar):
-                verdi = mqtt_verdiar.get(mk.topic)
+                verdi = mqtt_verdiar.get(mk.namn)
                 if verdi is None:
                     continue
                 kanal_idx = self._antal_adc + mi
@@ -1059,7 +1059,7 @@ class OpenDAQBro:
 
         try:
             for mi, mk in enumerate(self._mqtt_kanalar):
-                verdi = mqtt_verdiar.get(mk.topic)
+                verdi = mqtt_verdiar.get(mk.namn)
                 if verdi is None:
                     continue
 

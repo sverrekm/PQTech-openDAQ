@@ -80,8 +80,11 @@ class MqttKlient:
     def __init__(self, konfig: MqttKonfig):
         self._konfig = konfig
         self._client: Optional['mqtt.Client'] = None
-        self._verdiar: Dict[str, float] = {}    # topic → siste verdi
-        self._tidsstempel: Dict[str, float] = {}  # topic → tidspunkt
+        # Nøkla på KANALNAMN, ikkje topic: fleire kanalar kan dele éin topic
+        # (t.d. ein HAN/AMS-målar som sender all straum/effekt/energi i éin
+        # JSON-payload, der kvar kanal plukkar sitt felt via json_sti).
+        self._verdiar: Dict[str, float] = {}    # namn → siste verdi
+        self._tidsstempel: Dict[str, float] = {}  # namn → tidspunkt
         self._lock = threading.Lock()
         self._tilkobla = False
         self._feil: Optional[str] = None
@@ -90,10 +93,15 @@ class MqttKlient:
         # Callback for buffer-logging (set eksternt etter init)
         self._on_verdi_callback = None
 
-        # Bygg topic→json_sti-mapping for rask oppslag i on_message
-        self._topic_sti: Dict[str, str] = {}
-        for k in konfig.kanalar:
-            self._topic_sti[k.topic] = k.json_sti
+        # topic → liste av kanalar på den topicen (for rask oppslag)
+        self._topic_kanalar = self._bygg_topic_kanalar(konfig.kanalar)
+
+    @staticmethod
+    def _bygg_topic_kanalar(kanalar) -> dict:
+        m: Dict[str, list] = {}
+        for k in kanalar:
+            m.setdefault(k.topic, []).append(k)
+        return m
 
     def start(self):
         """Kopla til broker og start abonnement."""
@@ -165,7 +173,7 @@ class MqttKlient:
         """Stopp, oppdater konfig, og start på nytt."""
         self.stopp()
         self._konfig = ny_konfig
-        self._topic_sti = {k.topic: k.json_sti for k in ny_konfig.kanalar}
+        self._topic_kanalar = self._bygg_topic_kanalar(ny_konfig.kanalar)
         with self._lock:
             self._verdiar.clear()
             self._tidsstempel.clear()
@@ -178,15 +186,21 @@ class MqttKlient:
             return dict(self._verdiar)
 
     def hent_status(self) -> dict:
-        """Hent MQTT-klientstatus for web API."""
+        """Hent MQTT-klientstatus for web API.
+
+        Nøkla på KANALNAMN (unikt), so fleire kanalar på same topic kvar
+        får si eiga rad. Kvar rad har med `topic` òg.
+        """
         with self._lock:
-            topic_status = {}
+            kanal_status = {}
             for k in self._konfig.kanalar:
-                topic_status[k.topic] = {
+                kanal_status[k.namn] = {
                     "namn": k.namn,
+                    "topic": k.topic,
+                    "json_sti": k.json_sti,
                     "enhet": k.enhet,
-                    "verdi": self._verdiar.get(k.topic),
-                    "sist_oppdatert": self._tidsstempel.get(k.topic),
+                    "verdi": self._verdiar.get(k.namn),
+                    "sist_oppdatert": self._tidsstempel.get(k.namn),
                 }
         return {
             "tilkobla": self._tilkobla,
@@ -194,7 +208,7 @@ class MqttKlient:
             "broker": f"{self._konfig.broker.host}:{self._konfig.broker.port}",
             "feil": self._feil,
             "meldingar_motteke": self._meldingar_motteke,
-            "topics": topic_status,
+            "topics": kanal_status,
         }
 
     # --- paho callbacks ---
@@ -203,10 +217,13 @@ class MqttKlient:
         if rc == 0:
             self._tilkobla = True
             self._feil = None
-            topics = [(k.topic, 0) for k in self._konfig.kanalar]
+            # Distinkte topics — fleire kanalar kan dele éin topic.
+            topics = [(t, 0) for t in dict.fromkeys(
+                k.topic for k in self._konfig.kanalar)]
             if topics:
                 client.subscribe(topics)
-                log.info(f"MQTT tilkobla, abonnerer på {len(topics)} topics")
+                log.info(f"MQTT tilkobla, abonnerer på {len(topics)} topics "
+                         f"({len(self._konfig.kanalar)} kanalar)")
             else:
                 log.info("MQTT tilkobla (ingen topics)")
         else:
@@ -232,26 +249,29 @@ class MqttKlient:
     def _on_message(self, client, userdata, msg):
         try:
             payload_str = msg.payload.decode('utf-8', errors='replace')
-            json_sti = self._topic_sti.get(msg.topic, "")
-            verdi = _hent_json_verdi(payload_str, json_sti)
-
-            if verdi is not None:
-                now = time.time()
+            kanalar = self._topic_kanalar.get(msg.topic, [])
+            now = time.time()
+            any_ok = False
+            for k in kanalar:
+                # Kvar kanal på denne topicen plukkar sitt eige JSON-felt.
+                verdi = _hent_json_verdi(payload_str, k.json_sti)
+                if verdi is None:
+                    if k.namn not in self._verdiar:
+                        log.warning(f"MQTT {msg.topic} → {k.namn}: kunne ikkje "
+                                    f"parse verdi frå '{payload_str[:100]}' "
+                                    f"(json_sti='{k.json_sti}')")
+                    continue
+                any_ok = True
                 with self._lock:
-                    self._verdiar[msg.topic] = verdi
-                    self._tidsstempel[msg.topic] = now
-                    self._meldingar_motteke += 1
-                # Buffer-logging callback
+                    self._verdiar[k.namn] = verdi
+                    self._tidsstempel[k.namn] = now
                 if self._on_verdi_callback is not None:
                     try:
-                        self._on_verdi_callback(msg.topic, verdi)
+                        self._on_verdi_callback(k.namn, verdi)
                     except Exception:
                         pass  # Callback-feil skal ikkje blokkere MQTT
-            else:
-                # Logg berre fyrste gong per topic
-                if msg.topic not in self._verdiar:
-                    log.warning(f"MQTT {msg.topic}: kunne ikkje parse verdi "
-                                f"frå '{payload_str[:100]}' "
-                                f"(json_sti='{json_sti}')")
+            if any_ok:
+                with self._lock:
+                    self._meldingar_motteke += 1
         except Exception as e:
             log.warning(f"MQTT melding feil: {e}")
