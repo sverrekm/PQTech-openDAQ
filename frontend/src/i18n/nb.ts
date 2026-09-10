@@ -799,4 +799,10 @@ export const nb: Record<string, string> = {
   'apparent power': 'tilsynelatande effekt',
   'power factor': 'effektfaktor',
   'temperature': 'temperatur',
+  'Channels shown': 'Kanalar som visast',
+  'Choose which nodes and channels appear on the dashboard. Saved on this device.': 'Vel kva nodar og kanalar som visast på dashbordet. Lagra på denne eininga.',
+  'Hide all': 'Skjul alle',
+  'Show all': 'Vis alle',
+  'No channels received yet.': 'Ingen kanalar mottekne enno.',
+  'channels shown': 'kanalar visast',
 }

@@ -6,6 +6,8 @@ import { useI18n } from '../i18n'
 import BufferStatusCard from '../components/BufferStatusCard'
 
 export const HUB_SYNLEGE_KEY = 'hub_synlege_kanalar'
+/** Sendt når synleg-utvalet endrar seg, so Dashboard oppdaterer straks. */
+export const SYNLEGE_EVENT = 'hub-synlege-endra'
 
 /**
  * Les synlege kanalar frå localStorage. Returnerer null viss brukar ikkje
@@ -29,8 +31,9 @@ export function erKanalSynleg(key: string): boolean {
   return sett.has(key)
 }
 
-function lagreSynlegeKanalar(set: Set<string>) {
+export function lagreSynlegeKanalar(set: Set<string>) {
   localStorage.setItem(HUB_SYNLEGE_KEY, JSON.stringify([...set]))
+  try { window.dispatchEvent(new Event(SYNLEGE_EVENT)) } catch { /* ignore */ }
 }
 
 export default function HubPage() {

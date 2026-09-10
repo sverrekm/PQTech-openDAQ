@@ -1,6 +1,6 @@
-import { useRef } from 'react'
+import {useRef, useState, useEffect} from 'react'
 import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
-import { erKanalSynleg } from '../pages/HubPage'
+import { erKanalSynleg, SYNLEGE_EVENT } from '../pages/HubPage'
 import SparklineChart from './SparklineChart'
 import { useI18n } from '../i18n'
 
@@ -17,6 +17,13 @@ interface Props {
 }
 
 export default function ChannelLiveCard({ kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, onMqttClick, onHubClick, loading = false, hubKanalar }: Props) {
+  // Re-render straks synleg-utvalet endrar seg (frå filter-kortet).
+  const [, setSynlegVer] = useState(0)
+  useEffect(() => {
+    const h = () => setSynlegVer(v => v + 1)
+    window.addEventListener(SYNLEGE_EVENT, h)
+    return () => window.removeEventListener(SYNLEGE_EVENT, h)
+  }, [])
   const { t } = useI18n()
   const sparkDataRef = useRef<Map<number, number[]>>(new Map())
   const hubSparkRef = useRef<Map<string, number[]>>(new Map())

@@ -10,6 +10,7 @@ import { RemoteBufferStatusCard } from '../components/BufferStatusCard'
 import EventListCard from '../components/EventListCard'
 import MqttLogCard from '../components/MqttLogCard'
 import NodeOverviewCard from '../components/NodeOverviewCard'
+import HubKanalFilterCard from '../components/HubKanalFilterCard'
 
 interface Props {
   status: ServerStatus | null
@@ -57,6 +58,7 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
     return (
       <Rutenett>
         <Vid><NodeOverviewCard /></Vid>
+        <Vid><HubKanalFilterCard /></Vid>
         <Vid>{channelCard}</Vid>
         <ServerStatusCard status={status} />
         <Vid><LogViewer /></Vid>
