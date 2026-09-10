@@ -837,4 +837,6 @@ export const nb: Record<string, string> = {
   'replies': 'svar',
   'Modbus meters found by the last network scan. Pick the type — PQube 3 is auto-recognised; for Elspec G4500 (via an RS-485→Modbus-TCP gateway) choose it and unit 159.': 'Modbus-målarar frå siste nettskann. Vel type — PQube 3 blir kjend att automatisk; for Elspec G4500 (via ein RS-485→Modbus-TCP-gateway) vel den og unit 159.',
   'Unit id': 'Unit-id',
+  'Delete file': 'Slett fil',
+  'Delete this file on the instrument? This cannot be undone.': 'Slette denne fila på instrumentet? Dette kan ikkje angrast.',
 }

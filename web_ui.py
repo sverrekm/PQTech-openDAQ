@@ -2662,6 +2662,31 @@ def api_instrument_ftp_kanalar():
         return jsonify({"feil": str(e), "kanalar": {}}), 500
 
 
+@app.route("/api/instrument-ftp/slett-test")
+def api_instrument_ftp_slett_test():
+    """Non-destruktivt: stoettar FTP-serveren DELE?"""
+    try:
+        import instrument_ftp
+        return jsonify(instrument_ftp.slett_stotta(
+            str(request.args.get("vert", "")).strip()))
+    except Exception as e:
+        return jsonify({"stotta": False, "melding": str(e)}), 500
+
+
+@app.route("/api/instrument-ftp/slett", methods=["POST"])
+def api_instrument_ftp_slett():
+    """Slett éi fil paa instrumentet (DELE). Destruktivt — GUI stadfester."""
+    data = request.get_json(silent=True) or {}
+    sti = str(data.get("sti", "") or "").strip()
+    if not sti:
+        return jsonify({"suksess": False, "melding": "Missing path"}), 400
+    try:
+        import instrument_ftp
+        return jsonify(instrument_ftp.slett(sti, str(data.get("vert", "")).strip()))
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/instrument-ftp/synk", methods=["POST"])
 def api_instrument_ftp_synk():
     """Hent nye filer no. Koeyrer i bakgrunnen: eit FTP-arkiv kan vere

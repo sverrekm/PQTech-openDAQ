@@ -89,3 +89,10 @@ export const synkFtp = () =>
 
 export const kanalarFtp = () =>
   apiGet<FtpKanalar>('/api/instrument-ftp/kanalar')
+
+export const slettTestFtp = (vert?: string) =>
+  apiGet<{ stotta: boolean; melding: string }>(
+    `/api/instrument-ftp/slett-test${vert ? `?vert=${encodeURIComponent(vert)}` : ''}`)
+
+export const slettFtp = (sti: string, vert?: string) =>
+  apiPost<{ suksess: boolean; melding: string }>('/api/instrument-ftp/slett', { sti, vert })

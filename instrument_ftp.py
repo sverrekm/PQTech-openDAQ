@@ -308,6 +308,62 @@ def banner(vert: str = "", port: int = 0, timeout: float = 0) -> dict:
             "melding": "Reached FTP server: %s" % (vel or "(no banner)")}
 
 
+def slett(sti: str, vert: str = "", **kv) -> dict:
+    """Slett éi fil (DELE) på instrumentet. Katalog → RMD.
+
+    Destruktivt — kallaren (GUI) må stadfeste. Vi rører berre den eine
+    stien som blir send inn.
+    """
+    if not sti or sti in ("/", ""):
+        return {"suksess": False, "melding": "Refusing to delete root"}
+    with _las:
+        f = _opne(vert, **kv)
+        try:
+            try:
+                f.delete(sti)
+                return {"suksess": True, "melding": "Deleted %s" % sti}
+            except ftplib.error_perm as e:
+                m = str(e)
+                # Kanskje ein katalog — prøv RMD.
+                if m.startswith("550"):
+                    try:
+                        f.rmd(sti)
+                        return {"suksess": True, "melding": "Removed directory %s" % sti}
+                    except Exception:
+                        pass
+                return {"suksess": False, "melding": m}
+        finally:
+            _lukk(f)
+
+
+def slett_stotta(vert: str = "", **kv) -> dict:
+    """Non-destruktiv sjekk: støttar serveren DELE i det heile?
+
+    Prøver å slette eit namn som ikkje finst og les svaret. «No such file»
+    tyder at DELE er lov (berre fila mangla); «not implemented»/«permission»
+    tyder at det ikkje går. Ingen ekte fil blir rørt.
+    """
+    with _las:
+        f = _opne(vert, **kv)
+        try:
+            probe = "/pqtech_delete_probe_%d.tmp" % int(time.time())
+            try:
+                f.delete(probe)
+                return {"stotta": True, "melding": "DELE accepted"}
+            except ftplib.error_perm as e:
+                m = str(e)
+                lav = m.lower()
+                nekta = ("permission" in lav or "denied" in lav
+                         or m.startswith(("500", "502", "504")))
+                mangla = ("no such" in lav or "not found" in lav
+                          or "cannot find" in lav or m.startswith("550"))
+                return {"stotta": bool(mangla and not nekta), "melding": m}
+            except Exception as e:
+                return {"stotta": False, "melding": str(e)}
+        finally:
+            _lukk(f)
+
+
 def test(vert: str = "", **kv) -> dict:
     """Kom vi inn, og kva svarar serveren?
 

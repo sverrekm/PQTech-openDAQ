@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import {
-  fetchFtp, lagreFtp, testFtp, listeFtp, filFtp, synkFtp, kanalarFtp,
+  fetchFtp, lagreFtp, testFtp, listeFtp, filFtp, synkFtp, kanalarFtp, slettFtp,
 } from '../api/instrumentftp'
 import type { FtpKonfig, FtpListe, FtpFil, FtpKanalar } from '../api/instrumentftp'
 import { useI18n } from '../i18n'
@@ -90,6 +90,18 @@ export default function InstrumentFtpCard() {
       setFil({ suksess: false, melding: e instanceof Error ? e.message : String(e) })
     } finally {
       setJobbar(null)
+    }
+  }
+
+  const slett = async (filsti: string, namn: string) => {
+    if (!window.confirm(t('Delete this file on the instrument? This cannot be undone.') + `\n\n${namn}`)) return
+    setMelding(null); setFeil(null)
+    try {
+      const r = await slettFtp(filsti, v('vert'))
+      if (r.suksess) { setMelding(r.melding); bla(sti) }
+      else setFeil(r.melding)
+    } catch (e) {
+      setFeil(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -282,6 +294,11 @@ export default function InstrumentFtpCard() {
                 )}
                 <span className="text-gray-400 font-mono">{o.storleik || ''}</span>
                 <span className="text-gray-400">{o.dato}</span>
+                {!o.katalog && (
+                  <button title={t('Delete file')}
+                    className="text-gray-400 hover:text-red-600 px-1"
+                    onClick={() => slett(sti.replace(/\/+$/, '') + '/' + o.namn, o.namn)}>🗑</button>
+                )}
               </div>
             ))}
           </div>
