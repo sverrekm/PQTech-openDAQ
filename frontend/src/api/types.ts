@@ -222,6 +222,8 @@ export interface EnhetKonfig {
   antal_adc_kanalar: number
   modell: string
   location: string
+  /** 'auto' | 'vis' | 'skjul' — USB-korta på dashbordet */
+  vis_usb?: string
 }
 
 // --- /api/hub/* ---

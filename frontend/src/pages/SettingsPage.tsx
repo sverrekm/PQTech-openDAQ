@@ -1,5 +1,6 @@
 import DeviceNameCard from '../components/DeviceNameCard'
 import DeviceSettingsCard from '../components/DeviceSettingsCard'
+import InstrumentFunnCard from '../components/InstrumentFunnCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
 import MqttOppdagCard from '../components/MqttOppdagCard'
@@ -30,6 +31,7 @@ export default function SettingsPage() {
         <DeviceSettingsCard />
         <DeviceConnectionCard />
         <ChannelConfigCard />
+        <InstrumentFunnCard />
         <BufferConfigCard />
       </SettingsSection>
 

@@ -21,6 +21,8 @@ export interface SkannFunn {
   tittel?: string
   /** Sett naar port 502 svarte med SunSpec-signaturen */
   sunspec?: SunSpecInfo
+  /** Sett naar port 502 ser ut som ein PQube 3 (power-målar) */
+  pqube?: { melding?: string; verdiar?: Record<string, number> }
 }
 
 export interface SkannMaal {

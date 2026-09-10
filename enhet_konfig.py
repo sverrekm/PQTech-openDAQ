@@ -38,6 +38,9 @@ class EnhetKonfig:
     # hubben kan berre halde den eine («Device with the same local ID already
     # exists»). -1 = ikkje sett her; då gjeld env OPENDAQ_DEVICE_IDX (default 0).
     opendaq_device_idx: int = -1
+    # Vis USB-korta (SIRIUS-status + USB/IP) paa dashbordet.
+    # 'auto' = berre naar eit USB-instrument er til stades; 'vis'/'skjul' = tving.
+    vis_usb: str = "auto"
 
 
 def les_enhet_konfig() -> EnhetKonfig:
@@ -50,6 +53,7 @@ def les_enhet_konfig() -> EnhetKonfig:
                 modell=str(data.get("modell", "")),
                 location=str(data.get("location", "")),
                 opendaq_device_idx=int(data.get("opendaq_device_idx", -1)),
+                vis_usb=str(data.get("vis_usb", "auto")),
             )
             log.info(f"Lasta enhet-konfig: {konfig.antal_adc_kanalar} ADC-kanalar, "
                      f"modell={konfig.modell}")
@@ -108,8 +112,12 @@ def valider_enhet_konfig(data: dict) -> tuple:
     else:
         idx = les_enhet_konfig().opendaq_device_idx
 
+    vis_usb = str(data.get("vis_usb", "")).strip().lower()
+    if vis_usb not in ("auto", "vis", "skjul"):
+        vis_usb = les_enhet_konfig().vis_usb
+
     return EnhetKonfig(antal_adc_kanalar=n, modell=modell, location=location,
-                       opendaq_device_idx=idx), None
+                       opendaq_device_idx=idx, vis_usb=vis_usb), None
 
 
 # --- Modus-persistens ---

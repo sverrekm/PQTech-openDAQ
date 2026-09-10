@@ -5,7 +5,7 @@ import { useI18n } from '../i18n'
 
 export default function DeviceSettingsCard() {
   const { t } = useI18n()
-  const [konfig, setKonfig] = useState<EnhetKonfig>({ antal_adc_kanalar: 8, modell: '', location: '' })
+  const [konfig, setKonfig] = useState<EnhetKonfig>({ antal_adc_kanalar: 8, modell: '', location: '', vis_usb: 'auto' })
   const [melding, setMelding] = useState<string | null>(null)
   const [lagrar, setLagrar] = useState(false)
 
@@ -62,6 +62,20 @@ export default function DeviceSettingsCard() {
           onChange={e => setKonfig({ ...konfig, location: e.target.value })}
           placeholder="e.g. Workshop, Panel 3"
         />
+      </div>
+
+      <div className="mb-4">
+        <label className="block text-xs font-medium text-gray-600 mb-1">{t('USB cards on dashboard')}</label>
+        <select
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#D76428] focus:border-[#D76428]"
+          value={konfig.vis_usb ?? 'auto'}
+          onChange={e => setKonfig({ ...konfig, vis_usb: e.target.value })}
+        >
+          <option value="auto">{t('Auto — only when a USB instrument is present')}</option>
+          <option value="vis">{t('Always show')}</option>
+          <option value="skjul">{t('Never show')}</option>
+        </select>
+        <p className="text-xs text-gray-400 mt-1">{t('SIRIUS status and USB/IP sharing. Hide them on nodes that use Modbus/MQTT instruments instead.')}</p>
       </div>
 
       <div className="flex items-center gap-3">

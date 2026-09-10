@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react'
-import type { ServerStatus, KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
+import { useCallback, type ReactNode } from 'react'
+import { usePolling } from '../hooks/usePolling'
+import { fetchEnhetKonfig } from '../api/enhet'
+import type { ServerStatus, KanalKonfig, KanalLive, MqttStatus, HubKanal, EnhetKonfig } from '../api/types'
 import SiriusStatusCard from '../components/SiriusStatusCard'
 import UsbIpCard from '../components/UsbIpCard'
 import ChannelLiveCard from '../components/ChannelLiveCard'
@@ -68,10 +70,21 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
 
   // Direkte-modus: kompakte statuskort deler radene; kanaltabell, hendingar,
   // MQTT-logg og logg spenner full breidde.
+  return <DirekteDashboard status={status} siriusTilkoblet={siriusTilkoblet} channelCard={channelCard} />
+}
+
+function DirekteDashboard({ status, siriusTilkoblet, channelCard }:
+  { status: ServerStatus | null; siriusTilkoblet: boolean; channelCard: ReactNode }) {
+  const enhetFetcher = useCallback(() => fetchEnhetKonfig(), [])
+  const { data: enhet } = usePolling<EnhetKonfig>(enhetFetcher, 30000)
+  // USB-instrument til stades? SIRIUS tilkobla, eller USB-einingar oppdaga.
+  const usbTilstades = siriusTilkoblet || (status?.usb_enheter?.length ?? 0) > 0
+  const visUsb = enhet?.vis_usb === 'vis' || (enhet?.vis_usb !== 'skjul' && usbTilstades)
+
   return (
     <Rutenett>
-      <SiriusStatusCard />
-      <UsbIpCard ip={status?.ip || '-'} />
+      {visUsb && <SiriusStatusCard />}
+      {visUsb && <UsbIpCard ip={status?.ip || '-'} />}
       <Vid>{channelCard}</Vid>
       <OpenDaqBridgeCard />
       <RemoteBufferStatusCard />

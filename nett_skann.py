@@ -287,6 +287,22 @@ def _sunspec(ip: str, timeout: float) -> dict:
     return {}
 
 
+def _pqube(ip: str, timeout: float) -> dict:
+    """Kort PQube-sondering av ein vert med open 502. {} om ikkje truleg."""
+    try:
+        import pqube
+    except Exception:
+        return {}
+    ms = int(max(timeout, 2.0) * 1000)
+    try:
+        info = pqube.oppdag(ip, 502, 1, ms)
+    except Exception:
+        return {}
+    if info.get("pqube"):
+        return {"melding": info.get("melding", ""), "verdiar": info.get("verdiar", {})}
+    return {}
+
+
 def _detaljer(funn: dict, timeout: float) -> dict:
     """Full portliste + HTTP-banner for ein vert som alt har svart."""
     ip = funn["ip"]
@@ -314,6 +330,13 @@ def _detaljer(funn: dict, timeout: float) -> dict:
             # eige namn er betre enn ingen ting.
             if not funn.get("produsent") and ss.get("produsent"):
                 funn["produsent"] = ss["produsent"]
+        elif not _stopp.is_set():
+            # Ikkje SunSpec — er det ein PQube 3 (eller liknande målar med
+            # same register-kart)? Vi les eit par register og sjekkar at
+            # spenning/frekvens er fysisk fornuftige.
+            pq = _pqube(ip, timeout)
+            if pq:
+                funn["pqube"] = pq
     return funn
 
 

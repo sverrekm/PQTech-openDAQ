@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling'
 import { fetchSkann, startSkann, stoppSkann, fetchSisteSkann, fetchSkannMaal } from '../api/nettskann'
 import type { SkannStatus, SkannFunn, SisteFunn, SkannMaal } from '../api/nettskann'
 import { leggTilSunSpec } from '../api/sunspec'
+import { leggTilPqube } from '../api/pqube'
 import type { SunSpecInfo, LeggTilSvar } from '../api/sunspec'
 import { useI18n } from '../i18n'
 import Panel from './ui/Panel'
@@ -107,6 +108,7 @@ export default function NettSkannCard() {
         {f.tittel && <div className="text-gray-500">{f.tittel}</div>}
         {f.mac && <div className="text-gray-400 font-mono">{f.mac}</div>}
         {f.sunspec && <SunSpecFunn ip={f.ip} ss={f.sunspec} />}
+        {f.pqube && <PqubeFunn ip={f.ip} melding={f.pqube.melding} />}
       </td>
     </tr>
   ))
@@ -296,6 +298,31 @@ function SunSpecFunn({ ip, ss }: { ip: string; ss: SunSpecInfo }) {
           {svar.melding}
         </div>
       )}
+    </div>
+  )
+}
+
+
+/** Eit PQube-funn i skannet, med knapp som legg han inn med register-kartet. */
+function PqubeFunn({ ip, melding }: { ip: string; melding?: string }) {
+  const { t } = useI18n()
+  const [jobbar, setJobbar] = useState(false)
+  const [svar, setSvar] = useState<string | null>(null)
+  const leggTil = async () => {
+    setJobbar(true); setSvar(null)
+    try { const r = await leggTilPqube(ip, `PQube 3 ${ip}`); setSvar(r.melding) }
+    catch (e) { setSvar(e instanceof Error ? e.message : String(e)) }
+    finally { setJobbar(false) }
+  }
+  return (
+    <div className="mt-1.5 border-l-2 border-[#D76428] pl-2">
+      <div className="font-medium text-[#D76428]">PQube 3</div>
+      {melding && <div className="text-gray-500">{melding}</div>}
+      <button onClick={leggTil} disabled={jobbar}
+        className="mt-1 text-xs px-2 py-0.5 rounded bg-[#D76428] text-white hover:bg-[#b8541f] disabled:opacity-50">
+        {jobbar ? t('Adding…') : t('Add as PQube 3')}
+      </button>
+      {svar && <div className="mt-1 text-green-600">{svar}</div>}
     </div>
   )
 }
