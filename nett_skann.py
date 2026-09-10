@@ -288,18 +288,32 @@ def _sunspec(ip: str, timeout: float) -> dict:
 
 
 def _pqube(ip: str, timeout: float) -> dict:
-    """Kort PQube-sondering av ein vert med open 502. {} om ikkje truleg."""
+    """Kort PQube-sondering av ein vert med open 502. {} om ikkje truleg.
+
+    Eitt retry: ei innebygd eining som nettopp slapp ei anna tilkopling er
+    gjerne treg til å ta imot den neste, og eit skann skal ikkje gå glipp
+    av ein PQube på det.
+    """
     try:
         import pqube
     except Exception:
         return {}
     ms = int(max(timeout, 2.0) * 1000)
-    try:
-        info = pqube.oppdag(ip, 502, 1, ms)
-    except Exception:
-        return {}
-    if info.get("pqube"):
-        return {"melding": info.get("melding", ""), "verdiar": info.get("verdiar", {})}
+    for forsok in range(2):
+        if _stopp.is_set():
+            return {}
+        try:
+            info = pqube.oppdag(ip, 502, 1, ms)
+        except Exception:
+            info = {}
+        if info.get("pqube"):
+            return {"melding": info.get("melding", ""),
+                    "verdiar": info.get("verdiar", {})}
+        # Berre verdt eit nytt forsøk om vi ikkje fekk kopla til i det heile.
+        if forsok == 0 and "onnect" in str(info.get("melding", "")):
+            time.sleep(0.5)
+            continue
+        break
     return {}
 
 
@@ -323,20 +337,21 @@ def _detaljer(funn: dict, timeout: float) -> dict:
                 funn.update(banner)
                 break
     if any(o["port"] == 502 for o in opne) and not _stopp.is_set():
-        ss = _sunspec(ip, timeout)
-        if ss:
-            funn["sunspec"] = ss
-            # OUI-tabellen kjenner ikkje alle produsentar; eininga sitt
-            # eige namn er betre enn ingen ting.
-            if not funn.get("produsent") and ss.get("produsent"):
-                funn["produsent"] = ss["produsent"]
+        # PQube FØRST: innebygd Modbus (PQube o.l.) toler ofte berre EI
+        # TCP-tilkopling om gongen. SunSpec-proben prøver fleire basar =
+        # fleire tilkoplingar, og la beslag på slottet rett før PQube-proben,
+        # so PQuben aldri vart kjend att under eit skann. Éin rein
+        # PQube-prøve først løyser det; er det ikkje ein PQube, prøver vi
+        # SunSpec etterpå.
+        pq = _pqube(ip, timeout)
+        if pq:
+            funn["pqube"] = pq
         elif not _stopp.is_set():
-            # Ikkje SunSpec — er det ein PQube 3 (eller liknande målar med
-            # same register-kart)? Vi les eit par register og sjekkar at
-            # spenning/frekvens er fysisk fornuftige.
-            pq = _pqube(ip, timeout)
-            if pq:
-                funn["pqube"] = pq
+            ss = _sunspec(ip, timeout)
+            if ss:
+                funn["sunspec"] = ss
+                if not funn.get("produsent") and ss.get("produsent"):
+                    funn["produsent"] = ss["produsent"]
     return funn
 
 
