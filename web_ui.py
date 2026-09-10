@@ -2795,6 +2795,84 @@ def api_g4500_legg_til():
                         melding)})
 
 
+@app.route("/api/instrument/banner")
+def api_instrument_banner():
+    """Hent ein TCP-banner frae ein privat vert:port (diagnose).
+
+    Reint informativt: koplar til, les det serveren sender (og sender ei
+    linje for aa lokke fram ein prompt), og returnerer raa + lesbar tekst.
+    Berre private IP-ar, som instrument-proxyen — inga vidarekopling.
+    """
+    import socket as _sock
+    import time as _t
+    host = str(request.args.get("host", "")).strip()
+    try:
+        port = int(request.args.get("port", 23))
+    except (TypeError, ValueError):
+        return jsonify({"feil": "invalid port"}), 400
+    if not host:
+        return jsonify({"feil": "missing host"}), 400
+    try:
+        import instrument_proxy as _ip
+        if not _ip.tillat_vert(host):
+            return jsonify({"feil": "only private IPs allowed"}), 400
+    except Exception:
+        pass
+    data = b""
+    feil = ""
+    s2 = _sock.socket()
+    s2.settimeout(5.0)
+    try:
+        s2.connect((host, port))
+        s2.settimeout(2.5)
+        try:
+            while len(data) < 4096:
+                bit = s2.recv(1024)
+                if not bit:
+                    break
+                data += bit
+        except _sock.timeout:
+            pass
+        if len(data) < 4:
+            try:
+                s2.sendall(bytes([13, 10]))
+                _t.sleep(0.6)
+                data += s2.recv(2048)
+            except Exception:
+                pass
+    except Exception as e:
+        feil = str(e)
+    finally:
+        try:
+            s2.close()
+        except Exception:
+            pass
+    forhandling = []
+    tekst = bytearray()
+    i = 0
+    KMD = {251: "WILL", 252: "WONT", 253: "DO", 254: "DONT"}
+    while i < len(data):
+        b = data[i]
+        if b == 255 and i + 1 < len(data):
+            c = data[i + 1]
+            if c in KMD and i + 2 < len(data):
+                forhandling.append("%s opt %d" % (KMD[c], data[i + 2]))
+                i += 3
+                continue
+            i += 2
+            continue
+        if b in (9, 10, 13) or 32 <= b < 127:
+            tekst.append(b)
+        i += 1
+    return jsonify({
+        "host": host, "port": port, "bytes": len(data),
+        "hex": data[:160].hex(),
+        "tekst": tekst.decode("ascii", "replace"),
+        "telnet_forhandling": forhandling[:20],
+        "feil": feil,
+    })
+
+
 @app.route("/api/pqube/oppdag", methods=["POST"])
 def api_pqube_oppdag():
     """Ser eininga ut som ein PQube 3 (power-målar på Modbus)?"""
