@@ -584,6 +584,22 @@ def start_server(args):
     except Exception:
         log.warning(f"Instrument-FTP: {traceback.format_exc(limit=1).strip()}")
 
+    # Node som SMTP-server: instrument (PQube, Elspec ...) mailar rapportar
+    # og hendingsvarsel hit. CSV-vedlegg blir kanalar via instrument_ftp.
+    try:
+        import smtp_server
+        smtp_server.start()
+    except Exception:
+        log.warning(f"SMTP-server: {traceback.format_exc(limit=1).strip()}")
+
+    # Node som tidsserver (NTP/SNTP): instrument paa eit isolert maalenett
+    # har ofte ingen veg ut til ein tidsserver; noden staar paa same nett.
+    try:
+        import ntp_server
+        ntp_server.start()
+    except Exception:
+        log.warning(f"NTP-server: {traceback.format_exc(limit=1).strip()}")
+
     # Berge-serveren startar FOER Flask og er uavhengig av han: doeyr
     # web-traaden, er noden framleis naabar via hubben paa berge-porten,
     # med traceback og ein oppdater-og-restart-knapp. Utan denne er ein node

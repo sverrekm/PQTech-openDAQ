@@ -2587,6 +2587,64 @@ def api_instrument_ftp_fil():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/smtp")
+def api_smtp_hent():
+    """SMTP-server-konfig + status. Passordet foelgjer aldri med ut."""
+    try:
+        import smtp_server
+        return jsonify(smtp_server.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/smtp", methods=["PUT"])
+def api_smtp_lagre():
+    data = request.get_json(silent=True) or {}
+    try:
+        import smtp_server
+        ok, melding = smtp_server.lagre_konfig(data)
+        if ok:
+            smtp_server.start()
+        return jsonify({"suksess": ok, "melding": melding,
+                        **smtp_server.konfig_offentleg()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/smtp/meldingar")
+def api_smtp_meldingar():
+    """Siste mottekne e-postar (avsendar, emne, vedlegg)."""
+    try:
+        import smtp_server
+        return jsonify({"meldingar": list(reversed(smtp_server.meldingar()))[:100]})
+    except Exception as e:
+        return jsonify({"meldingar": [], "feil": str(e)}), 500
+
+
+@app.route("/api/ntp")
+def api_ntp_hent():
+    """NTP/SNTP-tidsserver-konfig + status."""
+    try:
+        import ntp_server
+        return jsonify(ntp_server.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/ntp", methods=["PUT"])
+def api_ntp_lagre():
+    data = request.get_json(silent=True) or {}
+    try:
+        import ntp_server
+        ok, melding = ntp_server.lagre_konfig(data)
+        if ok:
+            ntp_server.start()
+        return jsonify({"suksess": ok, "melding": melding,
+                        **ntp_server.konfig_offentleg()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/instrument-ftp/kanalar")
 def api_instrument_ftp_kanalar():
     """Kanalane vi har trekt ut av dei ferskaste rapportane."""
