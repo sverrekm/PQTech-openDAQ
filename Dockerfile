@@ -732,6 +732,7 @@ COPY instrument_proxy.py .
 COPY instrument_ftp.py .
 COPY mqtt_oppdag.py .
 COPY pqube.py .
+COPY g4500.py .
 COPY smtp_server.py .
 COPY ntp_server.py .
 COPY brukar_auth.py .

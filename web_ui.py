@@ -2718,6 +2718,83 @@ def api_sunspec_kanalar():
                         "registers": []}), 500
 
 
+@app.route("/api/g4500/oppdag", methods=["POST"])
+def api_g4500_oppdag():
+    """Svarar det ein Elspec G4500 her (via RS-485→Modbus-TCP-gateway)?"""
+    data = request.get_json(silent=True) or {}
+    try:
+        import g4500
+        return jsonify(g4500.oppdag(
+            str(data.get("host", "")).strip(),
+            int(data.get("port", 502)), int(data.get("unit_id", g4500.UNIT)),
+            int(data.get("timeout_ms", 2000))))
+    except Exception as e:
+        return jsonify({"g4500": False, "melding": str(e)}), 500
+
+
+@app.route("/api/g4500/legg-til", methods=["POST"])
+def api_g4500_legg_til():
+    """Legg ein Elspec G4500 inn som modbus_tcp-node (unit 159, ferdig kart)."""
+    data = request.get_json(silent=True) or {}
+    vert = str(data.get("host", "")).strip()
+    if not vert:
+        return jsonify({"suksess": False, "melding": "Missing host"}), 400
+    try:
+        import g4500
+        havn = int(data.get("port", 502))
+        unit = int(data.get("unit_id", g4500.UNIT))
+        funksjon = str(data.get("funksjon", "") or "")
+        if funksjon not in ("holding", "input"):
+            # Prøv å oppdage rett funksjonskode; fall til holding.
+            try:
+                info = g4500.oppdag(vert, havn, unit)
+                funksjon = info.get("funksjon") or "holding"
+            except Exception:
+                funksjon = "holding"
+        ny = g4500.lag_node(vert, str(data.get("namn", "")).strip(), havn, unit,
+                            float(data.get("poll_hz", 1.0)), funksjon)
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+    gjeldande = (hent_hub_konfig_dict() if HUB_MODUS
+                 else les_hub_konfig().til_dict())
+    nodar = list(gjeldande.get("nodar", []))
+    for i, n in enumerate(nodar):
+        if (str(n.get("adresse", "")) == vert
+                and int(n.get("port", 502) or 502) == havn
+                and int(n.get("modbus_unit_id", 1) or 1) == unit
+                and str(n.get("type", "")) == "modbus_tcp"):
+            ny["id"] = n.get("id")
+            ny["namn"] = str(n.get("namn") or ny["namn"])
+            ny["lokasjon"] = n.get("lokasjon", "")
+            nodar[i] = ny
+            break
+    else:
+        nodar.append(ny)
+    gjeldande["nodar"] = nodar
+
+    konfig, feil = valider_hub_konfig(gjeldande)
+    if feil:
+        return jsonify({"suksess": False, "melding": feil}), 400
+    if HUB_MODUS:
+        ok, melding = oppdater_hub_konfig(konfig)
+    else:
+        ok = lagre_hub_konfig(konfig)
+        melding = "config saved" if ok else "could not save config"
+        if ok and SIRIUS_DIREKTE:
+            try:
+                _modbus_restart_etter_konfig()
+                melding = "config saved, Modbus manager restarting"
+            except Exception as e:
+                melding = "config saved, but restart failed: {}".format(e)
+    return jsonify({"suksess": ok, "namn": ny["namn"],
+                    "tal": len(ny["modbus_registers"]),
+                    "melding": "{} channels from {} (FC{}) — {}".format(
+                        len(ny["modbus_registers"]), ny["namn"],
+                        "03" if ny["modbus_registers"][0]["funksjon"] == "holding" else "04",
+                        melding)})
+
+
 @app.route("/api/pqube/oppdag", methods=["POST"])
 def api_pqube_oppdag():
     """Ser eininga ut som ein PQube 3 (power-målar på Modbus)?"""
