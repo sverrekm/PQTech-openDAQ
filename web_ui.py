@@ -2621,6 +2621,30 @@ def api_smtp_meldingar():
         return jsonify({"meldingar": [], "feil": str(e)}), 500
 
 
+@app.route("/api/ftp-proxy")
+def api_ftp_proxy_hent():
+    """FTP-proxy-konfig + status (instrument-FTP over Tailscale)."""
+    try:
+        import ftp_proxy
+        return jsonify(ftp_proxy.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/ftp-proxy", methods=["PUT"])
+def api_ftp_proxy_lagre():
+    data = request.get_json(silent=True) or {}
+    try:
+        import ftp_proxy
+        ok, melding = ftp_proxy.lagre_konfig(data)
+        if ok:
+            ftp_proxy.start()
+        return jsonify({"suksess": ok, "melding": melding,
+                        **ftp_proxy.konfig_offentleg()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/ntp")
 def api_ntp_hent():
     """NTP/SNTP-tidsserver-konfig + status."""

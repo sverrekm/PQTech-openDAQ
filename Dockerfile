@@ -735,6 +735,7 @@ COPY pqube.py .
 COPY g4500.py .
 COPY smtp_server.py .
 COPY ntp_server.py .
+COPY ftp_proxy.py .
 COPY brukar_auth.py .
 COPY tailscale_manager.py .
 # Modular lagt til etter at COPY-lista sist vart oppdatert. Utan desse

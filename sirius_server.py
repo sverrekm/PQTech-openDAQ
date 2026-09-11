@@ -1841,6 +1841,14 @@ def start_server(args):
     except Exception:
         log.warning(f"NTP-server: {traceback.format_exc(limit=1).strip()}")
 
+    # FTP-proxy: gjer eit instrument sin FTP tilgjengeleg over Tailscale
+    # (PASV-medviten). Startar alltid, i tomgang til paaslegen.
+    try:
+        import ftp_proxy
+        ftp_proxy.start()
+    except Exception:
+        log.warning(f"FTP-proxy: {traceback.format_exc(limit=1).strip()}")
+
     # Berge-serveren startar FOER Flask og er uavhengig av han: doeyr
     # web-traaden, er noden framleis naabar via hubben paa berge-porten,
     # med traceback og ein oppdater-og-restart-knapp. Utan denne er ein node

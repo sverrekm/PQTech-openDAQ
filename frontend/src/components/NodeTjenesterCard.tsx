@@ -2,8 +2,9 @@ import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import {
   fetchSmtp, lagreSmtp, fetchSmtpMeldingar, fetchNtp, lagreNtp,
+  fetchFtpProxy, lagreFtpProxy,
 } from '../api/tjenester'
-import type { SmtpKonfig, SmtpMelding, NtpKonfig } from '../api/tjenester'
+import type { SmtpKonfig, SmtpMelding, NtpKonfig, FtpProxyKonfig } from '../api/tjenester'
 import Panel from './ui/Panel'
 import { useI18n } from '../i18n'
 
@@ -23,7 +24,61 @@ export default function NodeTjenesterCard() {
       <Smtp />
       <div className="my-4" style={{ borderTop: '1px solid var(--color-line-soft)' }} />
       <Ntp />
+      <div className="my-4" style={{ borderTop: '1px solid var(--color-line-soft)' }} />
+      <FtpProxy />
     </Panel>
+  )
+}
+
+function FtpProxy() {
+  const { t } = useI18n()
+  const fetcher = useCallback(() => fetchFtpProxy(), [])
+  const { data, refresh } = usePolling<FtpProxyKonfig>(fetcher, 5000)
+  const [u, setU] = useState<Partial<FtpProxyKonfig>>({})
+  const [melding, setMelding] = useState<string | null>(null)
+  const v = <K extends keyof FtpProxyKonfig>(f: K): FtpProxyKonfig[K] =>
+    (u[f] !== undefined ? (u[f] as FtpProxyKonfig[K]) : data?.[f]) as FtpProxyKonfig[K]
+  const sett = (f: string, val: unknown) => setU((o) => ({ ...o, [f]: val }))
+  const lagre = async () => {
+    setMelding(null)
+    try { const r = await lagreFtpProxy(u); setMelding(r.melding); setU({}); refresh() }
+    catch (e) { setMelding(e instanceof Error ? e.message : String(e)) }
+  }
+  const naaAdr = data?.tailscale_ip && data?.lytt_port
+    ? `${data.tailscale_ip}:${data.lytt_port}` : null
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="card-head" style={{ margin: 0 }}>{t('Instrument FTP over Tailscale')}</span>
+        <span className="tag ml-auto" style={{ color: st(data?.status?.tilstand), border: '1px solid var(--color-divider)' }}>
+          {data?.status?.tilstand || '—'}{data?.status?.totalt_okter ? ` · ${data.status.totalt_okter} ${t('sessions')}` : ''}
+        </span>
+      </div>
+      <p className="hint mb-2">{t('Makes the instrument’s FTP reachable from the hub side over Tailscale — PASV is rewritten so file transfers work through the NAT.')}</p>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <label className="flex items-center gap-2 text-sm col-span-2">
+          <input type="checkbox" checked={!!v('aktivert')} onChange={(e) => sett('aktivert', e.target.checked)} />
+          {t('Enable FTP proxy')}
+        </label>
+        <div><label className="ui-label">{t('Listen port')}</label>
+          <input className={inn} type="number" value={v('lytt_port') ?? 2121} onChange={(e) => sett('lytt_port', Number(e.target.value))} /></div>
+        <div><label className="ui-label">{t('Instrument FTP (IP)')}</label>
+          <input className={inn} value={v('maal_vert') ?? ''} placeholder={data?.maal_vert_effektiv || '10.99.0.1'}
+            onChange={(e) => sett('maal_vert', e.target.value)} /></div>
+        <label className="flex items-center gap-2 text-sm col-span-2">
+          <input type="checkbox" checked={v('berre_tailscale') ?? true} onChange={(e) => sett('berre_tailscale', e.target.checked)} />
+          {t('Only expose on the Tailscale address (not the local LAN)')}
+        </label>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button className="btn-primary" onClick={lagre}>{t('Save')}</button>
+        {naaAdr && data?.status?.tilstand === 'koeyrer' && (
+          <span className="hint">{t('Connect an FTP client to')} <span className="ui-num">{naaAdr}</span> ({t('user')} ftpuser)</span>
+        )}
+        {melding && <span className="hint">{melding}</span>}
+      </div>
+    </div>
   )
 }
 

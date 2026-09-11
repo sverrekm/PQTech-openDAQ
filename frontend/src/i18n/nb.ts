@@ -839,4 +839,13 @@ export const nb: Record<string, string> = {
   'Unit id': 'Unit-id',
   'Delete file': 'Slett fil',
   'Delete this file on the instrument? This cannot be undone.': 'Slette denne fila på instrumentet? Dette kan ikkje angrast.',
+  'Instrument FTP over Tailscale': 'Instrument-FTP over Tailscale',
+  'sessions': 'økter',
+  'Makes the instrument’s FTP reachable from the hub side over Tailscale — PASV is rewritten so file transfers work through the NAT.': 'Gjer instrumentet sin FTP nåbar frå hub-sida over Tailscale — PASV blir skrive om så filoverføring virkar gjennom NAT-en.',
+  'Enable FTP proxy': 'Slå på FTP-proxy',
+  'Listen port': 'Lytte-port',
+  'Instrument FTP (IP)': 'Instrument-FTP (IP)',
+  'Only expose on the Tailscale address (not the local LAN)': 'Eksponer berre på Tailscale-adressa (ikkje lokalnettet)',
+  'Connect an FTP client to': 'Kople ein FTP-klient til',
+  'user': 'brukar',
 }

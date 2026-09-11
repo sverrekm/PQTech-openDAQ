@@ -40,3 +40,21 @@ export interface NtpKonfig {
 export const fetchNtp = () => apiGet<NtpKonfig>('/api/ntp')
 export const lagreNtp = (k: Partial<NtpKonfig>) =>
   apiPut<{ suksess: boolean; melding: string } & NtpKonfig>('/api/ntp', k)
+
+// --- FTP-proxy (instrument-FTP over Tailscale) ---
+export interface FtpProxyKonfig {
+  aktivert: boolean
+  lytt_port: number
+  maal_vert: string
+  maal_port: number
+  berre_tailscale: boolean
+  maal_vert_effektiv?: string
+  tailscale_ip?: string
+  status?: {
+    tilstand: string; melding: string; lytt: string; maal: string
+    aktive_okter: number; totalt_okter: number
+  }
+}
+export const fetchFtpProxy = () => apiGet<FtpProxyKonfig>('/api/ftp-proxy')
+export const lagreFtpProxy = (k: Partial<FtpProxyKonfig>) =>
+  apiPut<{ suksess: boolean; melding: string } & FtpProxyKonfig>('/api/ftp-proxy', k)
