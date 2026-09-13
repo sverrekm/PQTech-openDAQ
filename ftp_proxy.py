@@ -37,6 +37,10 @@ STANDARD = {
     "maal_vert": "",      # tomt = bruk instrument_ftp sin vert
     "maal_port": 21,
     "berre_tailscale": True,   # bind berre tailscale-adressa
+    # Eksplisitt bind-adresse. Overstyrer berre_tailscale når sett. Brukt på
+    # HUBBEN: bind kontor-LAN-IP-en so office-maskiner kan FTP-e til hubben,
+    # UTAN å eksponere relayet på den offentlege adressa (0.0.0.0).
+    "bind_ip": "",
 }
 
 _227 = re.compile(rb"227[^\d]*\(?(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)?")
@@ -65,9 +69,18 @@ def lagre_konfig(data: dict) -> tuple:
     mv = str(data.get("maal_vert", k["maal_vert"])).strip()
     if mv and not _privat(mv):
         return False, "'%s' is not a private IP address" % mv
+    bind = str(data.get("bind_ip", k["bind_ip"])).strip()
+    if bind:
+        try:
+            import ipaddress
+            a = ipaddress.ip_address(bind)
+            if a.is_global:
+                return False, "Refusing to bind a public address (%s)" % bind
+        except ValueError:
+            return False, "Invalid bind IP"
     k.update({
         "aktivert": bool(data.get("aktivert", k["aktivert"])),
-        "lytt_port": lp, "maal_port": mp, "maal_vert": mv,
+        "lytt_port": lp, "maal_port": mp, "maal_vert": mv, "bind_ip": bind,
         "berre_tailscale": bool(data.get("berre_tailscale", k["berre_tailscale"])),
     })
     try:
@@ -116,11 +129,29 @@ def _tailscale_ip() -> str:
     return ""
 
 
+def _lokale_ip() -> list:
+    """Ikkje-loopback IPv4 på denne maskina (for bind-val i GUI-et)."""
+    ut = []
+    try:
+        r = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True,
+                           text=True, timeout=5)
+        for ln in r.stdout.splitlines():
+            delar = ln.split()
+            if len(delar) >= 4 and "/" in delar[3]:
+                ip = delar[3].split("/")[0]
+                if not ip.startswith("127."):
+                    ut.append(ip)
+    except Exception:
+        pass
+    return ut
+
+
 def konfig_offentleg() -> dict:
     k = les_konfig()
     k["status"] = status()
     k["maal_vert_effektiv"] = _maalvert()
     k["tailscale_ip"] = _tailscale_ip()
+    k["lokale_ip"] = _lokale_ip()
     return k
 
 
@@ -298,8 +329,13 @@ def _server_loop() -> None:
                 return
             _behov_omstart.wait(5)
             continue
-        bind_ip = _tailscale_ip() if k.get("berre_tailscale", True) else "0.0.0.0"
-        if not bind_ip:
+        # Eksplisitt bind_ip vinn (hubben sin kontor-LAN); elles tailscale;
+        # elles alle grensesnitt.
+        if k.get("bind_ip"):
+            bind_ip = k["bind_ip"]
+        elif k.get("berre_tailscale", True):
+            bind_ip = _tailscale_ip() or "0.0.0.0"
+        else:
             bind_ip = "0.0.0.0"
         srv = socket.socket()
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

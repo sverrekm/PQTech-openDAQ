@@ -848,4 +848,9 @@ export const nb: Record<string, string> = {
   'Only expose on the Tailscale address (not the local LAN)': 'Eksponer berre på Tailscale-adressa (ikkje lokalnettet)',
   'Connect an FTP client to': 'Kople ein FTP-klient til',
   'user': 'brukar',
+  'Target FTP (IP)': 'Mål-FTP (IP)',
+  'Bind address (blank = Tailscale only)': 'Bind-adresse (tom = berre Tailscale)',
+  'e.g. hub office-LAN IP, or blank': 't.d. hub sin kontor-LAN-IP, eller tom',
+  'On the hub, set this to its office-LAN IP and Target to the node’s Tailscale FTP (e.g. 100.79.202.65:2121) to relay it onto the office network.': 'På hubben: sett denne til kontor-LAN-IP-en, og Mål til noden sin Tailscale-FTP (t.d. 100.79.202.65:2121), for å relaye han ut på kontornettet.',
+  'This host:': 'Denne maskina:',
 }

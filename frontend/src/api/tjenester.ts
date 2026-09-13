@@ -48,8 +48,10 @@ export interface FtpProxyKonfig {
   maal_vert: string
   maal_port: number
   berre_tailscale: boolean
+  bind_ip: string
   maal_vert_effektiv?: string
   tailscale_ip?: string
+  lokale_ip?: string[]
   status?: {
     tilstand: string; melding: string; lytt: string; maal: string
     aktive_okter: number; totalt_okter: number

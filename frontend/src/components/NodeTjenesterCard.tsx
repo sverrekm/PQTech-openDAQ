@@ -63,13 +63,25 @@ function FtpProxy() {
         </label>
         <div><label className="ui-label">{t('Listen port')}</label>
           <input className={inn} type="number" value={v('lytt_port') ?? 2121} onChange={(e) => sett('lytt_port', Number(e.target.value))} /></div>
-        <div><label className="ui-label">{t('Instrument FTP (IP)')}</label>
-          <input className={inn} value={v('maal_vert') ?? ''} placeholder={data?.maal_vert_effektiv || '10.99.0.1'}
-            onChange={(e) => sett('maal_vert', e.target.value)} /></div>
-        <label className="flex items-center gap-2 text-sm col-span-2">
-          <input type="checkbox" checked={v('berre_tailscale') ?? true} onChange={(e) => sett('berre_tailscale', e.target.checked)} />
-          {t('Only expose on the Tailscale address (not the local LAN)')}
-        </label>
+        <div className="grid grid-cols-3 gap-1">
+          <div className="col-span-2"><label className="ui-label">{t('Target FTP (IP)')}</label>
+            <input className={inn} value={v('maal_vert') ?? ''} placeholder={data?.maal_vert_effektiv || '10.99.0.1'}
+              onChange={(e) => sett('maal_vert', e.target.value)} /></div>
+          <div><label className="ui-label">{t('Port')}</label>
+            <input className={inn} type="number" value={v('maal_port') ?? 21} onChange={(e) => sett('maal_port', Number(e.target.value))} /></div>
+        </div>
+        <div className="col-span-2">
+          <label className="ui-label">{t('Bind address (blank = Tailscale only)')}</label>
+          <input className={inn} value={v('bind_ip') ?? ''} placeholder={t('e.g. hub office-LAN IP, or blank')}
+            onChange={(e) => sett('bind_ip', e.target.value)} list="ftpproxy-ips" />
+          <datalist id="ftpproxy-ips">
+            {(data?.lokale_ip ?? []).map((ip) => <option key={ip} value={ip} />)}
+          </datalist>
+          <p className="hint mt-1">
+            {t('On the hub, set this to its office-LAN IP and Target to the node’s Tailscale FTP (e.g. 100.79.202.65:2121) to relay it onto the office network.')}
+            {(data?.lokale_ip?.length ?? 0) > 0 && ` ${t('This host:')} ${data!.lokale_ip!.join(', ')}`}
+          </p>
+        </div>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <button className="btn-primary" onClick={lagre}>{t('Save')}</button>
