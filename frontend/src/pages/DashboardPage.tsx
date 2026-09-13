@@ -6,6 +6,7 @@ import SiriusStatusCard from '../components/SiriusStatusCard'
 import UsbIpCard from '../components/UsbIpCard'
 import ChannelLiveCard from '../components/ChannelLiveCard'
 import InstrumentMeterGrid from '../components/InstrumentMeterGrid'
+import HubMeterGrid from '../components/HubMeterGrid'
 import OpenDaqBridgeCard from '../components/OpenDaqBridgeCard'
 import ServerStatusCard from '../components/ServerStatusCard'
 import LogViewer from '../components/LogViewer'
@@ -56,16 +57,22 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
     />
   )
 
-  // Hub-modus: node-oversikt + mottatte kanalar er breie; server er kompakt.
+  // Hub-modus: hero-målarrutenett over dei synlege node-kanalane øvst,
+  // deretter node-oversikt, filter, tabell og logg.
   if (isHubMode) {
     return (
-      <Rutenett>
-        <Vid><NodeOverviewCard /></Vid>
-        <Vid><HubKanalFilterCard /></Vid>
-        <Vid>{channelCard}</Vid>
-        <ServerStatusCard status={status} />
-        <Vid><LogViewer /></Vid>
-      </Rutenett>
+      <div className="flex flex-col gap-6">
+        <div>
+          <HubMeterGrid hubKanalar={hubKanalar} onHubClick={onHubClick} />
+        </div>
+        <Rutenett>
+          <Vid><NodeOverviewCard /></Vid>
+          <Vid><HubKanalFilterCard /></Vid>
+          <Vid>{channelCard}</Vid>
+          <ServerStatusCard status={status} />
+          <Vid><LogViewer /></Vid>
+        </Rutenett>
+      </div>
     )
   }
 
@@ -79,6 +86,8 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
       siriusTilkoblet={siriusTilkoblet}
       onChannelClick={onChannelClick}
       onMqttClick={onMqttClick}
+      hubKanalar={hubKanalar}
+      onHubClick={onHubClick}
     />
   )
   return <DirekteDashboard status={status} siriusTilkoblet={siriusTilkoblet} channelCard={channelCard} meterGrid={meterGrid} />

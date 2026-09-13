@@ -1,6 +1,7 @@
-import { useRef } from 'react'
-import type { KanalKonfig, KanalLive, MqttStatus } from '../api/types'
-import SparklineChart from './SparklineChart'
+import { useRef, useState, useEffect } from 'react'
+import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
+import { erKanalSynleg, SYNLEGE_EVENT } from '../pages/HubPage'
+import MeterGrid, { type Meter } from './MeterGrid'
 import { useI18n } from '../i18n'
 
 interface Props {
@@ -10,18 +11,8 @@ interface Props {
   siriusTilkoblet?: boolean
   onChannelClick?: (index: number) => void
   onMqttClick?: (topic: string) => void
-}
-
-interface Meter {
-  key: string
-  num: string
-  namn: string
-  verdi: string
-  eining: string
-  kjelde: string
-  farge: string
-  spark: number[]
-  onClick?: () => void
+  hubKanalar?: HubKanal[]
+  onHubClick?: (nodeId: string, namn: string) => void
 }
 
 // Kjelde -> farge (same paletten som ChannelLiveCard).
@@ -32,14 +23,25 @@ const KJELDE_FARGE: Record<string, string> = {
   MQTT: '#8b5cf6',
 }
 
+// Palett for framsende (hub/modbus-sub-node) kanalar, farga per node.
+const NODE_PALETT = ['#0d9488', '#d97706', '#db2777', '#2563eb', '#7c3aed', '#059669']
+
 /**
- * Instrument-målarrutenett: hero-seksjonen på dashbordet i blueprint-språket.
- * Kvar aktiv kanal (SIRIUS/USB/Sim) og MQTT-topic vert ein stor mono-avlesing
- * med kjelde-tagg og sparklinje. Auto-fit-grid utnyttar heile breidda.
+ * Node-dashbordets hero: eit målar-rutenett over aktive kanalar (SIRIUS/USB/
+ * Sim) og MQTT-topics, kvar som ei stor mono-avlesing med kjelde-tagg og
+ * sparklinje. Brukar same verdi-logikk som ChannelLiveCard.
  */
 export default function InstrumentMeterGrid({
   kanalar, liveData: live, mqttStatus, siriusTilkoblet, onChannelClick, onMqttClick,
+  hubKanalar, onHubClick,
 }: Props) {
+  // Re-render straks synleg-utvalet endrar seg (frå filter-kortet).
+  const [, setSynlegVer] = useState(0)
+  useEffect(() => {
+    const h = () => setSynlegVer(v => v + 1)
+    window.addEventListener(SYNLEGE_EVENT, h)
+    return () => window.removeEventListener(SYNLEGE_EVENT, h)
+  }, [])
   const { t } = useI18n()
   const sparkRef = useRef<Map<string, number[]>>(new Map())
 
@@ -86,7 +88,7 @@ export default function InstrumentMeterGrid({
   }
 
   if (mqttStatus?.aktivert && mqttStatus.topics) {
-    Object.entries(mqttStatus.topics).forEach(([topic, info], j) => {
+    Object.entries(mqttStatus.topics).forEach(([topic, info]) => {
       const num = info.verdi
       meters.push({
         key: `mqtt_${topic}`,
@@ -99,72 +101,41 @@ export default function InstrumentMeterGrid({
         spark: num !== null && num !== undefined ? pushSpark(`mqtt_${topic}`, num) : (sparkRef.current.get(`mqtt_${topic}`) || []),
         onClick: onMqttClick ? () => onMqttClick(topic) : undefined,
       })
-      void j
     })
   }
 
-  const kanalTal = meters.length
+  // Framsende kanalar frå modbus/hub-sub-nodar (t.d. PQube på ein node), farga
+  // per node. Kan vere den einaste live-kjelda på ein rein aggregerings-node.
+  const synlegeHub = (hubKanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`))
+  const nodeFarge = new Map<string, string>()
+  synlegeHub.forEach(k => {
+    if (!nodeFarge.has(k.node_id)) nodeFarge.set(k.node_id, NODE_PALETT[nodeFarge.size % NODE_PALETT.length])
+  })
+  synlegeHub.forEach(k => {
+    const sparkKey = `hub_${k.node_id}:${k.namn}`
+    meters.push({
+      key: sparkKey,
+      num: String(meters.length + 1).padStart(2, '0'),
+      namn: k.namn,
+      verdi: k.verdi !== null && k.verdi !== undefined ? k.verdi.toFixed(2) : '—',
+      eining: k.eining || '',
+      kjelde: k.node_namn || k.node_id,
+      farge: nodeFarge.get(k.node_id) || '#0d9488',
+      spark: k.verdi !== null && k.verdi !== undefined ? pushSpark(sparkKey, k.verdi) : (sparkRef.current.get(sparkKey) || []),
+      onClick: onHubClick ? () => onHubClick(k.node_id, k.namn) : undefined,
+    })
+  })
 
   return (
-    <section>
-      <div className="flex items-end justify-between gap-4 mb-3">
-        <div>
-          <span className="mono block text-[9px] tracking-[0.16em] uppercase" style={{ color: 'var(--color-accent-700)' }}>
-            {t('Live acquisition')}
-          </span>
-          <h2 className="text-[27px] leading-none mt-0.5" style={{ fontFamily: 'var(--font-heading)', fontWeight: 600 }}>
-            {t('Instrument')}
-          </h2>
-        </div>
-        <div className="mono flex gap-5 text-[11px] tracking-[0.06em] uppercase pb-1" style={{ color: 'rgba(26,26,26,0.55)' }}>
-          <span>{siriusTilkoblet ? 'SIRIUS' : t('No USB instrument')}</span>
-          <span>{kanalTal} {t('channels')}</span>
-        </div>
-      </div>
-
-      {kanalTal === 0 ? (
-        <div className="blueprint p-6 text-center text-sm" style={{ color: 'rgba(26,26,26,0.55)' }}>
-          <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
-          {t('No live channels yet.')}
-        </div>
-      ) : (
-        <div className="blueprint" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))' }}>
-          <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
-          {meters.map(m => (
-            <div
-              key={m.key}
-              onClick={m.onClick}
-              className={m.onClick ? 'cursor-pointer transition-colors hover:bg-black/[0.02]' : ''}
-              style={{
-                padding: '14px 16px 12px',
-                borderRight: '1px solid var(--color-divider)',
-                borderBottom: '1px solid var(--color-divider)',
-                minWidth: 0,
-              }}
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="mono text-[10px] tracking-[0.12em]" style={{ color: 'rgba(26,26,26,0.45)' }}>{m.num}</span>
-                <span className="mono text-[9px] tracking-[0.12em] uppercase" style={{ color: m.farge }}>{m.kjelde}</span>
-              </div>
-              <div
-                className="mt-1.5 overflow-hidden text-ellipsis whitespace-nowrap"
-                style={{ fontFamily: 'var(--font-heading)', fontWeight: 600, fontSize: 15, letterSpacing: '0.01em', textTransform: 'uppercase', color: 'rgba(26,26,26,0.72)' }}
-              >
-                {m.namn}
-              </div>
-              <div className="flex items-end justify-between gap-2.5 mt-0.5">
-                <div className="flex items-baseline gap-1.5 min-w-0 overflow-hidden">
-                  <span className="mono" style={{ fontSize: 30, lineHeight: 1.05, fontWeight: 500, color: m.farge }}>{m.verdi}</span>
-                  <span className="mono text-[12px]" style={{ color: 'rgba(26,26,26,0.5)' }}>{m.eining}</span>
-                </div>
-                <div style={{ width: 72, flexShrink: 0 }}>
-                  <SparklineChart data={[...m.spark]} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+    <MeterGrid
+      kicker={t('Live acquisition')}
+      tittel={t('Instrument')}
+      meta={<>
+        <span>{siriusTilkoblet ? 'SIRIUS' : synlegeHub.length > 0 ? t('Forwarded') : t('No USB instrument')}</span>
+        <span>{meters.length} {t('channels')}</span>
+      </>}
+      meters={meters}
+      tomtekst={t('No live channels yet.')}
+    />
   )
 }

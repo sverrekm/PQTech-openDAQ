@@ -878,4 +878,10 @@ export const nb: Record<string, string> = {
   'NAS mount, raw-file archive and the hub time-series database.': 'NAS-montering, rå-fil-arkiv og hub-tidsseriedatabasen.',
   'Wi-Fi, instrument network, scanning, FTP and hub/node topology.': 'Wi-Fi, instrumentnett, skanning, FTP og hub/node-topologi.',
   'Console, probe analysis and endpoint recovery. Handle with care.': 'Konsoll, probe-analyse og endepunkt-berging. Handsam med omhug.',
+  'Hub — live channels': 'Hub — sanntidskanalar',
+  'Fleet': 'Flåte',
+  'node': 'node',
+  'nodes': 'nodar',
+  'No channels selected. Pick channels in the filter below.': 'Ingen kanalar valde. Vel kanalar i filteret under.',
+  'Forwarded': 'Framsend',
 }
