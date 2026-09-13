@@ -45,6 +45,23 @@ management-uplink.
    sudo systemctl daemon-reload
    sudo systemctl enable pqtech-firstboot.service
    ```
+6. **Innlogging = SSH-nøkkel, passord av** (ingen delt passord i flåten). Bak
+   inn admin-nøkkelen for både `sverre` og `root`, og slå av passord-SSH:
+   ```bash
+   for U in /home/sverre /root; do
+     sudo install -d -m700 "$U/.ssh"
+     echo 'ssh-ed25519 AAAA... deg@maskin' | sudo tee "$U/.ssh/authorized_keys" >/dev/null
+     sudo chmod 600 "$U/.ssh/authorized_keys"
+   done
+   sudo chown -R sverre:sverre /home/sverre/.ssh
+   printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nPermitRootLogin prohibit-password\n' \
+     | sudo tee /etc/ssh/sshd_config.d/pqtech-hardening.conf >/dev/null
+   ```
+   **Test nøkkel-innlogging FØR du går vidare** (elles blir heile flåten
+   utilgjengeleg): `ssh -o PasswordAuthentication=no sverre@<node> hostname`.
+   Ikkje restart sshd på masteren om host-nøklane alt er sletta (`sshd -t` gir
+   «no hostkeys available») — passord-av + friske host-nøklar slår inn ved boot
+   på kvar klon (regenerate_ssh_host_keys.service).
 
 > Test gjerne heile flyten på masteren først: `sudo bash pqtech-golden-reset.sh`,
 > reboot, sjekk at `PQTech-Setup-XXXX` dukkar opp og at wizarden fullfører.
