@@ -38,10 +38,11 @@ kvar node setje seg opp headless via eit **captive-portal-AP** ved fyrste boot
 (open `PQTech-Setup-XXXX` → wizard → DHCP-lease). Full oppskrift i
 **[docs/PROVISIONING.md](docs/PROVISIONING.md)**.
 
-IP-modus: containeren tek som **standard ein ekte DHCP-lease** (macvlan med
-`null`-IPAM + `dhclient`), så mange nodar kan stå på same LAN utan å kollidere.
-Fast IP vert valt med `IP_MODE=static` (via captive-portalen eller
-`pqtech-config.sh`), som legg på `docker-compose.static.yml`.
+IP-modus: som **standard (auto)** vel noden ein **ledig IP** på LAN-et ved
+fyrste oppstart (`start.sh` les subnett/gateway av verten og skannar etter ein
+fri adresse, som pinnast i `.env`) — så mange nodar kan stå på same LAN utan å
+kollidere. Fast IP vert valt med `IP_MODE=static` + `CONTAINER_IP` (via captive-
+portalen eller `pqtech-config.sh`). Docker sin macvlan kan ikkje ta ekte DHCP.
 
 ## Hurtigstart (manuelt / utvikling)
 

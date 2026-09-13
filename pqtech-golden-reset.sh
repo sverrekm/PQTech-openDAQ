@@ -24,7 +24,6 @@ case "$svar" in j|J|y|Y) ;; *) echo "Avbrote."; exit 0;; esac
 
 # 1. Stopp og fjern container + nettverk (imaget står).
 if docker compose version >/dev/null 2>&1; then
-    docker compose -f docker-compose.yml -f docker-compose.static.yml down 2>/dev/null
     docker compose down 2>/dev/null
 fi
 
@@ -46,7 +45,7 @@ echo "  fjerna konfig/*.json + provisioned-marker"
 
 # 4. .env (IP-modus, fast IP, token, NAS/DATA-stiar) → tilbake til defaults.
 rm -f .env
-echo "  fjerna .env (defaults: IP_MODE=dhcp, auto parent)"
+echo "  fjerna .env (default: IP_MODE=auto — vel ledig IP ved fyrste boot)"
 
 # 5. Tailscale-state (kvar node må re-autentisere).
 rm -rf tailscale/* 2>/dev/null

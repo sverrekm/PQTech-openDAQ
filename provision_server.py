@@ -142,19 +142,20 @@ def bruk_oppsett(d):
     if not namn:
         return False, "Node name is required."
     rolle = d.get("rolle") if d.get("rolle") in ("node", "hub") else "node"
-    ip_mode = d.get("ip_mode") if d.get("ip_mode") in ("dhcp", "static") else "dhcp"
+    ip_mode = d.get("ip_mode") if d.get("ip_mode") in ("auto", "static") else "auto"
     container_ip = (d.get("container_ip") or "").strip()
     if ip_mode == "static" and not IPV4.match(container_ip):
         return False, f"Invalid static IP: {container_ip or '(empty)'}"
     token = (d.get("token") or "").strip()
     hub_url = (d.get("hub_url") or "").strip()
 
-    # .env: IP-modus (+ fast IP), delt ingest-token.
+    # .env: IP-modus (+ fast IP for static). Auto => la start.sh velje ledig IP.
     env = {"IP_MODE": ip_mode}
     if ip_mode == "static":
         env["CONTAINER_IP"] = container_ip
         env["OPENDAQ_IP"] = container_ip
     else:
+        env["CONTAINER_IP"] = ""
         env["OPENDAQ_IP"] = ""
     if token:
         env["INGEST_TOKEN"] = token
@@ -264,9 +265,9 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 
   <section>
    <h2>03 — Container IP</h2>
-   <p class="hint">The address DewesoftX connects to. DHCP is recommended — many nodes on one LAN never collide.</p>
+   <p class="hint">The address DewesoftX connects to. Auto is recommended — the node picks a free address on the LAN, so many nodes never collide.</p>
    <div class="seg" id="ip_mode">
-     <button type="button" data-v="dhcp" aria-pressed="true">DHCP (auto)</button>
+     <button type="button" data-v="auto" aria-pressed="true">Auto (pick free)</button>
      <button type="button" data-v="static">Static</button>
    </div>
    <div id="staticblock" hidden>
@@ -300,7 +301,7 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 </main>
 <script>
 const $=s=>document.querySelector(s);
-const state={rolle:'node',uplink:'ethernet',ip_mode:'dhcp'};
+const state={rolle:'node',uplink:'ethernet',ip_mode:'auto'};
 function seg(id,key,after){document.querySelectorAll('#'+id+' button').forEach(b=>{
   b.onclick=()=>{state[key]=b.dataset.v;
     document.querySelectorAll('#'+id+' button').forEach(x=>x.setAttribute('aria-pressed', x===b));

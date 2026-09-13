@@ -209,18 +209,19 @@ handter_nettverk() {
     local val
     val="$(ui_meny "Nettverk" \
         "IP-modus: $(les_env IP_MODE dhcp)\nIP (fast): ${ip}\nGrensesnitt (parent): ${parent:-auto}\nSubnett: $(les_env NET_SUBNET 192.168.1.0/24)\nGateway: $(les_env NET_GATEWAY 192.168.1.1)\n\nVel handling:" \
-        dhcp   "DHCP — la ruteren dele ut IP (standard)" \
+        auto   "Auto — vel ledig IP ved oppstart (standard)" \
         fast   "Fast IP (skriv inn) — set static-modus" \
-        auto   "Auto — finn ledig IP på subnettet (static)" \
         parent "Endre nettverksgrensesnitt (parent)" \
         oppdag "Les subnett + gateway av nettet (ved flytting)" \
         attende "Tilbake")" || return
 
     case "$val" in
-        dhcp)
-            sett_env IP_MODE "dhcp"
+        auto)
+            # Nullstill vald IP → start.sh vel ein ny ledig ved neste oppstart.
+            sett_env IP_MODE "auto"
+            sett_env CONTAINER_IP ""
             sett_env OPENDAQ_IP ""
-            ui_msg "Nettverk" "IP-modus sett til DHCP.\n\nContaineren hentar sjølv ein ekte lease frå ruteren — ingen fast IP å kollidere med. DewesoftX finn han via mDNS.\n\nBruk «Bruk endringar» for å aktivere (krev recreate)."
+            ui_msg "Nettverk" "IP-modus sett til AUTO.\n\nVed neste «Bruk endringar» skannar noden LAN-et og vel ein ledig IP sjølv — ingen fast adresse å kollidere med. DewesoftX finn han via mDNS.\n\nBruk «Bruk endringar» for å aktivere (krev recreate)."
             ;;
         fast)
             local ny
@@ -535,22 +536,12 @@ bruk_endringar() {
         export NET_SUBNET="$(les_env NET_SUBNET "$(auto_subnett "$parent")")"
         export NET_GATEWAY="$(les_env NET_GATEWAY "$(auto_gateway "$parent")")"
         cd "$REPO_DIR" || { ui_msg "Feil" "Kjem ikkje inn i $REPO_DIR"; return; }
-        # Vel compose-filer ut fraa IP-modus (same logikk som start.sh):
-        # static legg paa override med fast IP; dhcp = berre base.
-        # Bakoverkompatibelt: manglar IP_MODE men CONTAINER_IP finst → static.
-        local ip_mode; ip_mode="$(les_env IP_MODE "")"
-        if [ -z "$ip_mode" ]; then
-            [ -n "$(les_env CONTAINER_IP '')" ] && ip_mode="static" || ip_mode="dhcp"
-        fi
-        local -a FILER=(-f docker-compose.yml)
-        [ "$ip_mode" = "static" ] && FILER+=(-f docker-compose.static.yml)
         clear
-        echo "== IP-modus: $ip_mode =="
         echo "== docker compose down =="
-        $DC "${FILER[@]}" down
+        bash start.sh down
         echo ""
-        echo "== docker compose up -d --build =="
-        if $DC "${FILER[@]}" up -d --build; then
+        echo "== start.sh up -d --build (auto-vel IP ved behov) =="
+        if bash start.sh up -d --build; then
             ui_msg "Ferdig" "Containeren er starta på nytt.\n\nWeb-GUI: http://$(les_env CONTAINER_IP 192.168.1.161):$(les_env WEB_PORT 8080)"
         else
             ui_msg "Feil" "docker compose feila. Sjå utskrifta i terminalen."

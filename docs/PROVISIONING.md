@@ -73,7 +73,7 @@ Ta ut M.2-en og klon han (vel éin):
    (XXXX = siste 4 av Pi-serienummeret). Captive-portalen sprett opp
    automatisk (elles gå til `http://10.42.0.1/`).
 3. Fyll ut: namn, rolle (node/hub), uplink (ethernet/WiFi), container-IP
-   (**DHCP** tilrådd), og valfritt hub-URL + token. Trykk **Finish setup**.
+   (**Auto** tilrådd), og valfritt hub-URL + token. Trykk **Finish setup**.
 4. Noden riggar ned AP-et, koplar opp, startar containeren, og set marker så
    dette ikkje skjer igjen. Finn han deretter på LAN-et (mDNS/ruter-lease).
 
@@ -81,11 +81,15 @@ Ta ut M.2-en og klon han (vel éin):
 
 ## IP-modus
 
-- **DHCP (standard):** base-`docker-compose.yml` brukar macvlan med `null`-IPAM;
-  containeren hentar sjølv ein lease (`dhclient` i entrypoint). Ingen fast IP å
-  kollidere med. DewesoftX finn noden via mDNS.
-- **Static:** `start.sh` legg på `docker-compose.static.yml` når `IP_MODE=static`
-  i `.env` (set av captive-portalen eller `pqtech-config.sh` → Nettverk).
+Docker sin macvlan-driver kan **ikkje** ta ein ekte DHCP-lease (krev eit
+adresse-pool). I staden VEL noden ein ledig adresse:
+
+- **Auto (standard):** ved fyrste `start.sh up` les noden subnett/gateway av
+  verten sin `eth0` og skannar `.240 → .200` etter ein **ledig** IP, som han
+  pinner (skrivast til `.env`, stabil etterpå). Ingen hardkoda adresse å
+  kollidere med; DewesoftX finn noden via mDNS.
+- **Static:** `IP_MODE=static` + `CONTAINER_IP` i `.env` (set av captive-
+  portalen eller `pqtech-config.sh` → Nettverk).
 
 ## Re-provisjonering
 
@@ -98,7 +102,9 @@ sudo rm -f /opt/pqtech-opendaq/konfig/provisioned && sudo reboot
 
 - **AP-et startar ikkje:** WiFi-land ikkje sett, eller rfkill.
   `nmcli radio wifi` / `sudo raspi-config nonint do_wifi_country NO`.
-- **Containeren får ikkje IP i DHCP-modus:** sjå `docker logs pqtech-opendaq`
-  for `[DHCP]`-linjene; sjekk at eth0 har kabel og at ruteren deler ut leige.
-- **Fleire nodar «forsvinn» for kvarandre:** dei skal ha kvar sin DHCP-lease;
-  sjekk at ingen står i static-modus med same `CONTAINER_IP`.
+- **Auto-IP feilar («fann inga ledig adresse» / «klarte ikkje lese subnett»):**
+  eth0 må ha kabel + eigen IP før start. Sjekk `ip addr show eth0`. Eller sett
+  fast IP: `pqtech-config.sh` → Nettverk → Fast IP.
+- **Fleire nodar med same IP:** kvar node auto-vel ein ledig adresse ved fyrste
+  boot og pinner han i `.env`. Klonar du ein disk UTAN `golden-reset` fyrst,
+  arvar alle same `.env`/IP — køyr alltid `pqtech-golden-reset.sh` før kloning.

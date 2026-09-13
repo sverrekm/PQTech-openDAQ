@@ -274,39 +274,6 @@ fi
 echo ""
 
 # =============================================================
-# macvlan DHCP: hent ekte lease naar IP_MODE=dhcp (standard)
-# Base-compose brukar null-IPAM, so Docker deler ikkje ut nokon IP paa
-# macvlan-grensesnittet. dhclient hentar ein ekte lease frae ruteren — paa
-# det grensesnittet som er oppe men manglar IPv4 (instrumentnett-bridgen har
-# alt fatt ein 172.x-adresse frae Docker). Maa skje FOER OPENDAQ_IP-
-# detekteringa nedanfor og foer openDAQ bind, elles annonserer serveren inga
-# adresse. Static-modus hoppar over dette (Docker set adressa sjoelv).
-# =============================================================
-if [ "${IP_MODE:-dhcp}" = "dhcp" ] && [ -z "${OPENDAQ_IP}" ]; then
-    DHCP_IFACE=""
-    for IFACE in $(ls /sys/class/net 2>/dev/null | grep -v -e '^lo$'); do
-        [ -e "/sys/class/net/$IFACE" ] || continue
-        if ! ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q 'inet '; then
-            DHCP_IFACE="$IFACE"; break
-        fi
-    done
-    if [ -n "$DHCP_IFACE" ]; then
-        if ! command -v dhclient >/dev/null 2>&1; then
-            echo "[DHCP] Installerer isc-dhcp-client (foerste oppstart)..."
-            apt-get update -qq && apt-get install -y -qq --no-install-recommends isc-dhcp-client >/dev/null 2>&1
-            rm -rf /var/lib/apt/lists/*
-        fi
-        echo "[DHCP] Hentar lease paa $DHCP_IFACE ..."
-        timeout 25 dhclient -1 -v "$DHCP_IFACE" 2>&1 | sed 's/^/  /' \
-            || echo "[DHCP] Ingen lease paa $DHCP_IFACE - held fram (openDAQ kan mangle adresse)"
-        LEASE_IP=$(ip -4 addr show dev "$DHCP_IFACE" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
-        [ -n "$LEASE_IP" ] && echo "[DHCP] $DHCP_IFACE = $LEASE_IP"
-    else
-        echo "[DHCP] Fann inkje IP-laust grensesnitt aa hente lease paa"
-    fi
-fi
-
-# =============================================================
 # Nettverksopprydding: IKKJE MOGLEG paa host-nettverk
 # Docker-bridges (172.x.x.x) er synlege for openDAQ mDNS, men vi
 # kan ikkje fjerne IP-ane (bryt Gitea/Portainer gateway-routing).
