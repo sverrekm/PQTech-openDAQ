@@ -94,15 +94,18 @@ def lagre_konfig(data: dict) -> tuple:
 
 
 def _privat(vert: str) -> bool:
+    """Godta private RFC1918-adresser, loopback/link-local, OG Tailscale/CGNAT
+    (100.64.0.0/10). Mål-verten kan vere eit instrument (10.x) eller ein
+    annan node sin Tailscale-adresse (100.x) — begge er legitime her.
+    Aldri offentlege adresser.
+    """
     try:
-        import instrument_proxy
-        return instrument_proxy.tillat_vert(vert)
+        import ipaddress
+        a = ipaddress.ip_address(vert)
+        return (a.is_private or a.is_loopback or a.is_link_local
+                or a in ipaddress.ip_network("100.64.0.0/10"))
     except Exception:
-        try:
-            import ipaddress
-            return ipaddress.ip_address(vert).is_private
-        except Exception:
-            return False
+        return False
 
 
 def _maalvert() -> str:
