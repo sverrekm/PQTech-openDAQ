@@ -11,10 +11,14 @@ services:
     # USB-tilgang til Dewesoft-instrument
     privileged: true
 
-    # macvlan-nettverk: eigen IP paa LAN (DewesoftX treng SSH til containeren)
+    # macvlan-nettverk: eigen IP paa LAN (DewesoftX treng SSH til containeren).
+    # STANDARD = DHCP: nettet har null-IPAM (sjaa nede), Docker deler IKKJE ut
+    # IP, og containeren hentar sjoelv ein ekte lease via dhclient i entrypoint.
+    # Slik kan mange nodar staa paa same LAN utan aa kollidere. For fast IP:
+    # docker compose -f docker-compose.yml -f docker-compose.static.yml up -d
+    # (sjaa start.sh, som byggjer -f-argumenta ut fraa IP_MODE i .env).
     networks:
-      daqnet:
-        ipv4_address: ${CONTAINER_IP:-192.168.1.161}
+      daqnet: {}
       # Veg ut via verten. macvlan-grensesnittet over kan ikkje snakke med
       # sin eigen vert, og ser difor ingenting av dei andre netta verten er
       # paa - t.d. eit instrument-wifi eller eit isolert maalesegment. Dette
@@ -81,8 +85,13 @@ services:
       - OPENDAQ_MODEL=PQTech-openDAQ
       # MAC-adresse (tom = auto-detect fraa nettverksgrensesnitt)
       #- OPENDAQ_MAC=
-      # OPC-UA annonsert IP — sett til container-IP (macvlan)
-      - OPENDAQ_IP=${CONTAINER_IP:-192.168.1.161}
+      # OPC-UA annonsert IP. Tom = entrypoint auto-detekterer frå den leasa
+      # macvlan-adressa (default-rute/eth0). Static-override set han eksplisitt.
+      - OPENDAQ_IP=${OPENDAQ_IP:-}
+      # IP-modus for macvlan: dhcp (standard, ekte lease) eller static
+      # (docker-compose.static.yml gir da fast CONTAINER_IP). Entrypoint les
+      # denne for aa avgjere om dhclient skal koeyrast.
+      - IP_MODE=${IP_MODE:-dhcp}
       # Device-indeks for daqref://device{N} — gir unik localId per node
       # (unngår "Device with the same local ID already exists" når hub
       # koblar til fleire nodar samtidig). Sett 0, 1, 2, ... per node.
@@ -114,12 +123,9 @@ networks:
     driver: macvlan
     driver_opts:
       parent: ${NET_PARENT:-eth0}
+    # null-IPAM: Docker deler ikkje ut nokon IP. Containeren hentar sjoelv ein
+    # ekte DHCP-lease paa macvlan-grensesnittet (dhclient i entrypoint). Dette
+    # er standard. For fast IP, sjaa docker-compose.static.yml som overstyrer
+    # denne med ein pinna subnet/gateway/ip_range + ipv4_address paa tenesta.
     ipam:
-      config:
-        # Subnett og gateway MAA matche nettet som parent-grensesnittet
-        # faktisk staar paa. Dei var hardkoda til 192.168.1.0/24, som er
-        # grunnen til at alle anlegg enda paa same subnett - og til at to
-        # kundenett kolliderte. pqtech-config.sh les dei av verten.
-        - subnet: ${NET_SUBNET:-192.168.1.0/24}
-          gateway: ${NET_GATEWAY:-192.168.1.1}
-          ip_range: ${CONTAINER_IP:-192.168.1.161}/32
+      driver: "null"

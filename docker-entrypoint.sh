@@ -139,6 +139,19 @@ ssh-keygen -A 2>/dev/null
 # Viss system.ini manglar: TSystemSettings vert nil → GetDisplayName krasjar.
 # Viss system.xml har feil element-namn: TDSRTSystemProperties parsar feil.
 # =============================================================
+# Auto-serienummer for masseproduksjon: utan eksplisitt OPENDAQ_SERIAL, avled
+# eit stabilt, unikt serienummer fraa Pi-en sjoelv, so kvar klona golden-image
+# node har unik identitet/localId mot hubben utan manuelt oppsett. /proc og
+# /sys er host sine (pid:host + /sys montert), so dette er Pi-en sitt serienr.
+if [ -z "${OPENDAQ_SERIAL}" ]; then
+    PI_SERIAL="$(cat /sys/firmware/devicetree/base/serial-number 2>/dev/null | tr -d '\0')"
+    [ -z "$PI_SERIAL" ] && PI_SERIAL="$(awk '/^Serial/{print $3}' /proc/cpuinfo 2>/dev/null | tail -1)"
+    if [ -n "$PI_SERIAL" ]; then
+        export OPENDAQ_SERIAL="PQ-${PI_SERIAL: -8}"
+        echo "  Serienummer auto fraa Pi: $OPENDAQ_SERIAL"
+    fi
+fi
+
 SERIAL="${OPENDAQ_SERIAL:-PQTech}"
 DEVICE_MODEL="${OPENDAQ_MODEL:-PQTech-openDAQ}"
 CONTAINER_IP="${OPENDAQ_IP:-192.168.1.161}"
@@ -259,6 +272,39 @@ if [ ! -e /sys/kernel/debug/usb ]; then
     mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
 fi
 echo ""
+
+# =============================================================
+# macvlan DHCP: hent ekte lease naar IP_MODE=dhcp (standard)
+# Base-compose brukar null-IPAM, so Docker deler ikkje ut nokon IP paa
+# macvlan-grensesnittet. dhclient hentar ein ekte lease frae ruteren — paa
+# det grensesnittet som er oppe men manglar IPv4 (instrumentnett-bridgen har
+# alt fatt ein 172.x-adresse frae Docker). Maa skje FOER OPENDAQ_IP-
+# detekteringa nedanfor og foer openDAQ bind, elles annonserer serveren inga
+# adresse. Static-modus hoppar over dette (Docker set adressa sjoelv).
+# =============================================================
+if [ "${IP_MODE:-dhcp}" = "dhcp" ] && [ -z "${OPENDAQ_IP}" ]; then
+    DHCP_IFACE=""
+    for IFACE in $(ls /sys/class/net 2>/dev/null | grep -v -e '^lo$'); do
+        [ -e "/sys/class/net/$IFACE" ] || continue
+        if ! ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q 'inet '; then
+            DHCP_IFACE="$IFACE"; break
+        fi
+    done
+    if [ -n "$DHCP_IFACE" ]; then
+        if ! command -v dhclient >/dev/null 2>&1; then
+            echo "[DHCP] Installerer isc-dhcp-client (foerste oppstart)..."
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends isc-dhcp-client >/dev/null 2>&1
+            rm -rf /var/lib/apt/lists/*
+        fi
+        echo "[DHCP] Hentar lease paa $DHCP_IFACE ..."
+        timeout 25 dhclient -1 -v "$DHCP_IFACE" 2>&1 | sed 's/^/  /' \
+            || echo "[DHCP] Ingen lease paa $DHCP_IFACE - held fram (openDAQ kan mangle adresse)"
+        LEASE_IP=$(ip -4 addr show dev "$DHCP_IFACE" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
+        [ -n "$LEASE_IP" ] && echo "[DHCP] $DHCP_IFACE = $LEASE_IP"
+    else
+        echo "[DHCP] Fann inkje IP-laust grensesnitt aa hente lease paa"
+    fi
+fi
 
 # =============================================================
 # Nettverksopprydding: IKKJE MOGLEG paa host-nettverk

@@ -208,21 +208,28 @@ handter_nettverk() {
 
     local val
     val="$(ui_meny "Nettverk" \
-        "IP: ${ip}\nGrensesnitt (parent): ${parent:-auto}\nSubnett: $(les_env NET_SUBNET 192.168.1.0/24)\nGateway: $(les_env NET_GATEWAY 192.168.1.1)\n\nVel handling:" \
-        fast   "Sett fast IP (skriv inn)" \
-        auto   "Auto — finn ledig IP på subnettet" \
+        "IP-modus: $(les_env IP_MODE dhcp)\nIP (fast): ${ip}\nGrensesnitt (parent): ${parent:-auto}\nSubnett: $(les_env NET_SUBNET 192.168.1.0/24)\nGateway: $(les_env NET_GATEWAY 192.168.1.1)\n\nVel handling:" \
+        dhcp   "DHCP — la ruteren dele ut IP (standard)" \
+        fast   "Fast IP (skriv inn) — set static-modus" \
+        auto   "Auto — finn ledig IP på subnettet (static)" \
         parent "Endre nettverksgrensesnitt (parent)" \
         oppdag "Les subnett + gateway av nettet (ved flytting)" \
         attende "Tilbake")" || return
 
     case "$val" in
+        dhcp)
+            sett_env IP_MODE "dhcp"
+            sett_env OPENDAQ_IP ""
+            ui_msg "Nettverk" "IP-modus sett til DHCP.\n\nContaineren hentar sjølv ein ekte lease frå ruteren — ingen fast IP å kollidere med. DewesoftX finn han via mDNS.\n\nBruk «Bruk endringar» for å aktivere (krev recreate)."
+            ;;
         fast)
             local ny
             ny="$(ui_input "Fast IP" "Container-IP på LAN (macvlan):" "$ip")" || return
             if [[ "$ny" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+                sett_env IP_MODE "static"
                 sett_env CONTAINER_IP "$ny"
                 sett_env OPENDAQ_IP "$ny"
-                ui_msg "Nettverk" "Fast IP sett: $ny\n\nBruk «Bruk endringar» for å aktivere (krev recreate)."
+                ui_msg "Nettverk" "Static IP sett: $ny\n\nBruk «Bruk endringar» for å aktivere (krev recreate)."
             else
                 ui_msg "Feil" "Ugyldig IP-adresse: $ny"
             fi
@@ -231,10 +238,11 @@ handter_nettverk() {
             local ledig
             ledig="$(finn_ledig_ip "$ip")"
             if [ -n "$ledig" ]; then
-                if ui_yesno "Auto-IP" "Fann ledig IP: $ledig\n\nBruk denne som fast container-IP?"; then
+                if ui_yesno "Auto-IP" "Fann ledig IP: $ledig\n\nBruk denne som fast container-IP (static-modus)?"; then
+                    sett_env IP_MODE "static"
                     sett_env CONTAINER_IP "$ledig"
                     sett_env OPENDAQ_IP "$ledig"
-                    ui_msg "Nettverk" "Container-IP sett til $ledig.\n\nBruk «Bruk endringar» for å aktivere."
+                    ui_msg "Nettverk" "Container-IP sett til $ledig (static).\n\nBruk «Bruk endringar» for å aktivere."
                 fi
             else
                 ui_msg "Auto-IP" "Fann ingen ledig IP i ${ip%.*}.150–199.\nSett fast IP manuelt i staden."
@@ -256,10 +264,11 @@ handter_nettverk() {
                 return
             fi
             fri="$(finn_ledig_ip "$gw")"
-            if ui_yesno "Nettoppdaging" "Grensesnitt: $dev\nSubnett:  $sn\nGateway:  $gw\nLedig IP: ${fri:-fann ingen}\n\nLagre dette som macvlan-oppsett?"; then
+            if ui_yesno "Nettoppdaging" "Grensesnitt: $dev\nSubnett:  $sn\nGateway:  $gw\nLedig IP: ${fri:-fann ingen}\n\nLagre dette som macvlan-oppsett (static)?"; then
                 sett_env NET_SUBNET "$sn"
                 sett_env NET_GATEWAY "$gw"
                 if [ -n "$fri" ]; then
+                    sett_env IP_MODE "static"
                     sett_env CONTAINER_IP "$fri"
                     sett_env OPENDAQ_IP "$fri"
                 fi
@@ -495,7 +504,8 @@ vis_status() {
     local ut=""
     ut+="Repo:        $REPO_DIR\n"
     ut+="Modus:       $(les_modus)\n"
-    ut+="IP:          $(les_env CONTAINER_IP 192.168.1.161)\n"
+    ut+="IP-modus:    $(les_env IP_MODE dhcp)\n"
+    ut+="IP (fast):   $(les_env CONTAINER_IP 192.168.1.161)\n"
     ut+="Parent:      $(les_env NET_PARENT "$(auto_parent)")\n"
     ut+="Datalagring: $(les_env DATA_DIR ./maalinger)\n"
     ut+="Web-port:    $(les_env WEB_PORT 8080)\n"
@@ -525,12 +535,22 @@ bruk_endringar() {
         export NET_SUBNET="$(les_env NET_SUBNET "$(auto_subnett "$parent")")"
         export NET_GATEWAY="$(les_env NET_GATEWAY "$(auto_gateway "$parent")")"
         cd "$REPO_DIR" || { ui_msg "Feil" "Kjem ikkje inn i $REPO_DIR"; return; }
+        # Vel compose-filer ut fraa IP-modus (same logikk som start.sh):
+        # static legg paa override med fast IP; dhcp = berre base.
+        # Bakoverkompatibelt: manglar IP_MODE men CONTAINER_IP finst → static.
+        local ip_mode; ip_mode="$(les_env IP_MODE "")"
+        if [ -z "$ip_mode" ]; then
+            [ -n "$(les_env CONTAINER_IP '')" ] && ip_mode="static" || ip_mode="dhcp"
+        fi
+        local -a FILER=(-f docker-compose.yml)
+        [ "$ip_mode" = "static" ] && FILER+=(-f docker-compose.static.yml)
         clear
+        echo "== IP-modus: $ip_mode =="
         echo "== docker compose down =="
-        $DC down
+        $DC "${FILER[@]}" down
         echo ""
         echo "== docker compose up -d --build =="
-        if $DC up -d --build; then
+        if $DC "${FILER[@]}" up -d --build; then
             ui_msg "Ferdig" "Containeren er starta på nytt.\n\nWeb-GUI: http://$(les_env CONTAINER_IP 192.168.1.161):$(les_env WEB_PORT 8080)"
         else
             ui_msg "Feil" "docker compose feila. Sjå utskrifta i terminalen."

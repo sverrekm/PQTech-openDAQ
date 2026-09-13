@@ -661,6 +661,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxi6 \
     libfreetype6 \
     iproute2 \
+    isc-dhcp-client \
     usbutils \
     usbip \
     procps \

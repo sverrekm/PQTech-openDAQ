@@ -1,0 +1,21 @@
+[Unit]
+Description=PQTech-openDAQ first-boot provisioning (captive portal) + container start
+# Treng NetworkManager (AP + nmcli) og Docker. VENTAR IKKJE på nett — heile
+# poenget er å kome opp utan nett og reise sitt eige setup-AP.
+After=NetworkManager.service docker.service
+Requires=docker.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+# Repoet skal ligge på /opt/pqtech-opendaq (klon eller symlink hit). Sjå
+# docs/PROVISIONING.md. Endre desse to linjene om du legg det ein annan stad.
+WorkingDirectory=/opt/pqtech-opendaq
+ExecStart=/bin/bash /opt/pqtech-opendaq/pqtech-firstboot.sh
+# Provisjonering kan vente lenge på operatøren; ikkje drep på timeout.
+TimeoutStartSec=0
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

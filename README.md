@@ -31,7 +31,19 @@ SIRIUS ──USB──> SiriusDriver (reverse-engineered USB-protokoll)
 - Docker og Docker Compose
 - Dewesoft SIRIUSi-HS tilkopla via USB
 
-## Hurtigstart
+## Nye nodar (masseproduksjon)
+
+For å rulle ut mange nodar: lag eit **golden-image** på M.2 som klonast, og lat
+kvar node setje seg opp headless via eit **captive-portal-AP** ved fyrste boot
+(open `PQTech-Setup-XXXX` → wizard → DHCP-lease). Full oppskrift i
+**[docs/PROVISIONING.md](docs/PROVISIONING.md)**.
+
+IP-modus: containeren tek som **standard ein ekte DHCP-lease** (macvlan med
+`null`-IPAM + `dhclient`), så mange nodar kan stå på same LAN utan å kollidere.
+Fast IP vert valt med `IP_MODE=static` (via captive-portalen eller
+`pqtech-config.sh`), som legg på `docker-compose.static.yml`.
+
+## Hurtigstart (manuelt / utvikling)
 
 ### 1. Klon repoet
 
@@ -61,6 +73,13 @@ vert lagra (`DATA_DIR`), ingest-token og web-port. Skriv til `.env` og
 `konfig/modus.json`, og kan byggje/starte containeren på nytt frå menyen.
 
 ### 4. Bygg og start
+
+```bash
+./start.sh up -d --build      # vel compose-filer ut frå IP_MODE i .env
+```
+
+`start.sh` auto-detekterer macvlan-parent og legg på `docker-compose.static.yml`
+når `IP_MODE=static`. I DHCP-modus (standard) held det med base-compose:
 
 ```bash
 docker compose up -d --build
