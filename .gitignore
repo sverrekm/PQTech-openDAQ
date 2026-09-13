@@ -6,6 +6,12 @@ __pycache__/
 *.pyc
 frontend/tsconfig.tsbuildinfo
 
+# Node-lokal konfig — MÅ ikkje i repoet. Ligg han her, får kvar klona node
+# same CONTAINER_IP (t.d. 192.168.1.161) og kolliderer på same LAN. Kvar node
+# får sin eigen .env (frå captive-portalen/pqtech-config, eller tom = DHCP).
+# Sjå .env.example for kva som kan setjast.
+.env
+
 # Lokale skript og eksperiment
 _t.py
 _deploy.py
