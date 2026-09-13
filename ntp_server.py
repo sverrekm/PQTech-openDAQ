@@ -162,24 +162,43 @@ def _vert_lyttar(port: int) -> bool:
 
 
 def _vert_diag(port: int) -> str:
-    """Kort diagnose: vertens UDP-lyttarar på porten + siste host-logg."""
+    """Diagnose for host-modus: nsenter, prosess, ss, logg."""
     ut = []
+    # nsenter finst?
     try:
-        r = subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
-                            "ss", "-ulnp"], capture_output=True, text=True, timeout=6)
-        for ln in r.stdout.splitlines():
-            if (":%d " % port) in ln:
-                ut.append(ln.strip())
-    except Exception as e:
-        ut.append("ss feila: %s" % e)
-    try:
-        with open(VERT_LOGG, "r", encoding="utf-8", errors="replace") as f:
-            hale = f.read()[-300:].strip()
-            if hale:
-                ut.append("logg: " + hale)
+        import shutil
+        ut.append("nsenter=%s" % ("ja" if shutil.which("nsenter") else "NEI"))
     except Exception:
         pass
-    return " | ".join(ut)[:400]
+    # host-prosess
+    if _vert_proc is None:
+        ut.append("proc=None")
+    else:
+        ut.append("proc.poll=%s" % _vert_proc.poll())
+    # nsenter -n verkar? køyr 'ip -o link' i host-netns (container-binær)
+    try:
+        r = subprocess.run(["nsenter", "-t", "1", "-n", "true"],
+                           capture_output=True, text=True, timeout=6)
+        ut.append("nsenter-n rc=%d %s" % (r.returncode,
+                                          r.stderr.strip()[:80]))
+    except Exception as e:
+        ut.append("nsenter-n feila: %s" % e)
+    # host UDP-lyttarar
+    try:
+        r = subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
+                            "ss", "-uln"], capture_output=True, text=True, timeout=6)
+        traff = [ln.strip() for ln in r.stdout.splitlines() if ":%d" % port in ln]
+        ut.append("udp123=%s" % (traff or "ingen"))
+    except Exception as e:
+        ut.append("ss feila: %s" % e)
+    # host-logg
+    try:
+        with open(VERT_LOGG, "r", encoding="utf-8", errors="replace") as f:
+            hale = f.read()[-200:].strip()
+        ut.append("logg[%dB]: %s" % (os.path.getsize(VERT_LOGG), hale or "(tom)"))
+    except Exception as e:
+        ut.append("logg: %s" % e)
+    return " | ".join(ut)[:500]
 
 
 def _drep_vert_prosess() -> None:
