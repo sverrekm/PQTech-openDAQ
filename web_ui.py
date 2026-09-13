@@ -257,6 +257,27 @@ def _hent_node_for_proxy(node_id: str):
     return None
 
 
+def _isoler_node_cookie(set_cookie: str, node_id: str) -> str:
+    """Gjer nodens 'session'-cookie kollisjonsfri med hubben sin.
+
+    Både hubben og noden brukar ein Flask-cookie som heiter 'session' paa
+    SAME domene (noden vert servert under /node-proxy/<id>/ paa hub-domenet).
+    Utan omskriving ville ei node-innlogging overskrive hub-sesjonen → 401 paa
+    alt. Vi gir difor node-cookien eit eige namn per node ('pqnode_<id>') og
+    scopar han til proxy-stien, so han aldri rører hub sin 'session'.
+    """
+    namn = set_cookie.split("=", 1)[0].strip()
+    if namn.lower() != "session":
+        return set_cookie  # andre cookies frae noden: la staa urørt
+    _, _, resten = set_cookie.partition("=")
+    ny = f"pqnode_{node_id}={resten}"
+    if re.search(r";\s*Path\s*=", ny, re.I):
+        ny = re.sub(r";\s*Path\s*=[^;]*", f"; Path=/node-proxy/{node_id}/", ny, count=1, flags=re.I)
+    else:
+        ny = ny + f"; Path=/node-proxy/{node_id}/"
+    return ny
+
+
 def _node_utilgjengeleg_html(node) -> str:
     """Lesbar feilside når ein node ikkje svarar (i staden for blank skjerm)."""
     namn = getattr(node, "namn", "") or "Noden"
@@ -321,7 +342,7 @@ def node_proxy(node_id, sub_path):
     # API-kall frå node-UI-et (kvit side).
     fwd_headers = {k: v for k, v in request.headers
                    if k.lower() not in _NODE_PROXY_HOP_HEADERS
-                   and k.lower() not in ("host", "referer")}
+                   and k.lower() not in ("host", "referer", "cookie")}
     # Set X-Forwarded-* slik at noden veit kva proxy-prefiks å bruke
     fwd_headers["X-Forwarded-Host"] = request.host
     fwd_headers["X-Forwarded-Proto"] = request.scheme
@@ -334,13 +355,23 @@ def node_proxy(node_id, sub_path):
     if _sso_tok:
         fwd_headers["X-Hub-Auth"] = _sso_tok
 
+    # Cookies til noden: send ALDRI hubben sin 'session'-cookie vidare (den er
+    # ikkje nodens, og noden kan ikkje validere han → forvirring/401). Oversett
+    # den isolerte node-cookien ('pqnode_<id>') tilbake til 'session' so noden
+    # kjenner att si eiga oekt. Autentisering skjer elles via X-Hub-Auth (SSO).
+    node_cookies = {k: v for k, v in request.cookies.items()
+                    if k != "session" and not k.startswith("pqnode_")}
+    _iso = request.cookies.get(f"pqnode_{node_id}")
+    if _iso:
+        node_cookies["session"] = _iso
+
     try:
         upstream = _http_proxy.request(
             method=request.method,
             url=target_url,
             headers=fwd_headers,
             data=request.get_data(),
-            cookies=request.cookies,
+            cookies=node_cookies,
             params=request.query_string,
             allow_redirects=False,
             stream=True,
@@ -369,12 +400,27 @@ def node_proxy(node_id, sub_path):
     # Bygg respons med headers (filtrer bort hop-by-hop)
     resp_headers = []
     for k, v in upstream.raw.headers.items():
-        if k.lower() in _NODE_PROXY_HOP_HEADERS:
+        kl = k.lower()
+        if kl in _NODE_PROXY_HOP_HEADERS:
+            continue
+        # Set-Cookie handterast separat under (kvar for seg + isolert namn).
+        if kl == "set-cookie":
             continue
         # Rewrite Location-headers så redirect held seg innanfor proxy
-        if k.lower() == "location" and v.startswith("/"):
+        if kl == "location" and v.startswith("/"):
             v = f"/node-proxy/{node_id}{v}"
         resp_headers.append((k, v))
+
+    # Isoler nodens session-cookie so han ikkje kolliderer med hub sin. Les
+    # kvar Set-Cookie for seg (getlist) — items() ville slaa dei saman med
+    # komma og øydeleggje cookie-verdien.
+    try:
+        _set_cookies = upstream.raw.headers.getlist("Set-Cookie")
+    except Exception:
+        _sc = upstream.raw.headers.get("Set-Cookie")
+        _set_cookies = [_sc] if _sc else []
+    for _sc in _set_cookies:
+        resp_headers.append(("Set-Cookie", _isoler_node_cookie(_sc, node_id)))
 
     return Response(upstream.content, status=upstream.status_code,
                     headers=resp_headers)
