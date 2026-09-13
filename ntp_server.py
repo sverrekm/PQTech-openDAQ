@@ -150,13 +150,28 @@ _vert_proc = None
 VERT_LOGG = "/data/konfig/ntp_host.log"
 
 
+_SELVTEST = (
+    "import socket,sys\n"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)\n"
+    "try:\n"
+    " s.sendto(b'\\x1b'+b'\\x00'*47,('127.0.0.1',%d))\n"
+    " d,_=s.recvfrom(128)\n"
+    " print('OK',len(d),d[0]&7)\n"
+    "except Exception as e:\n"
+    " print('FAIL',e)\n"
+)
+
+
 def _vert_lyttar(port: int) -> bool:
-    """Lyttar noko på UDP <port> i vertens netns? (vertens ss via full nsenter)"""
+    """Svarar host-responsen faktisk? Send ein ekte SNTP i vertens netns.
+
+    Meir påliteleg enn ss: vi sender til 127.0.0.1:<port> INNE i vertens
+    netns (via nsenter -n) og ser om vi får eit gyldig mode-4-svar.
+    """
     try:
-        r = subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
-                            "ss", "-uln"], capture_output=True, text=True, timeout=6)
-        ut = r.stdout
-        return (":%d " % port) in ut or (":%d\n" % port) in ut
+        r = subprocess.run(["nsenter", "-t", "1", "-n", sys.executable, "-c",
+                            _SELVTEST % port], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip().startswith("OK")
     except Exception:
         return False
 
@@ -175,14 +190,22 @@ def _vert_diag(port: int) -> str:
         ut.append("proc=None")
     else:
         ut.append("proc.poll=%s" % _vert_proc.poll())
-    # nsenter -n verkar? køyr 'ip -o link' i host-netns (container-binær)
+    # kva netns ser nsenter -t 1 -n? (host wlan0 vs container eth0)
     try:
-        r = subprocess.run(["nsenter", "-t", "1", "-n", "true"],
+        r = subprocess.run(["nsenter", "-t", "1", "-n", "ip", "-o", "-4", "addr"],
                            capture_output=True, text=True, timeout=6)
-        ut.append("nsenter-n rc=%d %s" % (r.returncode,
-                                          r.stderr.strip()[:80]))
+        ifs = [l.split()[1] + ":" + l.split()[3] for l in r.stdout.splitlines()
+               if len(l.split()) >= 4]
+        ut.append("pid1-netns=%s" % ifs)
     except Exception as e:
-        ut.append("nsenter-n feila: %s" % e)
+        ut.append("nsenter-n ip feila: %s" % e)
+    # ekte SNTP-sjølvtest i host-netns
+    try:
+        r = subprocess.run(["nsenter", "-t", "1", "-n", sys.executable, "-c",
+                            _SELVTEST % port], capture_output=True, text=True, timeout=10)
+        ut.append("selvtest=%s %s" % (r.stdout.strip(), r.stderr.strip()[:80]))
+    except Exception as e:
+        ut.append("selvtest feila: %s" % e)
     # host UDP-lyttarar
     try:
         r = subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
