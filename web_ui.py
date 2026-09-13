@@ -2669,6 +2669,44 @@ def api_ntp_lagre():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/pqzip")
+def api_pqzip_hent():
+    """PQZIP-arkiv-konfig + status."""
+    try:
+        import pqzip_arkiv
+        return jsonify(pqzip_arkiv.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/pqzip", methods=["PUT"])
+def api_pqzip_lagre():
+    data = request.get_json(silent=True) or {}
+    try:
+        import pqzip_arkiv
+        ok, melding = pqzip_arkiv.lagre_konfig(data)
+        if ok:
+            pqzip_arkiv.start_synk()
+        return jsonify({"suksess": ok, "melding": melding,
+                        **pqzip_arkiv.konfig_offentleg()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
+@app.route("/api/pqzip/synk", methods=["POST"])
+def api_pqzip_synk():
+    """Arkiver no (bakgrunn)."""
+    try:
+        import pqzip_arkiv, threading as _t
+        if pqzip_arkiv.status().get("tilstand") == "koeyrer":
+            return jsonify({"suksess": False, "melding": "A sync is already running"}), 409
+        _t.Thread(target=pqzip_arkiv.synk_ein_gong, name="pqzip-manuell",
+                  daemon=True).start()
+        return jsonify({"suksess": True, "melding": "Archiving started"})
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/instrument-ftp/kanalar")
 def api_instrument_ftp_kanalar():
     """Kanalane vi har trekt ut av dei ferskaste rapportane."""

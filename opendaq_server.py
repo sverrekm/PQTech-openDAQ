@@ -584,6 +584,13 @@ def start_server(args):
     except Exception:
         log.warning(f"Instrument-FTP: {traceback.format_exc(limit=1).strip()}")
 
+    # PQZIP-arkivering: last ned .PQZip-filer frae instrumentet med retensjon.
+    try:
+        import pqzip_arkiv
+        pqzip_arkiv.start_synk()
+    except Exception:
+        log.warning(f"PQZIP-arkiv: {traceback.format_exc(limit=1).strip()}")
+
     # Node som SMTP-server: instrument (PQube, Elspec ...) mailar rapportar
     # og hendingsvarsel hit. CSV-vedlegg blir kanalar via instrument_ftp.
     try:

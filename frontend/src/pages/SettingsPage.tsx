@@ -2,6 +2,7 @@ import DeviceNameCard from '../components/DeviceNameCard'
 import DeviceSettingsCard from '../components/DeviceSettingsCard'
 import InstrumentFunnCard from '../components/InstrumentFunnCard'
 import NodeTjenesterCard from '../components/NodeTjenesterCard'
+import PqzipArkivCard from '../components/PqzipArkivCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
 import MqttOppdagCard from '../components/MqttOppdagCard'
@@ -34,6 +35,7 @@ export default function SettingsPage() {
         <ChannelConfigCard />
         <InstrumentFunnCard />
         <NodeTjenesterCard />
+        <PqzipArkivCard />
         <BufferConfigCard />
       </SettingsSection>
 
