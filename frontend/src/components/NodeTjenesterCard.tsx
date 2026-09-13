@@ -201,7 +201,7 @@ function Ntp() {
           {data?.status?.tilstand || '—'}{data?.status?.svar ? ` · ${data.status.svar} ${t('replies')}` : ''}
         </span>
       </div>
-      <p className="hint mb-2">{t('Point the instrument’s NTP/time settings at this node’s IP so its measurements are correctly timestamped.')}</p>
+      <p className="hint mb-2">{t('Point the instrument’s NTP/time settings at this node’s IP so its measurements are correctly timestamped. For instruments on the node’s Wi-Fi, use the host Wi-Fi IP (e.g. 192.168.1.50).')}</p>
       <div className="grid grid-cols-2 gap-2 mb-2">
         <label className="flex items-center gap-2 text-sm col-span-2">
           <input type="checkbox" checked={!!v('aktivert')} onChange={(e) => sett('aktivert', e.target.checked)} />
@@ -211,7 +211,18 @@ function Ntp() {
           <input className={inn} type="number" value={v('port') ?? 123} onChange={(e) => sett('port', Number(e.target.value))} /></div>
         <div><label className="ui-label">{t('Stratum')}</label>
           <input className={inn} type="number" min={1} max={15} value={v('stratum') ?? 3} onChange={(e) => sett('stratum', Number(e.target.value))} /></div>
+        <label className="flex items-center gap-2 text-sm col-span-2">
+          <input type="checkbox" checked={v('paa_vert') ?? true} onChange={(e) => sett('paa_vert', e.target.checked)} />
+          {t('Also serve on the host interfaces (needed for Wi-Fi instruments)')}
+        </label>
       </div>
+      {data?.status?.paa_vert && (
+        <p className="hint mb-2" style={{ color: data.status.vert_lyttar ? 'var(--color-accent-700)' : '#b45309' }}>
+          {data.status.vert_lyttar
+            ? t('Host responder is listening — Wi-Fi instruments can reach it.')
+            : t('Host responder not listening yet (check after saving).')}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <button className="btn-primary" onClick={lagre}>{t('Save')}</button>
         {data?.status?.port && data.status.port < 1024 && (

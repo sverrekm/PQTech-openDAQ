@@ -16,6 +16,8 @@ import logging
 import os
 import socket
 import struct
+import subprocess
+import sys
 import threading
 import time
 
@@ -29,7 +31,14 @@ STANDARD = {
     "port": 123,
     "stratum": 3,       # vi er ein sekundærserver som fylgjer uplinken vår
     "berre_privat": True,
+    # Køyr responsen i VERTENS nettverk-namespace (via nsenter), ikkje berre i
+    # containeren. Naudsynt for instrument som når noden på vertens wifi
+    # (t.d. G4500 → 192.168.1.50): containeren kan ikkje binde vertens wlan0.
+    "paa_vert": True,
 }
+
+# Markør i argv so vi finn (og kan drepe) host-prosessen att.
+_VERT_MARKOR = "__ntp_host_serve__"
 
 
 def les_konfig() -> dict:
@@ -57,6 +66,7 @@ def lagre_konfig(data: dict) -> tuple:
         "aktivert": bool(data.get("aktivert", k["aktivert"])),
         "port": port, "stratum": stratum,
         "berre_privat": bool(data.get("berre_privat", k["berre_privat"])),
+        "paa_vert": bool(data.get("paa_vert", k["paa_vert"])),
     })
     try:
         os.makedirs(os.path.dirname(KONFIG_FIL), exist_ok=True)
@@ -133,11 +143,74 @@ def _svar(data: bytes, mottak: float, konfig: dict) -> bytes:
     )
 
 
+# --- Host-modus: køyr responsen i vertens netns via nsenter --------------
+_vert_proc = None
+
+
+def _vert_lyttar(port: int) -> bool:
+    """Lyttar noko på UDP <port> i vertens netns? (ss via nsenter)"""
+    try:
+        r = subprocess.run(["nsenter", "-t", "1", "-n", "ss", "-uln"],
+                           capture_output=True, text=True, timeout=6)
+        return (":%d " % port) in r.stdout or (":%d\n" % port) in r.stdout
+    except Exception:
+        return False
+
+
+def _drep_vert_prosess() -> None:
+    try:
+        subprocess.run(["nsenter", "-t", "1", "-n", "pkill", "-f", _VERT_MARKOR],
+                       capture_output=True, timeout=6)
+    except Exception:
+        pass
+
+
+def _start_vert_prosess(port: int, stratum: int) -> None:
+    """Start NTP-responsen i VERTENS netns.
+
+    `nsenter -t 1 -n` byter berre NETTVERK-namespace til verten; mount-ns er
+    framleis containeren sin, so vi køyrer containeren sin python + denne
+    fila, men bunden til vertens grensesnitt (wlan0 osv.).
+    """
+    global _vert_proc
+    _drep_vert_prosess()
+    try:
+        _vert_proc = subprocess.Popen(
+            ["nsenter", "-t", "1", "-n", sys.executable, os.path.abspath(__file__),
+             _VERT_MARKOR, str(port), str(stratum)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        log.info("NTP: starta host-responder i vertens netns (:%d)", port)
+    except Exception as e:
+        log.warning("NTP: kunne ikkje starte host-responder: %s", e)
+
+
+def _blocking_server(port: int, stratum: int) -> None:
+    """Enkel blokkerande SNTP-server (brukt av host-prosessen)."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", port))
+    konf = {"stratum": stratum}
+    while True:
+        try:
+            data, adr = srv.recvfrom(1024)
+        except Exception:
+            continue
+        mottak = time.time()
+        if not _privat(adr[0]):
+            continue
+        try:
+            srv.sendto(_svar(data, mottak, konf), adr)
+        except Exception:
+            pass
+
+
 def _server_loop() -> None:
     while not _stopp.is_set():
         _behov_omstart.clear()
         k = les_konfig()
         if not k["aktivert"]:
+            _drep_vert_prosess()
             with _las:
                 _tilstand.update(tilstand="av", melding="", port=k["port"])
             if _stopp.is_set():
@@ -145,6 +218,10 @@ def _server_loop() -> None:
             _behov_omstart.wait(5)
             continue
         port = int(k["port"])
+        # Host-modus: start responsen i vertens netns (så instrument på
+        # vertens wifi kan nå han). Køyrer i tillegg til container-lyttaren.
+        if k.get("paa_vert", True):
+            _start_vert_prosess(port, int(k["stratum"]))
         srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -158,11 +235,27 @@ def _server_loop() -> None:
             log.warning("NTP: bind :%d feila: %s", port, e)
             _behov_omstart.wait(15)
             continue
+        vert_ok = _vert_lyttar(port) if k.get("paa_vert", True) else None
         with _las:
-            _tilstand.update(tilstand="koeyrer", port=port, melding="Serving time")
-        log.info("NTP-server lyttar på :%d (stratum %d)", port, k["stratum"])
+            _tilstand.update(tilstand="koeyrer", port=port,
+                             paa_vert=bool(k.get("paa_vert", True)),
+                             vert_lyttar=vert_ok,
+                             melding="Serving time"
+                             + (" (host wlan0)" if vert_ok else
+                                " — container only; host responder not listening"
+                                if k.get("paa_vert", True) else ""))
+        log.info("NTP-server lyttar på :%d (stratum %d, paa_vert=%s vert_ok=%s)",
+                 port, k["stratum"], k.get("paa_vert", True), vert_ok)
+        _sist_sjekk = time.time()
         try:
             while not _stopp.is_set() and not _behov_omstart.is_set():
+                # Vakt: hald host-prosessen i live og oppdater status.
+                if k.get("paa_vert", True) and time.time() - _sist_sjekk > 20:
+                    _sist_sjekk = time.time()
+                    if _vert_proc is not None and _vert_proc.poll() is not None:
+                        _start_vert_prosess(port, int(k["stratum"]))
+                    with _las:
+                        _tilstand["vert_lyttar"] = _vert_lyttar(port)
                 try:
                     data, adr = srv.recvfrom(1024)
                 except socket.timeout:
@@ -199,3 +292,15 @@ def start() -> None:
 def stopp() -> None:
     _stopp.set()
     _behov_omstart.set()
+    _drep_vert_prosess()
+
+
+# Køyrd av host-prosessen: `nsenter -t 1 -n python3 ntp_server.py
+# __ntp_host_serve__ <port> <stratum>` — bind vertens grensesnitt.
+if __name__ == "__main__" and len(sys.argv) >= 2 and sys.argv[1] == _VERT_MARKOR:
+    _p = int(sys.argv[2]) if len(sys.argv) > 2 else 123
+    _s = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+    try:
+        _blocking_server(_p, _s)
+    except Exception as _e:
+        log.warning("NTP host-responder stoppa: %s", _e)

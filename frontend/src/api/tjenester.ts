@@ -32,9 +32,11 @@ export interface NtpKonfig {
   port: number
   stratum: number
   berre_privat: boolean
+  paa_vert: boolean
   status?: {
     tilstand: string; port: number; melding: string; svar: number
     sist_ts: number | null; sist_klient: string
+    paa_vert?: boolean; vert_lyttar?: boolean | null
   }
 }
 export const fetchNtp = () => apiGet<NtpKonfig>('/api/ntp')

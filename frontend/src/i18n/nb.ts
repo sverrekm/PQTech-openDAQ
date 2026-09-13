@@ -853,4 +853,8 @@ export const nb: Record<string, string> = {
   'e.g. hub office-LAN IP, or blank': 't.d. hub sin kontor-LAN-IP, eller tom',
   'On the hub, set this to its office-LAN IP and Target to the node’s Tailscale FTP (e.g. 100.79.202.65:2121) to relay it onto the office network.': 'På hubben: sett denne til kontor-LAN-IP-en, og Mål til noden sin Tailscale-FTP (t.d. 100.79.202.65:2121), for å relaye han ut på kontornettet.',
   'This host:': 'Denne maskina:',
+  'Point the instrument’s NTP/time settings at this node’s IP so its measurements are correctly timestamped. For instruments on the node’s Wi-Fi, use the host Wi-Fi IP (e.g. 192.168.1.50).': 'Peik instrumentet sine NTP-/tidsinnstillingar mot IP-en til denne noden, så målingane får rett tidsstempel. For instrument på noden sitt Wi-Fi, bruk vertens Wi-Fi-IP (t.d. 192.168.1.50).',
+  'Also serve on the host interfaces (needed for Wi-Fi instruments)': 'Server også på vertens grensesnitt (naudsynt for Wi-Fi-instrument)',
+  'Host responder is listening — Wi-Fi instruments can reach it.': 'Host-responsen lyttar — Wi-Fi-instrument kan nå han.',
+  'Host responder not listening yet (check after saving).': 'Host-responsen lyttar ikkje enno (sjekk etter lagring).',
 }
