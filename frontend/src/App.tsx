@@ -5,7 +5,6 @@ import { fetchMqttStatus } from './api/mqtt'
 import { fetchSiriusStatus } from './api/sirius'
 import { fetchHubKanalar, fetchHubStatus } from './api/hub'
 import { fetchPushKonfig } from './api/push'
-import { sjekkAuth } from './api/auth'
 import { usePolling } from './hooks/usePolling'
 import { useI18n } from './i18n'
 import Header from './components/Header'
@@ -32,22 +31,46 @@ function sidebredde(page: string): string {
 }
 
 export default function App() {
+  const { t } = useI18n()
   const [innlogga, setInnlogga] = useState<boolean | null>(null)
+  const [nettfeil, setNettfeil] = useState(false)
 
   useEffect(() => {
-    sjekkAuth()
-      .then(res => setInnlogga(res.innlogga))
-      .catch(() => setInnlogga(false))
+    let stopp = false
+    // Robust auth-sjekk: rå fetch (utanom apiGet, so vi ikkje trigg reload),
+    // og — viktig for 5G/flaky link — tolk timeout/nettfeil som «prøv igjen»,
+    // ALDRI som utlogga. Berre eit ekte 401 (eller innlogga:false) → login.
+    const sjekk = async (forsok = 0) => {
+      try {
+        const r = await fetch('/api/auth/status', { credentials: 'include' })
+        if (stopp) return
+        if (r.status === 401) { setInnlogga(false); return }
+        if (!r.ok) throw new Error('status ' + r.status)   // 5xx/502 → som nettfeil
+        const d = await r.json()
+        setNettfeil(false)
+        setInnlogga(!!d.innlogga)
+      } catch {
+        if (stopp) return
+        // Nettfeil/timeout — behald ukjend tilstand og prøv igjen (ikkje login).
+        setNettfeil(true)
+        setTimeout(() => sjekk(forsok + 1), Math.min(2000 + forsok * 1000, 8000))
+      }
+    }
+    sjekk()
+    return () => { stopp = true }
   }, [])
 
   // Spinner while checking auth
   if (innlogga === null) {
     return (
-      <div className="min-h-screen bg-[#111] flex items-center justify-center">
+      <div className="min-h-screen bg-[#111] flex flex-col items-center justify-center gap-3">
         <svg className="animate-spin h-8 w-8 text-[#D76428]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
+        {nettfeil && (
+          <p className="text-sm text-gray-400">{t('Reconnecting to the node…')}</p>
+        )}
       </div>
     )
   }

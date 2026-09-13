@@ -884,4 +884,5 @@ export const nb: Record<string, string> = {
   'nodes': 'nodar',
   'No channels selected. Pick channels in the filter below.': 'Ingen kanalar valde. Vel kanalar i filteret under.',
   'Forwarded': 'Framsend',
+  'Reconnecting to the node…': 'Koplar til noden på nytt…',
 }

@@ -1,10 +1,9 @@
 const BASE = ''
 
-function handle401(res: Response) {
-  if (res.status !== 401) return
-  // Loop-vakt: ikkje reload oftare enn éin gong per 8 s. Hindrar tett
-  // reload-loop dersom eit endepunkt held fram med å svare 401 rett etter
-  // sidelasting (t.d. utgått sesjon bak ein proxy).
+let _bekreftar401 = false
+
+function _reloadEinGong() {
+  // Loop-vakt: ikkje reload oftare enn éin gong per 8 s.
   try {
     const no = Date.now()
     const sist = Number(sessionStorage.getItem('siste_401_reload') || '0')
@@ -14,6 +13,29 @@ function handle401(res: Response) {
     /* sessionStorage utilgjengeleg — reload likevel */
   }
   window.location.reload()
+}
+
+function handle401(res: Response) {
+  if (res.status !== 401) return
+  // Over ein flaky link (5G/CGNAT via Tailscale-relay) kan hub-proxyen svare
+  // 401 sporadisk sjølv om vi framleis er innlogga. Ei enkeltståande 401 skal
+  // difor IKKJE kaste brukaren ut — vi stadfestar mot /api/auth/status og
+  // lastar berre på nytt viss sesjonen faktisk er borte. Timeout/nettfeil/5xx
+  // under stadfestinga tel som «uklart» → vi blir verande innlogga.
+  if (_bekreftar401) return
+  _bekreftar401 = true
+  fetch(`${BASE}/api/auth/status`, { credentials: 'include' })
+    .then(async r => {
+      if (r.ok) {
+        const d = await r.json().catch(() => null)
+        if (d && d.innlogga) return          // framleis innlogga — transient 401
+      } else if (r.status !== 401) {
+        return                                // uklart svar (5xx/502) — ikkje ut
+      }
+      _reloadEinGong()                        // stadfesta utlogga
+    })
+    .catch(() => { /* nettfeil under stadfesting → ikkje kast ut */ })
+    .finally(() => { _bekreftar401 = false })
 }
 
 // Surface backend-feilmelding (JSON {feil}|{melding}) i staden for berre
