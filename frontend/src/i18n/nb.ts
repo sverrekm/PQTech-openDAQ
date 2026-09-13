@@ -873,4 +873,9 @@ export const nb: Record<string, string> = {
   'Mode': 'Modus',
   'Connecting…': 'Koplar til…',
   'Server down': 'Server nede',
+  'Name, model, channels and the instruments this box acquires from.': 'Namn, modell, kanalar og instrumenta denne boksen les frå.',
+  'Publish channels over MQTT, to Grafana/InfluxDB and the read API.': 'Publiser kanalar over MQTT, til Grafana/InfluxDB og lese-API-et.',
+  'NAS mount, raw-file archive and the hub time-series database.': 'NAS-montering, rå-fil-arkiv og hub-tidsseriedatabasen.',
+  'Wi-Fi, instrument network, scanning, FTP and hub/node topology.': 'Wi-Fi, instrumentnett, skanning, FTP og hub/node-topologi.',
+  'Console, probe analysis and endpoint recovery. Handle with care.': 'Konsoll, probe-analyse og endepunkt-berging. Handsam med omhug.',
 }

@@ -27,7 +27,7 @@ import Layout from './components/Layout'
 // skjema-tunge sider held ei lesbar maks-breidde.
 function sidebredde(page: string): string {
   if (page === 'correlation') return 'max-w-[1600px]'
-  if (page === 'dashboard' || page === 'hub') return 'max-w-[1400px]'
+  if (page === 'dashboard' || page === 'hub' || page === 'settings') return 'max-w-[1400px]'
   return 'max-w-5xl'
 }
 
