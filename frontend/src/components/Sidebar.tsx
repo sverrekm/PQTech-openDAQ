@@ -74,6 +74,17 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
     return (odaq?.siste !== undefined) || (drv?.siste !== null && drv?.siste !== undefined)
   }
 
+  const kanalVerdi = (idx: number): number | null => {
+    if (!liveData) return null
+    const key = `kanal_${idx}`
+    const odaq = liveData.opendaq?.[key] as { siste?: number; kjelde?: string } | undefined
+    const drv = liveData.driver?.[key] as { siste?: number | null } | undefined
+    if (odaq && odaq.kjelde === 'sirius' && odaq.siste !== undefined) return odaq.siste
+    if (drv && drv.siste !== null && drv.siste !== undefined) return drv.siste
+    if (odaq && odaq.siste !== undefined) return odaq.siste
+    return null
+  }
+
   const aktiveKanalar = kanalar?.filter(k => k.aktiv) ?? []
   const mqttTopics = mqttStatus?.aktivert && mqttStatus.topics ? Object.entries(mqttStatus.topics) : []
   const synlegeHubKanalar = (hubKanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`))
@@ -126,7 +137,12 @@ export default function Sidebar({ view, onNavigate, kanalar, liveData, mqttStatu
                 onClick={() => onNavigate({ page: 'channel', index: k.indeks })}
               >
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasData(k.indeks) ? 'bg-green-500' : 'bg-gray-500'}`} />
-                {k.namn}
+                <span className="truncate">{k.namn}</span>
+                {(() => { const v = kanalVerdi(k.indeks); return v !== null ? (
+                  <span className="ml-auto text-xs font-mono text-gray-400 flex-shrink-0">
+                    {v.toFixed(1)}{k.enhet ? ` ${k.enhet}` : ''}
+                  </span>
+                ) : null })()}
               </div>
             ))}
           </>

@@ -5,6 +5,7 @@ import type { ServerStatus, KanalKonfig, KanalLive, MqttStatus, HubKanal, EnhetK
 import SiriusStatusCard from '../components/SiriusStatusCard'
 import UsbIpCard from '../components/UsbIpCard'
 import ChannelLiveCard from '../components/ChannelLiveCard'
+import InstrumentMeterGrid from '../components/InstrumentMeterGrid'
 import OpenDaqBridgeCard from '../components/OpenDaqBridgeCard'
 import ServerStatusCard from '../components/ServerStatusCard'
 import LogViewer from '../components/LogViewer'
@@ -68,13 +69,23 @@ export default function DashboardPage({ status, kanalar, liveData, mqttStatus, s
     )
   }
 
-  // Direkte-modus: kompakte statuskort deler radene; kanaltabell, hendingar,
-  // MQTT-logg og logg spenner full breidde.
-  return <DirekteDashboard status={status} siriusTilkoblet={siriusTilkoblet} channelCard={channelCard} />
+  // Direkte-modus: hero-målarrutenett øvst, deretter kompakte statuskort og
+  // breie kort (kanaltabell, hendingar, MQTT-logg, logg).
+  const meterGrid = (
+    <InstrumentMeterGrid
+      kanalar={kanalar}
+      liveData={liveData}
+      mqttStatus={mqttStatus}
+      siriusTilkoblet={siriusTilkoblet}
+      onChannelClick={onChannelClick}
+      onMqttClick={onMqttClick}
+    />
+  )
+  return <DirekteDashboard status={status} siriusTilkoblet={siriusTilkoblet} channelCard={channelCard} meterGrid={meterGrid} />
 }
 
-function DirekteDashboard({ status, siriusTilkoblet, channelCard }:
-  { status: ServerStatus | null; siriusTilkoblet: boolean; channelCard: ReactNode }) {
+function DirekteDashboard({ status, siriusTilkoblet, channelCard, meterGrid }:
+  { status: ServerStatus | null; siriusTilkoblet: boolean; channelCard: ReactNode; meterGrid: ReactNode }) {
   const enhetFetcher = useCallback(() => fetchEnhetKonfig(), [])
   const { data: enhet } = usePolling<EnhetKonfig>(enhetFetcher, 30000)
   // USB-instrument til stades? SIRIUS tilkobla, eller USB-einingar oppdaga.
@@ -82,16 +93,19 @@ function DirekteDashboard({ status, siriusTilkoblet, channelCard }:
   const visUsb = enhet?.vis_usb === 'vis' || (enhet?.vis_usb !== 'skjul' && usbTilstades)
 
   return (
-    <Rutenett>
-      {visUsb && <SiriusStatusCard />}
-      {visUsb && <UsbIpCard ip={status?.ip || '-'} />}
-      <Vid>{channelCard}</Vid>
-      <OpenDaqBridgeCard />
-      <RemoteBufferStatusCard />
-      <Vid><EventListCard /></Vid>
-      <Vid><MqttLogCard /></Vid>
-      <ServerStatusCard status={status} />
-      <Vid><LogViewer /></Vid>
-    </Rutenett>
+    <div className="flex flex-col gap-6">
+      <div>{meterGrid}</div>
+      <Rutenett>
+        {visUsb && <SiriusStatusCard />}
+        {visUsb && <UsbIpCard ip={status?.ip || '-'} />}
+        <Vid>{channelCard}</Vid>
+        <OpenDaqBridgeCard />
+        <RemoteBufferStatusCard />
+        <Vid><EventListCard /></Vid>
+        <Vid><MqttLogCard /></Vid>
+        <ServerStatusCard status={status} />
+        <Vid><LogViewer /></Vid>
+      </Rutenett>
+    </div>
   )
 }

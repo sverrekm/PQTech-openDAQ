@@ -142,7 +142,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="h-screen flex flex-col">
-      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} onMenu={() => setMenyOpen(true)} enhetsnamn={enhetsnamn} />
+      <Header serverOk={status?.server_kjorer ?? false} loading={isLoading} onLogout={onLogout} disconnected={statusStale} onMenu={() => setMenyOpen(true)} enhetsnamn={enhetsnamn} ip={status?.ip} modus={isHubMode ? 'Hub' : 'Node'} />
       <Layout>
         <Sidebar view={view} onNavigate={(v) => { setView(v); setMenyOpen(false) }} kanalar={kanalar} liveData={liveData} mqttStatus={mqttStatus} hubKanalar={hubKanalar} open={menyOpen} onClose={() => setMenyOpen(false)} />
         <div className="flex-1 overflow-y-auto p-3 md:p-6">

@@ -867,4 +867,10 @@ export const nb: Record<string, string> = {
   'Keep (days)': 'Behald (dagar)',
   'Archive now': 'Arkiver no',
   'Archiving…': 'Arkiverer…',
+  'Live acquisition': 'Sanntidsinnsamling',
+  'No USB instrument': 'Inkje USB-instrument',
+  'No live channels yet.': 'Ingen sanntidskanalar enno.',
+  'Mode': 'Modus',
+  'Connecting…': 'Koplar til…',
+  'Server down': 'Server nede',
 }
