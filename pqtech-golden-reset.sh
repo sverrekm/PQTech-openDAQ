@@ -39,9 +39,11 @@ for d in "$DATA_DIR" ./maalinger ./maalingar ./nas; do
     fi
 done
 
-# 3. Node-konfig + provisjonerings-marker.
-rm -f konfig/*.json konfig/provisioned 2>/dev/null
-echo "  fjerna konfig/*.json + provisioned-marker"
+# 3. Node-konfig + hemmelegheiter + provisjonerings-marker.
+# *.key = t.d. flask_secret.key (Flask session-nøkkel). Delt over klonar ville
+# late alle nodane dele same session-hemmelegheit — generer på nytt per node.
+rm -f konfig/*.json konfig/*.key konfig/provisioned 2>/dev/null
+echo "  fjerna konfig/*.json + *.key + provisioned-marker"
 
 # 4. .env (IP-modus, fast IP, token, NAS/DATA-stiar) → tilbake til defaults.
 rm -f .env
