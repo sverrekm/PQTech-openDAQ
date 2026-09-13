@@ -147,14 +147,39 @@ def _svar(data: bytes, mottak: float, konfig: dict) -> bytes:
 _vert_proc = None
 
 
+VERT_LOGG = "/data/konfig/ntp_host.log"
+
+
 def _vert_lyttar(port: int) -> bool:
-    """Lyttar noko på UDP <port> i vertens netns? (ss via nsenter)"""
+    """Lyttar noko på UDP <port> i vertens netns? (vertens ss via full nsenter)"""
     try:
-        r = subprocess.run(["nsenter", "-t", "1", "-n", "ss", "-uln"],
-                           capture_output=True, text=True, timeout=6)
-        return (":%d " % port) in r.stdout or (":%d\n" % port) in r.stdout
+        r = subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
+                            "ss", "-uln"], capture_output=True, text=True, timeout=6)
+        ut = r.stdout
+        return (":%d " % port) in ut or (":%d\n" % port) in ut
     except Exception:
         return False
+
+
+def _vert_diag(port: int) -> str:
+    """Kort diagnose: vertens UDP-lyttarar på porten + siste host-logg."""
+    ut = []
+    try:
+        r = subprocess.run(["nsenter", "-t", "1", "-m", "-u", "-n", "-i",
+                            "ss", "-ulnp"], capture_output=True, text=True, timeout=6)
+        for ln in r.stdout.splitlines():
+            if (":%d " % port) in ln:
+                ut.append(ln.strip())
+    except Exception as e:
+        ut.append("ss feila: %s" % e)
+    try:
+        with open(VERT_LOGG, "r", encoding="utf-8", errors="replace") as f:
+            hale = f.read()[-300:].strip()
+            if hale:
+                ut.append("logg: " + hale)
+    except Exception:
+        pass
+    return " | ".join(ut)[:400]
 
 
 def _drep_vert_prosess() -> None:
@@ -175,10 +200,14 @@ def _start_vert_prosess(port: int, stratum: int) -> None:
     global _vert_proc
     _drep_vert_prosess()
     try:
+        logg = open(VERT_LOGG, "w")
+    except Exception:
+        logg = subprocess.DEVNULL
+    try:
         _vert_proc = subprocess.Popen(
             ["nsenter", "-t", "1", "-n", sys.executable, os.path.abspath(__file__),
              _VERT_MARKOR, str(port), str(stratum)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=logg, stderr=subprocess.STDOUT,
             start_new_session=True)
         log.info("NTP: starta host-responder i vertens netns (:%d)", port)
     except Exception as e:
@@ -189,7 +218,12 @@ def _blocking_server(port: int, stratum: int) -> None:
     """Enkel blokkerande SNTP-server (brukt av host-prosessen)."""
     srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("0.0.0.0", port))
+    try:
+        srv.bind(("0.0.0.0", port))
+    except Exception as e:
+        print("bind 0.0.0.0:%d feila: %s" % (port, e), flush=True)
+        raise
+    print("host-responder bunden 0.0.0.0:%d stratum %d" % (port, stratum), flush=True)
     konf = {"stratum": stratum}
     while True:
         try:
@@ -240,6 +274,7 @@ def _server_loop() -> None:
             _tilstand.update(tilstand="koeyrer", port=port,
                              paa_vert=bool(k.get("paa_vert", True)),
                              vert_lyttar=vert_ok,
+                             vert_diag=(_vert_diag(port) if k.get("paa_vert", True) else ""),
                              melding="Serving time"
                              + (" (host wlan0)" if vert_ok else
                                 " — container only; host responder not listening"
