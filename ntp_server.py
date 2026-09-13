@@ -331,8 +331,12 @@ def _server_loop() -> None:
                     _sist_sjekk = time.time()
                     if _vert_proc is not None and _vert_proc.poll() is not None:
                         _start_vert_prosess(port, int(k["stratum"]))
+                    vo = _vert_lyttar(port)
                     with _las:
-                        _tilstand["vert_lyttar"] = _vert_lyttar(port)
+                        _tilstand["vert_lyttar"] = vo
+                        _tilstand["melding"] = ("Serving time (host wlan0 + container)"
+                                                if vo else
+                                                "Serving time — host responder starting…")
                 try:
                     data, adr = srv.recvfrom(1024)
                 except socket.timeout:
