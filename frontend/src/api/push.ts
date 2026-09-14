@@ -18,3 +18,21 @@ export const fetchPushKonfig = () => apiGet<PushKonfig>('/api/push/konfig')
 
 export const oppdaterPushKonfig = (k: PushKonfig) =>
   apiPut<{ suksess: boolean; melding: string }>('/api/push/konfig', k)
+
+/** Live-status for utgåande push (node → hub). */
+export interface PushStatus {
+  konfigurert: boolean
+  kjorer: boolean
+  parent_url?: string
+  node_namn?: string
+  push_hz?: number
+  sendt_ok?: number
+  sendt_feil?: number
+  siste_status_kode?: number | null
+  siste_feilmelding?: string
+  siste_send_ts?: number
+  siste_latens_ms?: number
+  feil?: string
+}
+
+export const fetchPushStatus = () => apiGet<PushStatus>('/api/push/status')

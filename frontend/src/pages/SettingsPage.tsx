@@ -5,6 +5,7 @@ import InstrumentFunnCard from '../components/InstrumentFunnCard'
 import NodeTjenesterCard from '../components/NodeTjenesterCard'
 import PqzipArkivCard from '../components/PqzipArkivCard'
 import ChannelConfigCard from '../components/ChannelConfigCard'
+import HubConnectionCard from '../components/HubConnectionCard'
 import MqttSettingsCard from '../components/MqttSettingsCard'
 import MqttOppdagCard from '../components/MqttOppdagCard'
 import WifiCard from '../components/WifiCard'
@@ -61,6 +62,7 @@ export default function SettingsPage() {
       sub: t('Publish channels over MQTT, to Grafana/InfluxDB and the read API.'),
       innhald: (
         <>
+          <HubConnectionCard />
           <MqttSettingsCard />
           <MqttOppdagCard />
           <InfluxShareCard />
