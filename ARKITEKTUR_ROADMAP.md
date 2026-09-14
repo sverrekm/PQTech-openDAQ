@@ -70,10 +70,32 @@ SIRIUS + PQube               VPS (eigen DERP, ~€4/mnd)          DewesoftX (1-1
 - **#32** Edge-aggregering: 1-10 Hz live stream (reduserer 5G-forbruk 1000×)
 - **#33** Burst-henting API: `/api/burst?node&from&to` (full resolusjon på forespørsel)
 
-### Fase 3 — Eksterne integrasjonar
+### Fase 3 — Eksterne integrasjonar (utgåande)
 - **#34** MQTT publisher på hub (custom klientar)
 - **#35** InfluxDB writer på hub (Grafana-dashbord)
 - **#36** REST `/api/data/historic` for ERP-pull
+
+### Fase 4 — Nye kjelde-adaptere (inngåande)
+Arkitekturen er ei **fler-kjelde-pipeline**: kvar kjelde (SIRIUS, Modbus, MQTT,
+SunSpec, FTP) er ein adapter som matar same kjede *kjelde → kanalar → buffer →
+openDAQ/push → dashbord/NAS*. Nye kjelder er difor berre nye adaptere + eit
+konfig-kort — resten er ferdig. Utvider marknaden ut over power-quality
+(industri/PLS, bygg/HVAC) og gir fleire kjelder per anlegg = meir ARR.
+
+- **#38** **OPC-UA-klient** — les frå PLS/SCADA. Koble til OPC-UA-endepunkt,
+  browse/abonner på noder, mappe til kanalar (som Modbus/MQTT-adapterne).
+  Byggjer på `asyncua` (alt ei avhengigheit) + openDAQ `opcua_client`-modulen
+  (alt i stacken, brukt hub→node). Ny `opcua_klient.py` + konfig-kort
+  (endepunkt + node-browse). *Effort: låg/moderat — enklaste neste kjelde.*
+  Sikkerheit: OPC-UA har autentisering/sertifikat (bra).
+- **#39** **BACnet-klient** — les frå bygningsautomasjon (HVAC/energi). Who-Is-
+  oppdaging, analog/binary/multistate-objekt → kanalar. Nytt bibliotek
+  (`BAC0`/`bacpypes`), BACnet/IP (evt. MS/TP seinare). Ny `bacnet_klient.py` +
+  konfig-kort (oppdaging + objektliste). *Effort: moderat.* Sikkerheit: BACnet
+  er ofte uautentisert → krev nett-isolasjon (som instrument-nettet i dag).
+
+Felles for begge: hugs den praktiske openDAQ-over-WAN-kanalgrensa — mange PLS-/
+BACnet-punkt bør bufrast/pushast (Fase 2), ikkje strøymast rått over WAN.
 
 ## Demo-pakken (i morgon)
 
