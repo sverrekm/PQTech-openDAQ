@@ -555,35 +555,65 @@ def _rapport_type(namn: str) -> str:
     return namn.split(" 20", 1)[0].strip() or namn
 
 
-def _nyaste_fjern(f, mappe: str, monster: str) -> list:
-    """Nyaste rapport per type på instrumentet, funne via NLST.
+def _samle_rapportfiler(f, mappe: str, monster: str, djup: int = 0,
+                        maks_djup: int = 3) -> list:
+    """Rekursivt: alle rapport-/CSV-filer under `mappe` (òg i undermapper).
 
-    Vi listar berre NAMN (lett, reset sjeldan), grupperer på type, og vel
-    det med seinast sluttid i namnet. Storleiken hentar vi med SIZE for
-    berre desse få — so vi slepp ei tung LIST av heile katalogen.
+    BlackBox-en legg rapportane i undermapper (t.d. dato-mapper under
+    /CF_UPMB/…), so vi må gå ned i katalogtreet — ikkje berre den eine mappa
+    vi fekk beskjed om. Vi brukar LIST (med retry) for å kjenne att kataloger
+    vs filer, og stoppar på `maks_djup` mot symlink-lykkjer. Storleiken kjem
+    frå LIST-linja, so vi slepp eigne SIZE-kall.
     """
-    namn, f = _nlst_med_retry(f, mappe)
-    beste: dict = {}
-    for n in namn:
+    try:
+        linjer, _ = _list_med_retry(f, mappe)
+    except Exception:
+        return []
+    ut = []
+    for ln in linjer:
+        o = _tolk_linje(ln)
+        n = o["namn"]
         if n in (".", ".."):
             continue
-        # Rapportfiler ("DL log …"/"MR log …") tel med jamvel utan .csv:
-        # den aktive loggen er open og har enno ikkje fått endinga. Elles
-        # eit eige mønster om brukaren har sett eit.
+        if o["katalog"]:
+            if djup < maks_djup:
+                ut.extend(_samle_rapportfiler(f, _sti(mappe, n), monster,
+                                              djup + 1, maks_djup))
+            continue
+        # Rapportfiler ("DL log …"/"MR log …") tel med jamvel utan .csv (den
+        # aktive loggen er open og har enno ikkje fått endinga). Elles krev
+        # vi .csv, eller eit eige mønster om brukaren har sett eit.
         er_rapport = n.startswith("DL log") or n.startswith("MR log")
         if not er_rapport and monster and not _passar(n, monster):
             continue
         if not er_rapport and not n.lower().endswith(".csv"):
             continue
-        slutt = _rapport_slutt(n)
-        typ = _rapport_type(n)
+        ut.append({"sti": _sti(mappe, n), "namn": n,
+                   "storleik": o.get("storleik") or 0, "dato": o.get("dato", "")})
+    return ut
+
+
+def _nyaste_fjern(f, mappe: str, monster: str) -> list:
+    """Nyaste rapport per type på instrumentet — rekursivt gjennom undermapper.
+
+    Samlar alle rapport-/CSV-filer i heile treet, grupperer på type ("DL log",
+    "MR log", …) og vel den med seinast sluttid i namnet. So slepp vi å laste
+    ned alle dei gamle — berre den ferskaste per type — men no òg frå
+    undermappene, ikkje berre rot-mappa.
+    """
+    alle = _samle_rapportfiler(f, mappe, monster)
+    beste: dict = {}
+    for fil in alle:
+        slutt = _rapport_slutt(fil["namn"])
+        typ = _rapport_type(fil["namn"])
         if typ not in beste or slutt > beste[typ][0]:
-            beste[typ] = (slutt, n)
+            beste[typ] = (slutt, fil)
     ut = []
-    for _typ, (_slutt, n) in beste.items():
-        sti = _sti(mappe, n)
-        ut.append({"sti": sti, "namn": n,
-                   "storleik": _storleik(f, sti) or 0, "dato": ""})
+    for _typ, (_slutt, fil) in beste.items():
+        # LIST manglar av og til storleik — fyll med SIZE for dei få valde.
+        if not fil["storleik"]:
+            fil["storleik"] = _storleik(f, fil["sti"]) or 0
+        ut.append(fil)
     return ut
 
 
