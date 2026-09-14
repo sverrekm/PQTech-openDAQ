@@ -204,6 +204,36 @@ def _finn_part(mappe: Path, node: str, dato: str, maks_bytes: int) -> Path:
 _kunde_cache: dict = {"tid": 0.0, "kart": {}}
 
 
+def _gjett_eining(ch: str) -> str:
+    """Utled eining frå kanalnamn når pushen ikkje sende ei.
+
+    Hovudkanalane over /api/ingest kjem utan eining (berre namn→verdi), so vi
+    gjettar frå namnet (PQube-stil: V_L1_N, I_L1, P_total, S_total, Frekvens).
+    Kjenner vi ikkje att namnet, står eininga tom (trygt)."""
+    c = (ch or "").strip().lower()
+    if not c:
+        return ""
+    if c.startswith(("v_", "u_")) or c in ("v", "u"):
+        return "V"
+    if c.startswith("i_") or c == "i":
+        return "A"
+    if c.startswith("q_") or c == "q":
+        return "var"
+    if c.startswith("s_") or c == "s":
+        return "VA"
+    if c.startswith("p_") or c == "p":
+        return "W"
+    if "frekvens" in c or "freq" in c or c == "hz":
+        return "Hz"
+    if "thd" in c:
+        return "%"
+    if c.startswith("e_") or "energi" in c or "energy" in c or "kwh" in c:
+        return "kWh"
+    if "temp" in c:
+        return "°C"
+    return ""
+
+
 def _kunde_for_node(node: str) -> str:
     """Kunde for eit node-namn (matchar node.namn og node.id). Tom = ukjend."""
     n = (node or "").strip()
@@ -274,9 +304,10 @@ def _skriv_loop():
                 # → {NAS}/{node}/... (bakoverkompatibelt).
                 kunde = _kunde_for_node(node_orig)
                 kt = _trygt(kunde) if kunde else ""
+                _ch = p.get("channel", "")
+                _eining = p.get("unit") or _gjett_eining(_ch)
                 per_grp.setdefault((kt, nt, dato), []).append(
-                    (iso, p["ts_ms"], node_orig, p.get("channel", ""),
-                     p.get("unit", ""), p.get("value")))
+                    (iso, p["ts_ms"], node_orig, _ch, _eining, p.get("value")))
 
             for (kt, nt, dato), rader in per_grp.items():
                 try:
