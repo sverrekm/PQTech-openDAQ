@@ -3574,6 +3574,22 @@ def api_ingest():
     except Exception:
         pass
 
+    # NAS rå-fil-arkiv: arkiver dei pusha kanalane per kunde/node (no-op når
+    # deaktivert). Tidlegare fekk arkivet berre EMC-linjer (/api/emc-ingest),
+    # so hovudkanalane frå push havna aldri på NAS. Hopp over rå sample-array
+    # (raw-modus) — berre skalarverdiar går i CSV-arkivet.
+    try:
+        import raa_fil_skrivar
+        _ts_ms = int(float(ts) * 1000)
+        _punkt = [{"node": node_namn, "channel": _namn, "unit": "",
+                   "value": _v, "ts_ms": _ts_ms}
+                  for _namn, _v in kanalar.items()
+                  if isinstance(_v, (int, float)) and not isinstance(_v, bool)]
+        if _punkt:
+            raa_fil_skrivar.skriv_punkt(_punkt)
+    except Exception:
+        pass
+
     # Injiser verdiar i hub si openDAQ-pipeline (DC-relay for skalarar,
     # DataPacket.send_packet for sample-arrays). node_namn er primær
     # matche-nøkkel sidan push-konfig.node_id ofte avvikar frå hub-id.
