@@ -21,6 +21,7 @@ export default function HubNodeConfigCard() {
   const [nyAdresse, setNyAdresse] = useState('')
   const [nyNamn, setNyNamn] = useState('')
   const [nyLokasjon, setNyLokasjon] = useState('')
+  const [nyKunde, setNyKunde] = useState('')
   const [nyPort, setNyPort] = useState(erHubModus ? '4840' : '502')
   const [nyProtokoll, setNyProtokoll] = useState('daq.opcua')
   const [nyUnitId, setNyUnitId] = useState('1')
@@ -43,6 +44,7 @@ export default function HubNodeConfigCard() {
     setNyAdresse('')
     setNyNamn('')
     setNyLokasjon('')
+    setNyKunde('')
     setNyPort(nyType === 'modbus_tcp' ? '502' : '4840')
     setNyUnitId('1')
     setNyPollHz('1')
@@ -83,6 +85,7 @@ export default function HubNodeConfigCard() {
         namn: nyNamn.trim() || undefined,
         port: parseInt(nyPort) || (nyType === 'modbus_tcp' ? 502 : 4840),
         lokasjon: nyLokasjon.trim() || undefined,
+        kunde: nyKunde.trim() || undefined,
         type: nyType,
       }
       if (nyType === 'opendaq') {
@@ -232,6 +235,15 @@ export default function HubNodeConfigCard() {
                 placeholder="Bygning A, 2. etasje"
                 className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
               />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">{t('Customer')}</label>
+              <input
+                type="text" value={nyKunde} onChange={e => setNyKunde(e.target.value)}
+                placeholder="Kunde A"
+                className="w-full text-sm border border-gray-300 rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#D76428]"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">{t('Groups the NAS archive: {NAS}/{customer}/{node}/…')}</p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>

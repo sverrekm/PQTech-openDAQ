@@ -22,6 +22,7 @@ export async function leggTilNode(data: {
   port?: number
   protokoll?: string
   lokasjon?: string
+  kunde?: string
   type?: NodeType
   modbus_unit_id?: number
   modbus_poll_hz?: number

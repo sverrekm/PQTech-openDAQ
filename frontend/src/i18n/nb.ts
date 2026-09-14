@@ -885,4 +885,6 @@ export const nb: Record<string, string> = {
   'No channels selected. Pick channels in the filter below.': 'Ingen kanalar valde. Vel kanalar i filteret under.',
   'Forwarded': 'Framsend',
   'Reconnecting to the node…': 'Koplar til noden på nytt…',
+  'Customer': 'Kunde',
+  'Groups the NAS archive: {NAS}/{customer}/{node}/…': 'Grupperer NAS-arkivet: {NAS}/{kunde}/{node}/…',
 }

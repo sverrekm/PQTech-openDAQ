@@ -82,6 +82,8 @@ class FjernNode:
     aktivert: bool = True
     protokoll: str = "daq.opcua"  # OPC-UA (for type=opendaq). Ignorert for modbus.
     lokasjon: str = ""
+    kunde: str = ""             # Kunde/eigar — brukt til å skilje NAS-arkivet
+                               # per kunde: {NAS}/{kunde}/{node}/...
     type: str = NODE_TYPE_OPENDAQ  # "opendaq" | "modbus_tcp"
 
     # Modbus-spesifikke felt (berre i bruk når type=modbus_tcp)
@@ -108,6 +110,7 @@ class FjernNode:
             aktivert=bool(d.get("aktivert", True)),
             protokoll=str(d.get("protokoll", "daq.nd")),
             lokasjon=str(d.get("lokasjon", "")),
+            kunde=str(d.get("kunde", "")),
             type=node_type,
             modbus_unit_id=int(d.get("modbus_unit_id", 1)),
             modbus_poll_hz=float(d.get("modbus_poll_hz", 1.0)),

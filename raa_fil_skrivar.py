@@ -10,7 +10,8 @@ dashboard-/rapport-spørjingar).
 Kvifor CSV på NAS og ikkje SQLite: SQLite over nettverks-FS (CIFS/NFS) kan
 korrumperast pga fil-låsing. Rein CSV-append toler nettverks-FS fint.
 
-Filoppsett: {katalog}/{node}/{YYYY-MM-DD}.csv  (dagleg rotasjon per node)
+Filoppsett: {katalog}/{kunde}/{node}/{node}_{YYYY-MM-DD}.csv  (dagleg rotasjon
+per node, gruppert per kunde). Ukjend kunde → {katalog}/{node}/... som før.
   header: tid_iso,ts_ms,node,channel,unit,value
 
 Skrivinga skjer i ein bakgrunnstråd via ein kø, så NAS-latens aldri
@@ -198,6 +199,36 @@ def _finn_part(mappe: Path, node: str, dato: str, maks_bytes: int) -> Path:
     return mappe / _filnamn(node, dato, part)
 
 
+# Node -> kunde-oppslag frå hub-konfig (cache 30 s). Kunde er hub-side metadata,
+# så vi slår han opp her i staden for å krevje at noden taggar det.
+_kunde_cache: dict = {"tid": 0.0, "kart": {}}
+
+
+def _kunde_for_node(node: str) -> str:
+    """Kunde for eit node-namn (matchar node.namn og node.id). Tom = ukjend."""
+    n = (node or "").strip()
+    if not n:
+        return ""
+    now = time.time()
+    if now - _kunde_cache["tid"] > 30:
+        kart = {}
+        try:
+            import hub_konfig
+            for fn in hub_konfig.les_hub_konfig().nodar:
+                k = (getattr(fn, "kunde", "") or "").strip()
+                if not k:
+                    continue
+                if fn.namn:
+                    kart[fn.namn.strip()] = k
+                if fn.id:
+                    kart[fn.id.strip()] = k
+        except Exception:
+            pass
+        _kunde_cache["kart"] = kart
+        _kunde_cache["tid"] = now
+    return _kunde_cache["kart"].get(n, "")
+
+
 def _skriv_loop():
     while True:
         try:
@@ -239,13 +270,17 @@ def _skriv_loop():
                     dato = "ukjend"
                 node_orig = p.get("node", "")
                 nt = _trygt(node_orig)
-                per_grp.setdefault((nt, dato), []).append(
+                # Skil arkivet per kunde: {NAS}/{kunde}/{node}/... Ukjend kunde
+                # → {NAS}/{node}/... (bakoverkompatibelt).
+                kunde = _kunde_for_node(node_orig)
+                kt = _trygt(kunde) if kunde else ""
+                per_grp.setdefault((kt, nt, dato), []).append(
                     (iso, p["ts_ms"], node_orig, p.get("channel", ""),
                      p.get("unit", ""), p.get("value")))
 
-            for (nt, dato), rader in per_grp.items():
+            for (kt, nt, dato), rader in per_grp.items():
                 try:
-                    mappe = rot / nt
+                    mappe = (rot / kt / nt) if kt else (rot / nt)
                     mappe.mkdir(parents=True, exist_ok=True)
                     fil = _finn_part(mappe, nt, dato, maks_bytes)
                     ny = not fil.exists()
