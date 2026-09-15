@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import {
-  fetchFtp, lagreFtp, testFtp, listeFtp, filFtp, synkFtp, kanalarFtp, slettFtp,
+  fetchFtp, lagreFtp, fjernFtp, testFtp, listeFtp, filFtp, synkFtp, kanalarFtp, slettFtp,
 } from '../api/instrumentftp'
 import type { FtpKonfig, FtpListe, FtpFil, FtpKanalar } from '../api/instrumentftp'
 import { useI18n } from '../i18n'
@@ -51,6 +51,24 @@ export default function InstrumentFtpCard() {
       refresh()
     } catch (e) {
       setFeil(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const fjern = async () => {
+    const namn = data?.vert || t('this instrument')
+    if (!window.confirm(t('Remove this FTP instrument (e.g. an Elspec BlackBox)? Its configuration and channels are cleared. Files already fetched to the node/NAS are kept.') + `\n\n${namn}`)) return
+    setJobbar('fjern'); setMelding(null); setFeil(null)
+    try {
+      const res = await fjernFtp()
+      if (res.suksess) {
+        setMelding(res.melding)
+        setUtkast({}); setListe(null); setFil(null); setTestSvar(null)
+      } else setFeil(res.melding)
+      refresh()
+    } catch (e) {
+      setFeil(e instanceof Error ? e.message : String(e))
+    } finally {
+      setJobbar(null)
     }
   }
 
@@ -223,6 +241,16 @@ export default function InstrumentFtpCard() {
         <button className={knappLys} onClick={synkNo} disabled={jobbar === 'synk'}>
           {jobbar === 'synk' ? t('Syncing…') : t('Fetch now')}
         </button>
+        {data?.vert && (
+          <button
+            className="btn-ghost text-red-600 border-red-200 hover:bg-red-50 ml-auto"
+            onClick={fjern}
+            disabled={jobbar === 'fjern'}
+            title={t('Remove instrument')}
+          >
+            {jobbar === 'fjern' ? t('Removing…') : t('Remove instrument')}
+          </button>
+        )}
       </div>
 
       {testSvar && (

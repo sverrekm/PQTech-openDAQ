@@ -151,15 +151,15 @@ export default function HubNodeConfigCard() {
   return (
     <div className="panel mb-4"><i className="bp-corner tl" /><i className="bp-corner tr" /><i className="bp-corner bl" /><i className="bp-corner br" />
       <div className="flex items-center justify-between mb-3">
-        <h3 className="card-head">{t('Remote nodes')}</h3>
+        <h3 className="card-head">{erHubModus ? t('Remote nodes') : t('Attached instruments')}</h3>
         <button
           onClick={() => setLeggTilOpen(!leggTilOpen)}
           className="text-xs font-medium px-3 py-1.5 rounded-md bg-[#D76428] text-white hover:bg-[#c55a23] transition-colors"
         >
-          {leggTilOpen ? t('Cancel') : t('+ Add node')}
+          {leggTilOpen ? t('Cancel') : (erHubModus ? t('+ Add node') : t('+ Add instrument'))}
         </button>
       </div>
-      <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{t('Measurement boxes this hub collects data from. Add, test and manage them here.')}</p>
+      <p className="text-sm text-gray-500 -mt-1 mb-4 leading-snug">{erHubModus ? t('Measurement boxes this hub collects data from. Add, test and manage them here.') : t('Instruments attached to this node (PQube 3, Modbus meters). Add, test and remove them here.')}</p>
 
       {/* Pending-changes banner (berre hub-modus) */}
       {hub?.pending_changes && (
@@ -407,7 +407,7 @@ export default function HubNodeConfigCard() {
 
       {/* Node list */}
       {(!hub?.nodar || hub.nodar.length === 0) ? (
-        <p className="text-sm text-gray-500 py-4 text-center">{t('No nodes configured. Add a remote node to get started.')}</p>
+        <p className="text-sm text-gray-500 py-4 text-center">{erHubModus ? t('No nodes configured. Add a remote node to get started.') : t('No instruments attached. Add a PQube or Modbus meter to get started.')}</p>
       ) : (
         <div className="space-y-2">
           {hub.nodar.map(node => (

@@ -1,5 +1,18 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  // Fjerning av instrument (PQube / BlackBox)
+  'Attached instruments': 'Tilkobla instrument',
+  '+ Add instrument': '+ Legg til instrument',
+  'Instruments attached to this node (PQube 3, Modbus meters). Add, test and remove them here.':
+    'Instrument tilkobla denne noden (PQube 3, Modbus-målarar). Legg til, test og fjern dei her.',
+  'No instruments attached. Add a PQube or Modbus meter to get started.':
+    'Ingen instrument tilkobla. Legg til ein PQube eller Modbus-målar for å komme i gang.',
+  'Remove instrument': 'Fjern instrument',
+  'Removing…': 'Fjernar…',
+  'this instrument': 'dette instrumentet',
+  'Remove this FTP instrument (e.g. an Elspec BlackBox)? Its configuration and channels are cleared. Files already fetched to the node/NAS are kept.':
+    'Fjerne dette FTP-instrumentet (t.d. ein Elspec BlackBox)? Konfigurasjonen og kanalane vert nullstilte. Filer som alt er henta til noden/NAS-en vert behaldne.',
+
   'Update hub + nodes': 'Oppdater hub + nodar',
   'Update all nodes, then the hub': 'Oppdater alle nodar, så hubben',
   'Update the whole fleet? All nodes update first, then the hub restarts.': 'Oppdatere heile flåten? Alle nodar vert oppdaterte fyrst, så restartar hubben.',

@@ -1,4 +1,4 @@
-import { apiGet, apiPut, apiPost } from './client'
+import { apiGet, apiPut, apiPost, apiDelete } from './client'
 
 /**
  * FTP-henting frå instrument som ikkje strøymer.
@@ -73,6 +73,9 @@ export const fetchFtp = () => apiGet<FtpKonfig>('/api/instrument-ftp')
 export const lagreFtp = (k: Partial<FtpKonfig> & { passord?: string }) =>
   apiPut<{ suksess: boolean; melding: string } & FtpKonfig>(
     '/api/instrument-ftp', k)
+
+export const fjernFtp = () =>
+  apiDelete<{ suksess: boolean; melding: string } & FtpKonfig>('/api/instrument-ftp')
 
 export const testFtp = (vert?: string) =>
   apiPost<{ suksess: boolean; melding?: string; velkomst?: string; syst?: string }>(

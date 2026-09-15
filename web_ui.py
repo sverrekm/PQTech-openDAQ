@@ -2593,6 +2593,19 @@ def api_instrument_ftp_lagre():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/instrument-ftp", methods=["DELETE"])
+def api_instrument_ftp_fjern():
+    """Fjern FTP-instrumentet (t.d. ein Elspec BlackBox): nullstill konfig,
+    tøm kanal-cachen og stopp henting. Destruktivt — GUI stadfester."""
+    try:
+        import instrument_ftp
+        ok, melding = instrument_ftp.fjern_konfig()
+        return jsonify({"suksess": ok, "melding": melding,
+                        **instrument_ftp.konfig_offentleg()}), 200 if ok else 400
+    except Exception as e:
+        return jsonify({"suksess": False, "melding": str(e)}), 500
+
+
 @app.route("/api/instrument-ftp/test", methods=["POST"])
 def api_instrument_ftp_test():
     """Kjem vi inn, og kva svarar serveren?"""

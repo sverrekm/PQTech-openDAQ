@@ -140,6 +140,31 @@ def konfig_offentleg() -> dict:
     return k
 
 
+def fjern_konfig() -> tuple:
+    """Fjern FTP-instrumentet heilt: nullstill konfig til STANDARD (av,
+    ingen vert), tøm kanal-cachen (so verdiane forsvinn frå push-straumen)
+    og gløym kva filer som er henta. Sjølve synk-løkka går automatisk i
+    tomgang når `aktivert`/`vert` er tomme. (ok, melding).
+    """
+    try:
+        with open(KONFIG_FIL, "w", encoding="utf-8") as f:
+            json.dump(dict(STANDARD), f, indent=2)
+    except Exception as e:
+        return False, "Could not remove: %s" % e
+    # Tøm kanal-cachen so BlackBox-kanalane forsvinn frå push med ein gong.
+    with _kanal_las:
+        _siste_kanalar.clear()
+    _tilstand.update(tilstand="", melding="", kanalar=0, kanal_detaljar={},
+                     nye_sist=0, neste_om_s=None)
+    # Gløym henta-lista (elles ligg ho att og gjeld eit anna instrument).
+    try:
+        if os.path.exists(HENTA_FIL):
+            os.remove(HENTA_FIL)
+    except Exception:
+        pass
+    return True, "Instrument removed"
+
+
 # --- Tilkopling ------------------------------------------------------
 def _opne(vert: str = "", port: int = 0, brukar: str = "", passord: str = "",
           timeout: float = 0) -> _Klient:
