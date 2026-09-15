@@ -1991,6 +1991,48 @@ def api_emc_test():
     return jsonify({"suksess": ok, "melding": melding})
 
 
+# Line-protocol: del på mellomrom som IKKJE er escapa ("\ ").
+_EMC_LP_SPACE = re.compile(r'(?<!\\) ')
+
+
+def _emc_node_fraa_linje(ln: str) -> str:
+    """Trekk ut `node`-taggen frå ei line-protocol-linje (av-escapa).
+
+    Linje: 'pqtech_harmonic,node=Sundet,channel=... value=1 172...'
+    node-taggen = push-konfig.node_namn på noden — same nøkkel som
+    logg_konfig gatar på.
+    """
+    try:
+        hovud = _EMC_LP_SPACE.split(ln, 1)[0]   # 'measurement,tag=..,tag=..'
+        for kv in hovud.split(",")[1:]:
+            if kv.startswith("node="):
+                return (kv[5:].replace("\\ ", " ")
+                        .replace("\\,", ",").replace("\\=", "="))
+    except Exception:
+        pass
+    return ""
+
+
+def _emc_gate_linjer(linjer: list) -> list:
+    """Behald berre linjer frå nodar som skal loggast akkurat no (per-node
+    logge-styring). Ukjend node => behald (loggar som standard)."""
+    try:
+        import logg_konfig
+    except Exception:
+        return linjer
+    ut = []
+    _cache = {}
+    for ln in linjer:
+        nd = _emc_node_fraa_linje(ln)
+        aktiv = _cache.get(nd)
+        if aktiv is None:
+            aktiv = logg_konfig.logging_aktiv(node_namn=nd)
+            _cache[nd] = aktiv
+        if aktiv:
+            ut.append(ln)
+    return ut
+
+
 @app.route("/api/emc-ingest", methods=["POST"])
 def api_emc_ingest():
     """Mottak: nodar streamar ferdig-rekna EMC-linjer hit (line-protocol).
@@ -2019,6 +2061,14 @@ def api_emc_ingest():
         return jsonify({"suksess": True, "melding": "ingen linjer"})
     # Berre pqtech_* measurements (unngå at nokon skriv vilkårleg)
     linjer = [str(l) for l in linjer if str(l).startswith("pqtech_")]
+    mottatt = len(linjer)
+    # Per-node logge-styring: filtrer bort linjer frå nodar som er sette til
+    # av / utanfor planlagt vindauge (same styring som /api/ingest). Gjeld
+    # både InfluxDB (Grafana-deling) og NAS-arkivet.
+    linjer = _emc_gate_linjer(linjer)
+    if not linjer:
+        return jsonify({"suksess": True, "melding": "logging pausa for node(ar)",
+                        "mottatt": mottatt, "lagra": 0})
     ok, melding = emc_pusher.skriv_linjer(linjer)
     # Arkiver rå CSV til NAS (no-op når deaktivert; ikkje-blokkerande kø)
     try:
@@ -2026,7 +2076,8 @@ def api_emc_ingest():
         raa_fil_skrivar.skriv_punkt(raa_fil_skrivar.parse_line_protocol(linjer))
     except Exception:
         pass
-    return jsonify({"suksess": ok, "melding": melding, "mottatt": len(linjer)})
+    return jsonify({"suksess": ok, "melding": melding,
+                    "mottatt": mottatt, "lagra": len(linjer)})
 
 
 # --- Hub-lager: persistent lagring av kanaldata på hubben ---
