@@ -201,65 +201,66 @@ class HubPusher:
         while not self._stopp.is_set():
             t_start = time.time()
             try:
-                # Rå-modus: hent sample-arrays
+                # Rå-modus: hent sample-arrays. Viss det ikkje finst raw-samples
+                # (t.d. ein rein Modbus/MQTT-node utan SIRIUS ADC, eller ADC-en
+                # ikkje er klar enno), fell vi GJENNOM til skalar-sending under
+                # slik at MQTT/Modbus-kanalar likevel når hubben. Utan dette
+                # ville ein raw-konfigurert node utan ADC aldri sende noko.
                 if is_raw_mode and get_samples_fn is not None:
                     raw_samples = get_samples_fn(self._konfig.samples_per_pakke)
-                    if not raw_samples:
-                        # Ingen samples å sende — vent og prøv igjen
-                        self._stopp.wait(timeout=intervall)
-                        continue
-                    # Mapp keys til kanalnamn
-                    if t_start - self._kanal_status_ts > _AKTIV_CACHE_TTL:
-                        self._kanal_status = _hent_kanal_status()
-                        self._namn_mapping = _bygg_namn_mapping()
-                        self._kanal_status_ts = t_start
-                    mapping = self._namn_mapping
-                    status = self._kanal_status or {}
-                    kanalar = {}
-                    for k, samples in raw_samples.items():
-                        namn = mapping.get(k, k)
-                        if status.get(namn, True) is False:
+                    if raw_samples:
+                        # Mapp keys til kanalnamn
+                        if t_start - self._kanal_status_ts > _AKTIV_CACHE_TTL:
+                            self._kanal_status = _hent_kanal_status()
+                            self._namn_mapping = _bygg_namn_mapping()
+                            self._kanal_status_ts = t_start
+                        mapping = self._namn_mapping
+                        status = self._kanal_status or {}
+                        kanalar = {}
+                        for k, samples in raw_samples.items():
+                            namn = mapping.get(k, k)
+                            if status.get(namn, True) is False:
+                                continue
+                            kanalar[namn] = samples
+                        if kanalar:
+                            payload = {
+                                "node_id": self._konfig.node_id,
+                                "node_namn": self._konfig.node_namn,
+                                "ts": t_start,
+                                "kanalar": kanalar,
+                                "sample_rate": self._konfig.sample_rate,
+                                "verdi_type": "raw",
+                                "buffer_lag_ms": 0,
+                            }
+                            body = json.dumps(payload).encode("utf-8")
+                            t_post = time.time()
+                            resp = sesjon.post(url, data=body, headers=headers, timeout=10.0)
+                            self._siste_latens_ms = (time.time() - t_post) * 1000.0
+                            self._siste_status_kode = resp.status_code
+                            self._siste_send_ts = t_start
+                            if 200 <= resp.status_code < 300:
+                                self._sendt_ok += 1
+                                feilteller = 0
+                                if self._sendt_ok % 100 == 1:
+                                    tot = sum(len(v) for v in kanalar.values())
+                                    log.info(f"Push raw OK #{self._sendt_ok}: "
+                                             f"{len(kanalar)} kanalar × ~{tot//max(1,len(kanalar))} samples, "
+                                             f"{self._siste_latens_ms:.0f}ms")
+                            else:
+                                self._sendt_feil += 1
+                                feilteller += 1
+                                self._siste_feilmelding = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                                if feilteller <= 3 or feilteller % 50 == 0:
+                                    log.warning(f"Push raw feil #{feilteller}: {self._siste_feilmelding}")
+                            # Backoff/intervall
+                            if feilteller > 0:
+                                self._stopp.wait(timeout=min(30.0, intervall * (2 ** min(feilteller, 6))))
+                            else:
+                                brukt = time.time() - t_start
+                                self._stopp.wait(timeout=max(0.0, intervall - brukt))
                             continue
-                        kanalar[namn] = samples
-                    if not kanalar:
-                        self._stopp.wait(timeout=intervall)
-                        continue
-                    payload = {
-                        "node_id": self._konfig.node_id,
-                        "node_namn": self._konfig.node_namn,
-                        "ts": t_start,
-                        "kanalar": kanalar,
-                        "sample_rate": self._konfig.sample_rate,
-                        "verdi_type": "raw",
-                        "buffer_lag_ms": 0,
-                    }
-                    body = json.dumps(payload).encode("utf-8")
-                    t_post = time.time()
-                    resp = sesjon.post(url, data=body, headers=headers, timeout=10.0)
-                    self._siste_latens_ms = (time.time() - t_post) * 1000.0
-                    self._siste_status_kode = resp.status_code
-                    self._siste_send_ts = t_start
-                    if 200 <= resp.status_code < 300:
-                        self._sendt_ok += 1
-                        feilteller = 0
-                        if self._sendt_ok % 100 == 1:
-                            tot = sum(len(v) for v in kanalar.values())
-                            log.info(f"Push raw OK #{self._sendt_ok}: "
-                                     f"{len(kanalar)} kanalar × ~{tot//max(1,len(kanalar))} samples, "
-                                     f"{self._siste_latens_ms:.0f}ms")
-                    else:
-                        self._sendt_feil += 1
-                        feilteller += 1
-                        self._siste_feilmelding = f"HTTP {resp.status_code}: {resp.text[:120]}"
-                        if feilteller <= 3 or feilteller % 50 == 0:
-                            log.warning(f"Push raw feil #{feilteller}: {self._siste_feilmelding}")
-                    # Backoff/intervall
-                    if feilteller > 0:
-                        self._stopp.wait(timeout=min(30.0, intervall * (2 ** min(feilteller, 6))))
-                    else:
-                        brukt = time.time() - t_start
-                        self._stopp.wait(timeout=max(0.0, intervall - brukt))
-                    continue
+                    # Ingen raw-samples (eller ingen mappa raw-kanalar) →
+                    # fall gjennom til skalar-send under (MQTT/Modbus/FTP).
 
                 verdiar = self._hent_verdiar() or {}
 
