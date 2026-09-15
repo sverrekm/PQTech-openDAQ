@@ -2473,6 +2473,52 @@ def api_hub_kanal_ranges_oppdater():
     return jsonify({"suksess": ok, "melding": melding}), 200 if ok else 400
 
 
+@app.route("/api/hub/logging")
+def api_hub_logging_hent():
+    """Per-node logge-styring: kva nodar er sette til av/kontinuerleg/planlagt,
+    pluss node-lista og server-tid (epoch ms) for planlegging i UI-et."""
+    import time as _t
+    import logg_konfig
+    innstillingar = {}
+    try:
+        konfig = logg_konfig.les_logg_konfig()
+        innstillingar = {k: v.til_dict() for k, v in konfig.innstillingar.items()}
+    except Exception as e:
+        return jsonify({"innstillingar": {}, "nodar": [], "feil": str(e)})
+    nodar = []
+    try:
+        for n in les_hub_konfig().nodar:
+            nodar.append({"id": n.id, "namn": n.namn})
+    except Exception:
+        pass
+    # Rekn ut om kvar node loggar akkurat no (for tydeleg status i UI-et)
+    for n in nodar:
+        try:
+            n["loggar_no"] = logg_konfig.logging_aktiv(node_id=n["id"], node_namn=n["namn"])
+        except Exception:
+            n["loggar_no"] = True
+    return jsonify({"innstillingar": innstillingar, "nodar": nodar,
+                    "server_ms": int(_t.time() * 1000)})
+
+
+@app.route("/api/hub/logging", methods=["PUT"])
+def api_hub_logging_sett():
+    """Set logge-innstilling for éin node (modus + evt. start/slutt epoch ms)."""
+    import logg_konfig
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"suksess": False, "melding": "Ugyldig JSON"}), 400
+    node_namn = str(data.get("node_namn", "")).strip()
+    modus = str(data.get("modus", "")).strip()
+    try:
+        start_ms = int(data.get("start_ms", 0) or 0)
+        slutt_ms = int(data.get("slutt_ms", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"suksess": False, "melding": "start_ms/slutt_ms må vere tal"}), 400
+    ok, melding = logg_konfig.sett_node_logg(node_namn, modus, start_ms, slutt_ms)
+    return jsonify({"suksess": ok, "melding": melding}), 200 if ok else 400
+
+
 @app.route("/api/hub/logg")
 def api_hub_logg():
     """Hub-loggar (ringbuffer)."""
@@ -3581,27 +3627,38 @@ def api_ingest():
         _ingest_stats["totalt"] += 1
         _ingest_stats["siste_ts"] = batch["mottatt_ts"]
 
-    # Persistent lagring på hubben (ikkje-blokkerande kø; no-op når deaktivert).
+    # Per-node logge-styring: skal data frå denne noden lagrast akkurat no?
+    # 'av' eller utanfor eit planlagt vindauge => hopp over ALL persistering
+    # (hub_lager + NAS), men behald live-injeksjon under so dashbordet framleis
+    # viser at noden lever. Ukjend node => lagre som standard.
     try:
-        hub_lager.lagre(node_id, node_namn, ts, kanalar)
+        import logg_konfig
+        _lagre_no = logg_konfig.logging_aktiv(node_id=node_id, node_namn=node_namn)
     except Exception:
-        pass
+        _lagre_no = True
 
-    # NAS rå-fil-arkiv: arkiver dei pusha kanalane per kunde/node (no-op når
-    # deaktivert). Tidlegare fekk arkivet berre EMC-linjer (/api/emc-ingest),
-    # so hovudkanalane frå push havna aldri på NAS. Hopp over rå sample-array
-    # (raw-modus) — berre skalarverdiar går i CSV-arkivet.
-    try:
-        import raa_fil_skrivar
-        _ts_ms = int(float(ts) * 1000)
-        _punkt = [{"node": node_namn, "channel": _namn, "unit": "",
-                   "value": _v, "ts_ms": _ts_ms}
-                  for _namn, _v in kanalar.items()
-                  if isinstance(_v, (int, float)) and not isinstance(_v, bool)]
-        if _punkt:
-            raa_fil_skrivar.skriv_punkt(_punkt)
-    except Exception:
-        pass
+    # Persistent lagring på hubben (ikkje-blokkerande kø; no-op når deaktivert).
+    if _lagre_no:
+        try:
+            hub_lager.lagre(node_id, node_namn, ts, kanalar)
+        except Exception:
+            pass
+
+        # NAS rå-fil-arkiv: arkiver dei pusha kanalane per kunde/node (no-op når
+        # deaktivert). Tidlegare fekk arkivet berre EMC-linjer (/api/emc-ingest),
+        # so hovudkanalane frå push havna aldri på NAS. Hopp over rå sample-array
+        # (raw-modus) — berre skalarverdiar går i CSV-arkivet.
+        try:
+            import raa_fil_skrivar
+            _ts_ms = int(float(ts) * 1000)
+            _punkt = [{"node": node_namn, "channel": _namn, "unit": "",
+                       "value": _v, "ts_ms": _ts_ms}
+                      for _namn, _v in kanalar.items()
+                      if isinstance(_v, (int, float)) and not isinstance(_v, bool)]
+            if _punkt:
+                raa_fil_skrivar.skriv_punkt(_punkt)
+        except Exception:
+            pass
 
     # Injiser verdiar i hub si openDAQ-pipeline (DC-relay for skalarar,
     # DataPacket.send_packet for sample-arrays). node_namn er primær

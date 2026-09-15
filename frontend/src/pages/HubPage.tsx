@@ -4,6 +4,7 @@ import { fetchHubStatus, fetchHubKanalar, fetchKanalRanges, oppdaterKanalRanges,
 import { usePolling } from '../hooks/usePolling'
 import { useI18n } from '../i18n'
 import BufferStatusCard from '../components/BufferStatusCard'
+import HubLoggingCard from '../components/HubLoggingCard'
 
 export const HUB_SYNLEGE_KEY = 'hub_synlege_kanalar'
 /** Sendt når synleg-utvalet endrar seg, so Dashboard oppdaterer straks. */
@@ -174,6 +175,9 @@ export default function HubPage() {
 
       {/* Buffer sync status */}
       {hubAktiv && <BufferStatusCard />}
+
+      {/* Per-node logge-styring (pause/planlegg lagring per node) */}
+      {hubAktiv && <HubLoggingCard />}
 
       {/* Log */}
       <HubLogViewer />

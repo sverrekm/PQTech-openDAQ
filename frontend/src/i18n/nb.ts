@@ -1,5 +1,19 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  // Per-node logge-styring på huben
+  'Per-node logging': 'Logge-styring per node',
+  'Control whether each node’s data is stored on the hub. Live view is unaffected — pausing only stops writing to disk (hub database + NAS). Useful when a node is being shut down or moved.':
+    'Styr om kvar node sine data vert lagra på huben. Live-visninga er ikkje råka — pause stoppar berre skriving til disk (hub-database + NAS). Nyttig når ein node skal stengast ned eller flyttast.',
+  'Logging now': 'Loggar no',
+  'Not logging': 'Loggar ikkje',
+  'Continuous': 'Kontinuerleg',
+  'Paused': 'Pause',
+  'Scheduled': 'Planlagt',
+  'Start (blank = now)': 'Start (tom = no)',
+  'End (blank = never)': 'Slutt (tom = aldri)',
+  'Save schedule': 'Lagre plan',
+  'No nodes configured.': 'Ingen nodar konfigurert.',
+
   // Hub-tilkobling push-status
   'Last send failed': 'Siste send feila',
   '{n} transient errors since start — auto-recovered, push is healthy.':
