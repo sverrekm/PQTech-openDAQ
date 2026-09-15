@@ -111,9 +111,19 @@ export default function HubConnectionCard() {
         </div>
       </div>
 
+      {/* Aktuell feil: berre synleg når SISTE send faktisk feila (backend
+          nullstiller meldinga ved kvar vellukka send). */}
       {status?.siste_feilmelding && (
         <div className="mt-2 px-3 py-2 rounded text-sm bg-red-50 text-red-800 border border-red-200">
-          {t('Last error')}: {status.siste_status_kode ? `[${status.siste_status_kode}] ` : ''}{status.siste_feilmelding}
+          {t('Last send failed')}: {status.siste_status_kode ? `[${status.siste_status_kode}] ` : ''}{status.siste_feilmelding}
+        </div>
+      )}
+
+      {/* Sunn push, men nokre historiske blipp (t.d. forbigåande 502 frå CDN).
+          Beroligar: dette er ikkje eit aktivt problem. */}
+      {status && !status.siste_feilmelding && (status.sendt_feil ?? 0) > 0 && (
+        <div className="mt-2 text-xs text-gray-400">
+          {t('{n} transient errors since start — auto-recovered, push is healthy.').replace('{n}', String(status.sendt_feil))}
         </div>
       )}
 

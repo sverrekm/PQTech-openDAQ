@@ -1,5 +1,10 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  // Hub-tilkobling push-status
+  'Last send failed': 'Siste send feila',
+  '{n} transient errors since start — auto-recovered, push is healthy.':
+    '{n} forbigåande feil sidan oppstart — retta seg sjølv, pushen er sunn.',
+
   // Fjerning av instrument (PQube / BlackBox)
   'Attached instruments': 'Tilkobla instrument',
   '+ Add instrument': '+ Legg til instrument',

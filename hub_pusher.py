@@ -241,6 +241,7 @@ class HubPusher:
                             if 200 <= resp.status_code < 300:
                                 self._sendt_ok += 1
                                 feilteller = 0
+                                self._siste_feilmelding = ""
                                 if self._sendt_ok % 100 == 1:
                                     tot = sum(len(v) for v in kanalar.values())
                                     log.info(f"Push raw OK #{self._sendt_ok}: "
@@ -321,6 +322,7 @@ class HubPusher:
                 if 200 <= resp.status_code < 300:
                     self._sendt_ok += 1
                     feilteller = 0
+                    self._siste_feilmelding = ""
                     if self._sendt_ok % 100 == 1:
                         log.info(f"Push OK #{self._sendt_ok}: "
                                  f"{len(kanalar)} kanalar, "
