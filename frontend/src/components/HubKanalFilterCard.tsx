@@ -2,7 +2,10 @@ import { useCallback, useMemo, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { fetchHubKanalar } from '../api/hub'
 import type { HubKanal } from '../api/types'
-import { hentSynlegeKanalar, lagreSynlegeKanalar } from '../pages/HubPage'
+import {
+  hentSynlegeKanalar, lagreSynlegeKanalar,
+  lagreNodeRekkefolgje, sorterEtterRekkefolgje,
+} from '../pages/HubPage'
 import Panel from './ui/Panel'
 import { useI18n } from '../i18n'
 
@@ -23,6 +26,8 @@ export default function HubKanalFilterCard() {
   // Lokalt speil av utvalet; null = alt synleg. Bumpar ved lagring.
   const [utval, setUtval] = useState<Set<string> | null>(() => hentSynlegeKanalar())
   const [opneNodar, setOpneNodar] = useState<Set<string>>(new Set())
+  // Bumpar når node-rekkefølgja endrar seg, so lista sorterast om straks.
+  const [orderVer, setOrderVer] = useState(0)
 
   const key = (k: HubKanal) => `${k.node_id}:${k.namn}`
   const alle = useMemo(() => new Set(kanalar.map(key)), [kanalar])
@@ -35,15 +40,28 @@ export default function HubKanalFilterCard() {
     const s = start(); s.has(nk) ? s.delete(nk) : s.add(nk); skriv(s)
   }
 
-  // Grupper per node
+  // Grupper per node, deretter sorter etter brukarvald node-rekkefølgje.
   const nodar = useMemo(() => {
     const m = new Map<string, { namn: string; kanalar: HubKanal[] }>()
     for (const k of kanalar) {
       const g = m.get(k.node_id) ?? { namn: k.node_namn || k.node_id, kanalar: [] }
       g.kanalar.push(k); m.set(k.node_id, g)
     }
-    return [...m.entries()]
-  }, [kanalar])
+    return sorterEtterRekkefolgje([...m.entries()], ([id]) => id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kanalar, orderVer])
+
+  // Flytt ein node opp/ned i dashbord-rekkefølgja.
+  const flyttNode = (nodeId: string, retning: -1 | 1) => {
+    const ids = nodar.map(([id]) => id)
+    const i = ids.indexOf(nodeId)
+    const j = i + retning
+    if (i < 0 || j < 0 || j >= ids.length) return
+    ;[ids[i], ids[j]] = [ids[j], ids[i]]
+    lagreNodeRekkefolgje(ids)
+    setOrderVer((v) => v + 1)
+  }
+  const kanFlytte = nodar.length > 1
 
   const nodeState = (ch: HubKanal[]) => {
     const på = ch.filter((k) => erSynleg(key(k))).length
@@ -69,14 +87,25 @@ export default function HubKanalFilterCard() {
         <div className="hint">{t('No channels received yet.')}</div>
       ) : (
         <>
-          <div className="hint mb-2">{synlege} {t('of')} {kanalar.length} {t('channels shown')}</div>
+          <div className="hint mb-2">{synlege} {t('of')} {kanalar.length} {t('channels shown')}
+            {kanFlytte ? ` · ${t('use ▲▼ to reorder nodes on the dashboard')}` : ''}</div>
           <div className="flex flex-col gap-1">
-            {nodar.map(([nodeId, g]) => {
+            {nodar.map(([nodeId, g], idx) => {
               const st = nodeState(g.kanalar)
               const open = opneNodar.has(nodeId)
               return (
                 <div key={nodeId} style={{ border: '1px solid var(--color-line-soft)' }}>
                   <div className="flex items-center gap-2 px-2 py-1.5">
+                    {kanFlytte && (
+                      <span className="flex flex-col leading-none">
+                        <button title={t('Move up')} disabled={idx === 0}
+                          className="text-[10px] text-gray-400 hover:text-[#D76428] disabled:opacity-30 disabled:hover:text-gray-400"
+                          onClick={() => flyttNode(nodeId, -1)}>▲</button>
+                        <button title={t('Move down')} disabled={idx === nodar.length - 1}
+                          className="text-[10px] text-gray-400 hover:text-[#D76428] disabled:opacity-30 disabled:hover:text-gray-400"
+                          onClick={() => flyttNode(nodeId, 1)}>▼</button>
+                      </span>
+                    )}
                     <input type="checkbox" checked={st === 'all'}
                       ref={(el) => { if (el) el.indeterminate = st === 'some' }}
                       onChange={() => toggleNode(g.kanalar)} />

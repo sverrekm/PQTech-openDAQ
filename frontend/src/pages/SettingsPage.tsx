@@ -23,6 +23,7 @@ import InfluxShareCard from '../components/InfluxShareCard'
 import ApiKeysCard from '../components/ApiKeysCard'
 import EmcCard from '../components/EmcCard'
 import StorageCard from '../components/StorageCard'
+import HubKanalFilterCard from '../components/HubKanalFilterCard'
 import SettingsSection, { OPNE_SEKSJON } from '../components/SettingsSection'
 import { useI18n } from '../i18n'
 
@@ -78,6 +79,12 @@ export default function SettingsPage() {
       tittel: t('Storage'),
       sub: t('NAS mount, raw-file archive and the hub time-series database.'),
       innhald: <StorageCard />,
+    },
+    {
+      id: 'dashbord',
+      tittel: t('Dashboard'),
+      sub: t('Choose which channels are shown and reorder the nodes on the dashboard. Saved on this device.'),
+      innhald: <HubKanalFilterCard />,
     },
     {
       id: 'nettverk',

@@ -37,6 +37,39 @@ export function lagreSynlegeKanalar(set: Set<string>) {
   try { window.dispatchEvent(new Event(SYNLEGE_EVENT)) } catch { /* ignore */ }
 }
 
+// --- Node-rekkefølgje på dashbordet (per eining, som synleg-utvalet) ---
+export const HUB_NODE_ORDER_KEY = 'hub_node_rekkefolgje'
+/** Sendt når node-rekkefølgja endrar seg, so Dashboard oppdaterer straks. */
+export const NODE_ORDER_EVENT = 'hub-node-order-endra'
+
+/** Lagra node-rekkefølgje (liste av node_id). Tom = standard (API-rekkefølgje). */
+export function hentNodeRekkefolgje(): string[] {
+  try {
+    const raw = localStorage.getItem(HUB_NODE_ORDER_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.map(String) : []
+  } catch { return [] }
+}
+
+export function lagreNodeRekkefolgje(ids: string[]) {
+  try { localStorage.setItem(HUB_NODE_ORDER_KEY, JSON.stringify(ids)) } catch { /* ignore */ }
+  try { window.dispatchEvent(new Event(NODE_ORDER_EVENT)) } catch { /* ignore */ }
+}
+
+/**
+ * Sorter node-id-ar etter lagra rekkefølgje. Node-id-ar utan lagra plass
+ * (nye nodar) hamnar sist i si opphavlege rekkefølgje. Stabil sortering.
+ */
+export function sorterEtterRekkefolgje<T>(element: T[], nodeId: (x: T) => string): T[] {
+  const order = hentNodeRekkefolgje()
+  if (order.length === 0) return element
+  const rank = (id: string) => {
+    const i = order.indexOf(id)
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i
+  }
+  return [...element].sort((a, b) => rank(nodeId(a)) - rank(nodeId(b)))
+}
+
 export default function HubPage() {
   const { t, lang } = useI18n()
   const hubFetcher = useCallback(() => fetchHubStatus(), [])

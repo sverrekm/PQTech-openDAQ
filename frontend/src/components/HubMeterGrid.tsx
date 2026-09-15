@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { HubKanal } from '../api/types'
-import { erKanalSynleg, SYNLEGE_EVENT } from '../pages/HubPage'
+import { erKanalSynleg, SYNLEGE_EVENT, NODE_ORDER_EVENT, sorterEtterRekkefolgje } from '../pages/HubPage'
 import MeterGrid, { type Meter } from './MeterGrid'
 import { useI18n } from '../i18n'
 import { useSparkStore } from '../hooks/useSparkStore'
@@ -24,12 +24,21 @@ export default function HubMeterGrid({ hubKanalar, onHubClick }: Props) {
   useEffect(() => {
     const h = () => setSynlegVer(v => v + 1)
     window.addEventListener(SYNLEGE_EVENT, h)
-    return () => window.removeEventListener(SYNLEGE_EVENT, h)
+    window.addEventListener(NODE_ORDER_EVENT, h)
+    return () => {
+      window.removeEventListener(SYNLEGE_EVENT, h)
+      window.removeEventListener(NODE_ORDER_EVENT, h)
+    }
   }, [])
   const { t } = useI18n()
   const { spark: sparkMap, push: pushSpark, siste: sisteSpark } = useSparkStore('pqtech_hub_spark')
 
-  const synlege = (hubKanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`))
+  // Filtrer på synleg-utval, deretter sorter etter brukarvald node-rekkefølgje
+  // (stabil — kanalrekkjefølgja innan ein node er uendra).
+  const synlege = sorterEtterRekkefolgje(
+    (hubKanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`)),
+    k => k.node_id,
+  )
 
   // Stabil farge per node_id (rekkjefølgd etter fyrste førekomst).
   const nodeFarge = new Map<string, string>()

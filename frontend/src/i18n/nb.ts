@@ -1,5 +1,12 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  // Dashbord-innstillingar (flytta til Settings) + node-rekkefølgje
+  'Choose which channels are shown and reorder the nodes on the dashboard. Saved on this device.':
+    'Vel kva kanalar som visast og endre rekkefølgja på nodane på dashbordet. Lagra på denne eininga.',
+  'use ▲▼ to reorder nodes on the dashboard': 'bruk ▲▼ for å endre rekkefølgja på nodane',
+  'Move up': 'Flytt opp',
+  'Move down': 'Flytt ned',
+
   // Per-node logge-styring på huben
   'Per-node logging': 'Logge-styring per node',
   'Control whether each node’s data is stored on the hub. Live view is unaffected — pausing only stops writing to disk (hub database + NAS). Useful when a node is being shut down or moved.':
