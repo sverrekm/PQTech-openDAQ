@@ -58,6 +58,12 @@ export default function SettingsPage() {
       ),
     },
     {
+      id: 'dashbord',
+      tittel: t('Dashboard'),
+      sub: t('Choose which channels are shown and reorder the nodes on the dashboard. Saved on this device.'),
+      innhald: <HubKanalFilterCard />,
+    },
+    {
       id: 'deling',
       tittel: t('Sharing & integrations'),
       sub: t('Publish channels over MQTT, to Grafana/InfluxDB and the read API.'),
@@ -79,12 +85,6 @@ export default function SettingsPage() {
       tittel: t('Storage'),
       sub: t('NAS mount, raw-file archive and the hub time-series database.'),
       innhald: <StorageCard />,
-    },
-    {
-      id: 'dashbord',
-      tittel: t('Dashboard'),
-      sub: t('Choose which channels are shown and reorder the nodes on the dashboard. Saved on this device.'),
-      innhald: <HubKanalFilterCard />,
     },
     {
       id: 'nettverk',
