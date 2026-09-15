@@ -1,8 +1,9 @@
-import { useRef, useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import type { KanalKonfig, KanalLive, MqttStatus, HubKanal } from '../api/types'
 import { erKanalSynleg, SYNLEGE_EVENT } from '../pages/HubPage'
 import MeterGrid, { type Meter } from './MeterGrid'
 import { useI18n } from '../i18n'
+import { useSparkStore } from '../hooks/useSparkStore'
 
 interface Props {
   kanalar: KanalKonfig[] | null
@@ -43,7 +44,7 @@ export default function InstrumentMeterGrid({
     return () => window.removeEventListener(SYNLEGE_EVENT, h)
   }, [])
   const { t } = useI18n()
-  const sparkRef = useRef<Map<string, number[]>>(new Map())
+  const { spark: sparkMap, push: pushSpark, siste: sisteSpark } = useSparkStore('pqtech_node_spark')
 
   const getChannelValue = (idx: number) => {
     const key = `kanal_${idx}`
@@ -55,14 +56,12 @@ export default function InstrumentMeterGrid({
     return null
   }
 
-  const pushSpark = (key: string, v: number) => {
-    const arr = sparkRef.current.get(key) || []
-    if (!isNaN(v)) {
-      arr.push(v)
-      if (arr.length > 30) arr.shift()
-      sparkRef.current.set(key, arr)
-    }
-    return sparkRef.current.get(key) || []
+  // Verdi-tekst med fallback til siste lagra punkt (så rutenettet ikkje viser
+  // «—» rett etter ein refresh, før første poll er inne).
+  const verdiMedFallback = (key: string, num: number | null | undefined): string => {
+    if (num !== null && num !== undefined && !isNaN(num)) return num.toFixed(2)
+    const f = sisteSpark(key)
+    return f !== undefined ? f.toFixed(2) : '—'
   }
 
   const meters: Meter[] = []
@@ -77,7 +76,7 @@ export default function InstrumentMeterGrid({
         key: `ch_${i}`,
         num: String(i + 1).padStart(2, '0'),
         namn: k.namn,
-        verdi: isNaN(num) ? '—' : num.toFixed(2),
+        verdi: verdiMedFallback(`ch_${i}`, num),
         eining: k.enhet || '',
         kjelde: cv.source,
         farge: KJELDE_FARGE[cv.source] || 'var(--color-text)',
@@ -94,11 +93,11 @@ export default function InstrumentMeterGrid({
         key: `mqtt_${topic}`,
         num: String(meters.length + 1).padStart(2, '0'),
         namn: info.namn || topic,
-        verdi: num !== null && num !== undefined ? num.toFixed(2) : '—',
+        verdi: verdiMedFallback(`mqtt_${topic}`, num),
         eining: info.enhet || '',
         kjelde: 'MQTT',
         farge: KJELDE_FARGE.MQTT,
-        spark: num !== null && num !== undefined ? pushSpark(`mqtt_${topic}`, num) : (sparkRef.current.get(`mqtt_${topic}`) || []),
+        spark: num !== null && num !== undefined ? pushSpark(`mqtt_${topic}`, num) : (sparkMap.get(`mqtt_${topic}`) || []),
         onClick: onMqttClick ? () => onMqttClick(topic) : undefined,
       })
     })
@@ -117,11 +116,11 @@ export default function InstrumentMeterGrid({
       key: sparkKey,
       num: String(meters.length + 1).padStart(2, '0'),
       namn: k.namn,
-      verdi: k.verdi !== null && k.verdi !== undefined ? k.verdi.toFixed(2) : '—',
+      verdi: verdiMedFallback(sparkKey, k.verdi),
       eining: k.eining || '',
       kjelde: k.node_namn || k.node_id,
       farge: nodeFarge.get(k.node_id) || '#0d9488',
-      spark: k.verdi !== null && k.verdi !== undefined ? pushSpark(sparkKey, k.verdi) : (sparkRef.current.get(sparkKey) || []),
+      spark: k.verdi !== null && k.verdi !== undefined ? pushSpark(sparkKey, k.verdi) : (sparkMap.get(sparkKey) || []),
       onClick: onHubClick ? () => onHubClick(k.node_id, k.namn) : undefined,
     })
   })

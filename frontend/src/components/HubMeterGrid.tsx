@@ -1,8 +1,9 @@
-import { useRef, useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import type { HubKanal } from '../api/types'
 import { erKanalSynleg, SYNLEGE_EVENT } from '../pages/HubPage'
 import MeterGrid, { type Meter } from './MeterGrid'
 import { useI18n } from '../i18n'
+import { useSparkStore } from '../hooks/useSparkStore'
 
 interface Props {
   hubKanalar?: HubKanal[]
@@ -26,7 +27,7 @@ export default function HubMeterGrid({ hubKanalar, onHubClick }: Props) {
     return () => window.removeEventListener(SYNLEGE_EVENT, h)
   }, [])
   const { t } = useI18n()
-  const sparkRef = useRef<Map<string, number[]>>(new Map())
+  const { spark: sparkMap, push: pushSpark, siste: sisteSpark } = useSparkStore('pqtech_hub_spark')
 
   const synlege = (hubKanalar ?? []).filter(k => erKanalSynleg(`${k.node_id}:${k.namn}`))
 
@@ -39,21 +40,23 @@ export default function HubMeterGrid({ hubKanalar, onHubClick }: Props) {
 
   const meters: Meter[] = synlege.map((k, i) => {
     const sparkKey = `${k.node_id}:${k.namn}`
-    if (k.verdi !== null && k.verdi !== undefined) {
-      const arr = sparkRef.current.get(sparkKey) || []
-      arr.push(k.verdi)
-      if (arr.length > 30) arr.shift()
-      sparkRef.current.set(sparkKey, arr)
-    }
+    const harVerdi = k.verdi !== null && k.verdi !== undefined
+    const spark = harVerdi ? pushSpark(sparkKey, k.verdi as number) : []
+    // Verdi-tekst: live-verdi når vi har den, elles siste lagra punkt (så
+    // rutenettet ikkje viser «—» rett etter ein refresh, før første poll).
+    const fallback = sisteSpark(sparkKey)
+    const verdiTekst = harVerdi
+      ? (k.verdi as number).toFixed(2)
+      : (fallback !== undefined ? fallback.toFixed(2) : '—')
     return {
       key: sparkKey,
       num: String(i + 1).padStart(2, '0'),
       namn: k.namn,
-      verdi: k.verdi !== null && k.verdi !== undefined ? k.verdi.toFixed(2) : '—',
+      verdi: verdiTekst,
       eining: k.eining || '',
       kjelde: k.node_namn || k.node_id,
       farge: nodeFarge.get(k.node_id) || '#D76428',
-      spark: sparkRef.current.get(sparkKey) || [],
+      spark: harVerdi ? spark : (sparkMap.get(sparkKey) || []),
       onClick: onHubClick ? () => onHubClick(k.node_id, k.namn) : undefined,
     }
   })
