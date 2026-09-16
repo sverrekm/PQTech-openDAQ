@@ -42,23 +42,23 @@ export default function InstrumentInnboksCard() {
   return (
     <Panel
       kicker={t('Retrieval')}
-      title={t('SFTP inbox (instrument push)')}
-      sub={t('For instruments that cannot be polled over FTP (e.g. PQube 3) but can push files via SFTP. The node receives them, archives them and parses CSV into channels.')}
+      title={t('FTP inbox (instrument push)')}
+      sub={t('For instruments that push their files (e.g. PQube 3 FTP push on events). The node runs a locked FTP server, receives the files, archives them and parses CSV into channels.')}
       right={
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" className="rounded" checked={aktiv} disabled={busy}
             onChange={(e) => kall({ aktivert: e.target.checked },
-              e.target.checked ? t('SFTP inbox enabled') : t('SFTP inbox disabled'))} />
+              e.target.checked ? t('FTP inbox enabled') : t('FTP inbox disabled'))} />
           {aktiv ? t('Enabled') : t('Disabled')}
         </label>
       }
     >
       {!aktiv ? (
-        <div className="hint">{t('Enable to create a locked SFTP user and show the connection details to enter on the instrument.')}</div>
+        <div className="hint">{t('Enable to start a locked FTP server and show the connection details to enter on the instrument.')}</div>
       ) : (
         <>
           <div className="p-2 mb-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-            {t('Enter these on the instrument’s SFTP/push settings. Only reachable on the local network.')}
+            {t('Enter these on the instrument’s FTP-push settings. Only reachable on the local network.')}
           </div>
           <div className="border border-gray-200 rounded-lg px-3 py-1.5 mb-3">
             <div className={felt}>
@@ -68,7 +68,7 @@ export default function InstrumentInnboksCard() {
               </span>
             </div>
             <div className={felt}>
-              <span className="ui-label">{t('Port')}</span><span className={verdi}>{data?.port ?? 22} (SFTP)</span>
+              <span className="ui-label">{t('Port')}</span><span className={verdi}>{data?.port ?? 21} (FTP)</span>
             </div>
             <div className={felt}>
               <span className="ui-label">{t('Username')}</span>

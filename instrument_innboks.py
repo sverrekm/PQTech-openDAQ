@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """
-SFTP-innboks: instrument som PUSHAR filene sine hit
-===================================================
-Nokre instrument (t.d. PQube 3) har inga FTP-teneste å hente frå, men kan
-PUSHE data (hendings-/bølgeform-/trend-filer) via SFTP. Containeren køyrer
-alt sshd, so her set vi opp ein LÅST sftp-berre-brukar (chroot, internal-sftp,
-ingen shell, ingen port-forwarding) + ein vaktetråd som tek imot nye filer og
-matar dei inn i same pipeline som FTP-henting/e-post:
+FTP-innboks: instrument som PUSHAR filene sine hit
+==================================================
+Nokre instrument tek ikkje imot FTP-henting, men PUSHAR data. PQube 3 har
+INGA SFTP-push — berre FTP-push: ved hendings-trigger lagar han ein .tar.gz av
+event-filene (PQDIF-bølgeform + CSV) og skyv han til ein FTP-server. Difor
+køyrer vi ein liten, LÅST FTP-server (pyftpdlib) på noden: éin virtuell brukar,
+heime-katalog = opplastingsmappa, passive porter, kun privat LAN. Ein vaktetråd
+tek imot filene og matar dei inn i same pipeline som FTP-henting/e-post:
 
+  - .tar.gz / .tgz     → pakkast ut, medlemmane handterast under
   - .csv               → kanalar (via smtp_server._mat_csv_til_kanalar)
-  - alt (inkl. bølgeform/PQDIF/PQZip) → arkivert til NAS/SSD
-
-Oppsettet (brukar + sshd Match-blokk) gjerast frå Python ved oppstart og ved
-aktivering — containeren køyrer som root. Idempotent og sjølv-lækjande: køyrer
-på nytt kvar oppstart, so det overlever container-recreate.
+  - alt (PQDIF/bølgeform/…) → arkivert til NAS/SSD (per kunde/node)
 
 Konfig: /data/konfig/innboks.json
 """
 
 import os
+import io
 import json
 import time
 import string
 import secrets
 import shutil
+import tarfile
 import logging
 import threading
 import subprocess
@@ -32,9 +32,13 @@ log = logging.getLogger("instrument_innboks")
 
 KONFIG_FIL = "/data/konfig/innboks.json"
 BRUKAR = "pqinnboks"
-CHROOT = "/data/innkomande"              # chroot-rot (root-eigd, chroot-krav)
-OPPLAST = CHROOT + "/opplasting"         # her skriv instrumentet (inne: /opplasting)
-FERDIG = "/data/innkomande_ferdig"       # prosesserte filer (utanfor chroot)
+OPPLAST = "/data/innkomande/opplasting"   # FTP heime-katalog (instrumentet skriv hit)
+FERDIG = "/data/innkomande_ferdig"        # prosesserte filer
+FTP_KONTROLLPORT = 21
+FTP_PASSIVE_FRA = 30000
+FTP_PASSIVE_TIL = 30009
+
+# Rest frå SFTP-varianten — vert rydda bort (PQube kan ikkje SFTP-pushe).
 SSHD_CONFIG = "/etc/ssh/sshd_config"
 MATCH_MARKER = "# --- pqtech instrument-innboks (auto) ---"
 MATCH_SLUTT = "# --- slutt pqtech instrument-innboks ---"
@@ -42,16 +46,18 @@ MATCH_SLUTT = "# --- slutt pqtech instrument-innboks ---"
 STANDARD = {
     "aktivert": False,
     "brukar": BRUKAR,
-    "passord": "",           # auto-generert ved fyrste aktivering
-    "kunde": "",             # for NAS-gruppering (valfritt)
-    "kanal_prefiks": "",     # prefiks på kanalnamn frå CSV (valfritt)
+    "passord": "",
+    "kunde": "",
+    "kanal_prefiks": "",
 }
 
 _stopp = threading.Event()
-_traad = None
+_traad = None                 # vaktetråd
+_ftp_server = None            # pyftpdlib FTPServer
+_ftp_traad = None
+_storleik_cache = {}
 _tilstand = {"tilstand": "", "melding": "", "mottatt_totalt": 0,
-             "sist_fil": "", "sist_ts": None}
-_storleik_cache = {}         # filnamn -> (storleik, sist_sett) for stabilitetssjekk
+             "sist_fil": "", "sist_ts": None, "ftp": "av"}
 
 
 # --- Konfig ----------------------------------------------------------
@@ -62,7 +68,7 @@ def les_konfig() -> dict:
             k.update(json.load(f) or {})
     except Exception:
         pass
-    k["brukar"] = BRUKAR  # alltid fast
+    k["brukar"] = BRUKAR
     return k
 
 
@@ -83,29 +89,29 @@ def generer_passord(n: int = 20) -> str:
 
 
 def konfig_offentleg() -> dict:
-    """Konfig + tilkoblingsdetaljar for GUI. Passordet SKAL visast her — det er
-    nodens eigen innboks-passord som operatøren må skrive inn på instrumentet."""
+    """Konfig + tilkoblingsdetaljar for GUI (host/bruker/passord/port) som skal
+    skrivast inn på instrumentet sine FTP-push-innstillingar."""
     k = les_konfig()
     return {
         "aktivert": k["aktivert"],
+        "protokoll": "FTP",
         "brukar": k["brukar"],
         "passord": k["passord"],
         "kunde": k.get("kunde", ""),
         "kanal_prefiks": k.get("kanal_prefiks", ""),
         "vert": _lan_ip(),
-        "port": 22,
-        "fjern_sti": "/opplasting",
+        "port": FTP_KONTROLLPORT,
+        "fjern_sti": "/",
         "status": status(),
     }
 
 
-# --- Oppsett (root): brukar + chroot + sshd Match --------------------
+# --- Hjelparar -------------------------------------------------------
 def _lan_ip() -> str:
-    """LAN-IP instrumentet skal pushe til (same nett som instrumentet)."""
     try:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("192.168.1.1", 1))   # rutar ikkje, berre for å velje iface
+        s.connect(("192.168.1.1", 1))
         ip = s.getsockname()[0]
         s.close()
         return ip
@@ -117,97 +123,136 @@ def _lan_ip() -> str:
             return ""
 
 
-def _sikre_sshd_match() -> None:
-    """Legg til ein låst Match-blokk for innboks-brukaren (idempotent).
-    Validerer med `sshd -t` FØR den byter fila, so vi aldri knekk sshd."""
+def _sikre_pyftpdlib() -> bool:
+    """pyftpdlib er rein Python — installer ved oppstart viss han manglar
+    (fleet-update byggjer ikkje imaget på nytt)."""
+    try:
+        import pyftpdlib  # noqa: F401
+        return True
+    except Exception:
+        pass
+    try:
+        log.info("Installerer pyftpdlib (fyrste gong)...")
+        subprocess.run(["pip", "install", "--no-cache-dir", "pyftpdlib"],
+                       check=False, capture_output=True, timeout=180)
+        import pyftpdlib  # noqa: F401
+        return True
+    except Exception as e:
+        log.error("Kunne ikkje installere pyftpdlib: %s", e)
+        return False
+
+
+def _fjern_sshd_match() -> None:
+    """Rydd bort SFTP Match-blokka frå den tidlegare SFTP-varianten (PQube kan
+    ikkje SFTP-pushe, so vi treng han ikkje)."""
     try:
         with open(SSHD_CONFIG, "r") as f:
             innhald = f.read()
-    except Exception as e:
-        log.warning("Les sshd_config feila: %s", e)
+    except Exception:
         return
-    if MATCH_MARKER in innhald:
+    if MATCH_MARKER not in innhald:
         return
-    blokk = (
-        f"\n{MATCH_MARKER}\n"
-        f"Match User {BRUKAR}\n"
-        f"    ChrootDirectory {CHROOT}\n"
-        f"    ForceCommand internal-sftp\n"
-        f"    AllowTcpForwarding no\n"
-        f"    X11Forwarding no\n"
-        f"    PermitTunnel no\n"
-        f"    PasswordAuthentication yes\n"
-        f"{MATCH_SLUTT}\n"
-    )
-    tmp = SSHD_CONFIG + ".pqny"
+    linjer = innhald.splitlines(keepends=True)
+    ut, hopp = [], False
+    for ln in linjer:
+        if ln.strip() == MATCH_MARKER.strip():
+            hopp = True
+            continue
+        if hopp:
+            if ln.strip() == MATCH_SLUTT.strip():
+                hopp = False
+            continue
+        ut.append(ln)
     try:
-        with open(tmp, "w") as f:
-            f.write(innhald.rstrip() + "\n" + blokk)
-        r = subprocess.run(["/usr/sbin/sshd", "-t", "-f", tmp],
-                           capture_output=True)
-        if r.returncode != 0:
-            log.error("sshd_config-validering feila — hoppar over Match: %s",
-                      r.stderr.decode("utf-8", "replace")[:200])
-            os.remove(tmp)
-            return
-        os.replace(tmp, SSHD_CONFIG)
-    except Exception as e:
-        log.warning("Skriv sshd Match feila: %s", e)
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
-        return
-    # Reload (HUP) — droppar ikkje eksisterande økter (DewesoftX/deploy trygt)
-    try:
+        with open(SSHD_CONFIG, "w") as f:
+            f.write("".join(ut))
         subprocess.run(
             ["bash", "-c",
              "kill -HUP $(cat /run/sshd.pid 2>/dev/null || pidof sshd) 2>/dev/null"],
             check=False)
-        log.info("sshd Match-blokk for %s lagt til + reloada", BRUKAR)
+        log.info("Rydda bort gamal SFTP Match-blokk")
+    except Exception:
+        pass
+
+
+# --- FTP-server (pyftpdlib) ------------------------------------------
+def _start_ftp(k: dict) -> None:
+    global _ftp_server, _ftp_traad
+    if not _sikre_pyftpdlib():
+        _tilstand["ftp"] = "feil: pyftpdlib manglar"
+        return
+    from pyftpdlib.authorizers import DummyAuthorizer
+    from pyftpdlib.handlers import FTPHandler
+    from pyftpdlib.servers import FTPServer
+
+    # Stopp evt. eksisterande server (t.d. passord endra)
+    _stopp_ftp()
+
+    os.makedirs(OPPLAST, exist_ok=True)
+    aut = DummyAuthorizer()
+    # perm: e=cd, l=list, r=hent, a=append, d=slett, f=rename, m=mkdir,
+    #       w=lagre(STOR), M=chmod, T=set mtime — full opplasting
+    aut.add_user(k["brukar"], k["passord"], OPPLAST, perm="elradfmwMT")
+    handler = FTPHandler
+    handler.authorizer = aut
+    handler.masquerade_address = _lan_ip() or None
+    handler.passive_ports = range(FTP_PASSIVE_FRA, FTP_PASSIVE_TIL + 1)
+    handler.banner = "PQTech openDAQ FTP-innboks"
+    try:
+        srv = FTPServer(("0.0.0.0", FTP_KONTROLLPORT), handler)
+        srv.max_cons = 32
+        srv.max_cons_per_ip = 8
     except Exception as e:
-        log.warning("sshd reload feila: %s", e)
+        log.error("Kunne ikkje binde FTP-port %d: %s", FTP_KONTROLLPORT, e)
+        _tilstand["ftp"] = f"feil: port {FTP_KONTROLLPORT} ({e})"
+        return
+    _ftp_server = srv
+
+    def _kjor():
+        try:
+            srv.serve_forever(timeout=1, handle_exit=True)
+        except Exception as e:
+            log.warning("FTP-server avslutta: %s", e)
+
+    _ftp_traad = threading.Thread(target=_kjor, name="innboks-ftp", daemon=True)
+    _ftp_traad.start()
+    _tilstand["ftp"] = f"lyttar :{FTP_KONTROLLPORT}"
+    log.info("FTP-innboks lyttar på :%d (bruker %s, passive %d-%d)",
+             FTP_KONTROLLPORT, k["brukar"], FTP_PASSIVE_FRA, FTP_PASSIVE_TIL)
+
+
+def _stopp_ftp() -> None:
+    global _ftp_server
+    if _ftp_server is not None:
+        try:
+            _ftp_server.close_all()
+        except Exception:
+            pass
+        _ftp_server = None
+        _tilstand["ftp"] = "av"
 
 
 def oppsett() -> tuple:
-    """Sørg for brukar + chroot + sshd Match. Krev root. (ok, melding)."""
+    """Sørg for katalogar + (re)start FTP-server. Krev root for port 21."""
     k = les_konfig()
+    _fjern_sshd_match()   # rydd bort SFTP-rest uansett
     if not k["aktivert"]:
+        _stopp_ftp()
         return True, "deaktivert"
-    if os.geteuid() != 0:
-        return False, "krev root for SFTP-oppsett"
     if not k["passord"]:
         k["passord"] = generer_passord()
         lagre_konfig(k)
-    # Chroot-struktur: rot MÅ vere root-eigd og ikkje skrivbar for andre.
     try:
-        os.makedirs(CHROOT, exist_ok=True)
-        os.chown(CHROOT, 0, 0)
-        os.chmod(CHROOT, 0o755)
         os.makedirs(OPPLAST, exist_ok=True)
         os.makedirs(FERDIG, exist_ok=True)
     except Exception as e:
-        return False, f"chroot-struktur feila: {e}"
-    # Brukar
-    try:
-        finst = subprocess.run(["id", BRUKAR], capture_output=True).returncode == 0
-        if not finst:
-            subprocess.run(["useradd", "-M", "-N", "-s", "/usr/sbin/nologin",
-                            BRUKAR], check=False, capture_output=True)
-        subprocess.run(["chpasswd"], input=f"{BRUKAR}:{k['passord']}".encode(),
-                       check=False, capture_output=True)
-        import pwd
-        pw = pwd.getpwnam(BRUKAR)
-        os.chown(OPPLAST, pw.pw_uid, pw.pw_gid)
-    except Exception as e:
-        return False, f"brukar-oppsett feila: {e}"
-    _sikre_sshd_match()
+        return False, f"katalog-oppsett feila: {e}"
+    _start_ftp(k)
     return True, "oppsett ok"
 
 
-# --- Ingest av mottekne filer ----------------------------------------
+# --- Ingest ----------------------------------------------------------
 def _nas_maal() -> str:
-    """Arkiv-katalog: NAS om montert/tilgjengeleg, elles lokal SSD."""
     if os.path.ismount("/data/nas") or os.path.isdir("/data/nas"):
         return "/data/nas/innboks"
     return "/data/maalingar/innboks"
@@ -234,36 +279,79 @@ def _trygt(namn: str) -> str:
     return ut[:150] or "fil"
 
 
-def _arkiver(sti: str, k: dict) -> None:
-    """Kopier fila til NAS/SSD-arkiv, og CSV → kanalar. Original vert flytta
-    til FERDIG etterpå av kallaren."""
-    namn = _trygt(os.path.basename(sti))
-    node = _node_namn()
-    kunde = (k.get("kunde") or "").strip()
+def _arkivkatalog(k: dict) -> str:
     delar = [_nas_maal()]
+    kunde = (k.get("kunde") or "").strip()
     if kunde:
         delar.append(_trygt(kunde))
-    delar.append(_trygt(node))
-    maalkat = os.path.join(*delar)
+    delar.append(_trygt(_node_namn()))
+    kat = os.path.join(*delar)
+    os.makedirs(kat, exist_ok=True)
+    return kat
+
+
+def _handter_fil(namn: str, data: bytes, k: dict) -> None:
+    """Arkiver ei enkelt-fil + CSV → kanalar."""
+    kat = _arkivkatalog(k)
     try:
-        os.makedirs(maalkat, exist_ok=True)
-        shutil.copy2(sti, os.path.join(maalkat, namn))
+        with open(os.path.join(kat, _trygt(namn)), "wb") as f:
+            f.write(data)
     except Exception as e:
         log.warning("Innboks-arkivering av %s feila: %s", namn, e)
-    # CSV → kanalar (best-effort, same pipeline som e-post/FTP)
     if namn.lower().endswith(".csv"):
         try:
             import smtp_server
-            with open(sti, "rb") as f:
-                data = f.read()
             pfx = (k.get("kanal_prefiks") or "").strip()
-            smtp_server._mat_csv_til_kanalar([((pfx + namn) if pfx else namn, data)])
+            smtp_server._mat_csv_til_kanalar(
+                [((pfx + os.path.basename(namn)) if pfx else os.path.basename(namn), data)])
         except Exception as e:
             log.warning("Innboks CSV->kanalar (%s) feila: %s", namn, e)
 
 
+def _prosesser_fil(sti: str, k: dict) -> None:
+    namn = os.path.basename(sti)
+    low = namn.lower()
+    if low.endswith((".tar.gz", ".tgz", ".tar")):
+        # PQube event-pakke: pakk ut og handter kvart medlem
+        try:
+            with tarfile.open(sti, "r:*") as tar:
+                for m in tar.getmembers():
+                    if not m.isfile():
+                        continue
+                    try:
+                        f = tar.extractfile(m)
+                        if f is None:
+                            continue
+                        _handter_fil(os.path.basename(m.name), f.read(), k)
+                    except Exception as e:
+                        log.warning("Innboks tar-medlem %s feila: %s", m.name, e)
+        except Exception as e:
+            log.warning("Innboks kunne ikkje pakke ut %s: %s", namn, e)
+        # Arkiver sjølve .tar.gz òg (rå)
+        try:
+            with open(sti, "rb") as f:
+                _handter_raa(namn, f.read(), k)
+        except Exception:
+            pass
+    else:
+        try:
+            with open(sti, "rb") as f:
+                _handter_fil(namn, f.read(), k)
+        except Exception as e:
+            log.warning("Innboks-fil %s feila: %s", namn, e)
+
+
+def _handter_raa(namn: str, data: bytes, k: dict) -> None:
+    """Arkiver ei rå-fil (t.d. sjølve .tar.gz) utan CSV-parsing."""
+    kat = _arkivkatalog(k)
+    try:
+        with open(os.path.join(kat, _trygt(namn)), "wb") as f:
+            f.write(data)
+    except Exception:
+        pass
+
+
 def _prosesser(k: dict) -> None:
-    """Plukk opp STABILE (ferdig-opplasta) filer i OPPLAST og handter dei."""
     try:
         filer = [f for f in os.listdir(OPPLAST)
                  if os.path.isfile(os.path.join(OPPLAST, f))]
@@ -276,15 +364,13 @@ def _prosesser(k: dict) -> None:
             st = os.stat(sti)
         except Exception:
             continue
-        # Stabil = same storleik som førre skann OG minst 8s gammal mtime.
         forrige = _storleik_cache.get(f)
         _storleik_cache[f] = (st.st_size, no)
         stabil = (forrige is not None and forrige[0] == st.st_size
                   and (no - st.st_mtime) >= 8)
         if not stabil:
             continue
-        _arkiver(sti, k)
-        # Flytt unna so vi ikkje prosesserer på nytt
+        _prosesser_fil(sti, k)
         try:
             os.makedirs(FERDIG, exist_ok=True)
             shutil.move(sti, os.path.join(FERDIG, _trygt(f)))
@@ -297,12 +383,13 @@ def _prosesser(k: dict) -> None:
         _tilstand.update(tilstand="ok", melding="Fil mottatt",
                          mottatt_totalt=_tilstand["mottatt_totalt"] + 1,
                          sist_fil=f, sist_ts=no)
-        log.info("Innboks: tok imot + arkiverte %s", f)
+        log.info("Innboks: tok imot + handterte %s", f)
 
 
 def status() -> dict:
     ut = dict(_tilstand)
     ut["kjorer"] = _traad is not None and _traad.is_alive()
+    ut["ftp_kjorer"] = _ftp_traad is not None and _ftp_traad.is_alive()
     return ut
 
 
@@ -319,7 +406,7 @@ def _loop() -> None:
 
 
 def start() -> None:
-    """Kjør oppsett + start vaktetråden. Trygg å kalle fleire gonger."""
+    """Kjør oppsett (FTP-server) + start vaktetråd. Trygg å kalle fleire gonger."""
     global _traad
     try:
         ok, m = oppsett()
@@ -330,10 +417,10 @@ def start() -> None:
     if _traad is not None and _traad.is_alive():
         return
     _stopp.clear()
-    _traad = threading.Thread(target=_loop, name="instrument-innboks",
-                              daemon=True)
+    _traad = threading.Thread(target=_loop, name="instrument-innboks", daemon=True)
     _traad.start()
 
 
 def stopp() -> None:
     _stopp.set()
+    _stopp_ftp()

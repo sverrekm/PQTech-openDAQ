@@ -1,15 +1,15 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
-  // SFTP-innboks (instrument push, t.d. PQube 3)
-  'SFTP inbox (instrument push)': 'SFTP-innboks (instrument push)',
-  'For instruments that cannot be polled over FTP (e.g. PQube 3) but can push files via SFTP. The node receives them, archives them and parses CSV into channels.':
-    'For instrument som ikkje kan hentast over FTP (t.d. PQube 3) men kan pushe filer via SFTP. Noden tek imot dei, arkiverer og parsar CSV til kanalar.',
-  'SFTP inbox enabled': 'SFTP-innboks slått på',
-  'SFTP inbox disabled': 'SFTP-innboks slått av',
-  'Enable to create a locked SFTP user and show the connection details to enter on the instrument.':
-    'Slå på for å lage ein låst SFTP-brukar og vise tilkoblingsdetaljane du skriv inn på instrumentet.',
-  'Enter these on the instrument’s SFTP/push settings. Only reachable on the local network.':
-    'Skriv desse inn i instrumentet sine SFTP-/push-innstillingar. Berre nåbar på lokalnettet.',
+  // FTP-innboks (instrument push, t.d. PQube 3 FTP-push)
+  'FTP inbox (instrument push)': 'FTP-innboks (instrument push)',
+  'For instruments that push their files (e.g. PQube 3 FTP push on events). The node runs a locked FTP server, receives the files, archives them and parses CSV into channels.':
+    'For instrument som pushar filene sine (t.d. PQube 3 FTP-push ved hendingar). Noden køyrer ein låst FTP-server, tek imot filene, arkiverer og parsar CSV til kanalar.',
+  'FTP inbox enabled': 'FTP-innboks slått på',
+  'FTP inbox disabled': 'FTP-innboks slått av',
+  'Enable to start a locked FTP server and show the connection details to enter on the instrument.':
+    'Slå på for å starte ein låst FTP-server og vise tilkoblingsdetaljane du skriv inn på instrumentet.',
+  'Enter these on the instrument’s FTP-push settings. Only reachable on the local network.':
+    'Skriv desse inn i instrumentet sine FTP-push-innstillingar. Berre nåbar på lokalnettet.',
   'Host (node IP)': 'Vert (node-IP)',
   'Remote path': 'Fjern-sti',
   'Customer (optional)': 'Kunde (valfritt)',
