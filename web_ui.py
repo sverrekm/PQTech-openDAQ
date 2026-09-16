@@ -2690,6 +2690,43 @@ def api_instrument_ftp_lagre():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/innboks")
+def api_innboks_hent():
+    """SFTP-innboks: konfig + tilkoblingsdetaljar (host/bruker/passord/sti) som
+    skal skrivast inn på instrumentet, pluss mottaks-status."""
+    try:
+        import instrument_innboks
+        return jsonify(instrument_innboks.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/innboks", methods=["PUT"])
+def api_innboks_sett():
+    """Aktiver/deaktiver SFTP-innboks (genererer passord + set opp sftp-brukar
+    ved fyrste aktivering). Felt: aktivert, kunde, kanal_prefiks,
+    regenerer_passord."""
+    import instrument_innboks
+    data = request.get_json(silent=True) or {}
+    k = instrument_innboks.les_konfig()
+    k["aktivert"] = bool(data.get("aktivert", k["aktivert"]))
+    if "kunde" in data:
+        k["kunde"] = str(data.get("kunde", "")).strip()
+    if "kanal_prefiks" in data:
+        k["kanal_prefiks"] = str(data.get("kanal_prefiks", "")).strip()
+    if bool(data.get("regenerer_passord")) or (k["aktivert"] and not k["passord"]):
+        k["passord"] = instrument_innboks.generer_passord()
+    if not instrument_innboks.lagre_konfig(k):
+        return jsonify({"suksess": False, "melding": "Lagring feila"}), 500
+    try:
+        instrument_innboks.start()  # køyrer oppsett + (re)startar vaktetråd
+    except Exception as e:
+        return jsonify({"suksess": False,
+                        "melding": f"Lagra, men oppsett feila: {e}"}), 500
+    return jsonify({"suksess": True, "melding": "Innboks oppdatert",
+                    **instrument_innboks.konfig_offentleg()})
+
+
 @app.route("/api/instrument-ftp", methods=["DELETE"])
 def api_instrument_ftp_fjern():
     """Fjern FTP-instrumentet (t.d. ein Elspec BlackBox): nullstill konfig,
@@ -3982,6 +4019,14 @@ try:
     raa_fil_skrivar.start()
 except Exception as _e:  # noqa: BLE001
     print(f"Rå-fil-skrivar starta ikkje: {_e}")
+
+# Start SFTP-innboks (instrument som PQube 3 pushar filer hit). Passiv til
+# aktivert i GUI (innboks.json). Set opp låst sftp-brukar + vaktetråd.
+try:
+    import instrument_innboks
+    instrument_innboks.start()
+except Exception as _e:  # noqa: BLE001
+    print(f"Instrument-innboks starta ikkje: {_e}")
 
 # Start modbus-lager (node-side store-and-forward; passiv til aktivert).
 # Idempotent — har eigen aktivert-gate. Trygt å kalle i alle modus.
