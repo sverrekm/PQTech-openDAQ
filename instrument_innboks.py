@@ -195,7 +195,10 @@ def _start_ftp(k: dict) -> None:
     aut.add_user(k["brukar"], k["passord"], OPPLAST, perm="elradfmwMT")
     handler = FTPHandler
     handler.authorizer = aut
-    handler.masquerade_address = _lan_ip() or None
+    # Ikkje set masquerade_address: node2 er direkte nåbar på både LAN-IP
+    # (PQuben) og tailscale-IP (fjern-tilgang), utan NAT imellom. Då vel
+    # pyftpdlib rett interface-IP per tilkopling for PASV — feil hardkoda IP
+    # ville broten passiv dataoverføring frå den andre vegen.
     handler.passive_ports = range(FTP_PASSIVE_FRA, FTP_PASSIVE_TIL + 1)
     handler.banner = "PQTech openDAQ FTP-innboks"
     try:
