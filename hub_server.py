@@ -110,6 +110,38 @@ _AUTO_REBUILD_STABIL_S = 30.0    # kanaltal må vere uendra så lenge før rebui
 _bygd_node_kanaltal = {}         # node_id -> openDAQ-kanaltal bakt inn i RefDevice
 _endring_obs = {"signatur": None, "sidan": 0.0}
 
+# Circuit breaker mot auto-rebuild-loop: ein node som flakkar (typisk CGNAT/5G
+# som koplar til/frå) kan elles tvinge hubben inn i endelause restartar, sidan
+# ei ny tilkopling som ikkje er "bakt inn" tel som topologi-endring. os.execv
+# nullstiller minnet, so tidspunkta må persisterast til disk. Etter for mange
+# auto-rebuild-ar i vindauget sluttar vi å auto-restarte til det roar seg
+# (eller til nokon kjører ein manuell oppdatering). Skru terskelen med
+# HUB_AUTO_REBUILD_MAKS (0 = uendeleg, som før).
+_REBUILD_TIDER_FIL = "/data/konfig/auto_rebuild_tider.json"
+_AUTO_REBUILD_MAKS = int(os.environ.get("HUB_AUTO_REBUILD_MAKS", "3"))
+_AUTO_REBUILD_VINDU_S = 1800.0   # 30 min
+_auto_rebuild_sperra_logga = False
+
+
+def _les_rebuild_tider() -> list:
+    """Persisterte auto-rebuild-tidspunkt (epoch s). Overlever os.execv."""
+    try:
+        with open(_REBUILD_TIDER_FIL) as f:
+            return [float(t) for t in (json.load(f) or [])]
+    except Exception:
+        return []
+
+
+def _registrer_rebuild_tid(no: float) -> None:
+    """Legg til eit auto-rebuild-tidspunkt (prunar eldre enn vindauget)."""
+    tider = [t for t in _les_rebuild_tider() if no - t < _AUTO_REBUILD_VINDU_S]
+    tider.append(no)
+    try:
+        with open(_REBUILD_TIDER_FIL, "w") as f:
+            json.dump(tider, f)
+    except Exception:
+        pass
+
 # --- Modbus TCP-nodar (via ModbusManager) ---
 def _modbus_status_cb(node_id: str, status: dict):
     """Propager modbus-status til _node_status så hent_hub_status ser den."""
@@ -2408,9 +2440,28 @@ def _sjekk_auto_rebuild():
         return
 
     if no - _endring_obs["sidan"] >= _AUTO_REBUILD_STABIL_S:
+        # Circuit breaker: unngå restart-loop når ein node flakkar. Tel berre
+        # auto-rebuild-ar (manuell oppdatering går ein annan veg).
+        global _auto_rebuild_sperra_logga
+        if _AUTO_REBUILD_MAKS > 0:
+            nylege = [t for t in _les_rebuild_tider()
+                      if no - t < _AUTO_REBUILD_VINDU_S]
+            if len(nylege) >= _AUTO_REBUILD_MAKS:
+                if not _auto_rebuild_sperra_logga:
+                    log.warning(
+                        f"Auto-rebuild SPERRA: {len(nylege)} restartar siste "
+                        f"{_AUTO_REBUILD_VINDU_S/60:.0f} min — node-topologi "
+                        f"flakkar (sannsynleg CGNAT-node som koplar til/frå): "
+                        f"{dict(_bygd_node_kanaltal)} -> {dict(live)}. Hoppar "
+                        f"over auto-restart for å unngå loop. Kjør ein manuell "
+                        f"oppdatering når nodane er stabile.")
+                    _auto_rebuild_sperra_logga = True
+                _endring_obs["signatur"] = None
+                return
         log.warning(f"Auto-rebuild: stabil kanal-topologi-endring "
                     f"{dict(_bygd_node_kanaltal)} -> {dict(live)} — restartar hub")
         _endring_obs["signatur"] = None
+        _registrer_rebuild_tid(no)
         restart_hub()
 
 
