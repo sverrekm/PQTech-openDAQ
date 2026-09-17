@@ -2690,6 +2690,39 @@ def api_instrument_ftp_lagre():
         return jsonify({"suksess": False, "melding": str(e)}), 500
 
 
+@app.route("/api/pqube-hent")
+def api_pqube_hent_hent():
+    """HTTP-henting av PQube event-tre: konfig + status."""
+    try:
+        import pqube_http_hent
+        return jsonify(pqube_http_hent.konfig_offentleg())
+    except Exception as e:
+        return jsonify({"feil": str(e)}), 500
+
+
+@app.route("/api/pqube-hent", methods=["PUT"])
+def api_pqube_hent_sett():
+    """Lagre HTTP-hent-konfig (vert/aktivert/intervall/kunde/…) + (re)start."""
+    import pqube_http_hent
+    data = request.get_json(silent=True) or {}
+    ok, melding = pqube_http_hent.lagre_konfig(data)
+    if ok:
+        try:
+            pqube_http_hent.start()
+        except Exception:
+            pass
+    return jsonify({"suksess": ok, "melding": melding,
+                    **pqube_http_hent.konfig_offentleg()}), 200 if ok else 400
+
+
+@app.route("/api/pqube-hent/hent-no", methods=["POST"])
+def api_pqube_hent_no():
+    """Køyr eit skann av PQube-treet med ein gong."""
+    import pqube_http_hent
+    ok, melding = pqube_http_hent.hent_no()
+    return jsonify({"suksess": ok, "melding": melding}), 200 if ok else 400
+
+
 @app.route("/api/innboks")
 def api_innboks_hent():
     """SFTP-innboks: konfig + tilkoblingsdetaljar (host/bruker/passord/sti) som
@@ -4020,13 +4053,21 @@ try:
 except Exception as _e:  # noqa: BLE001
     print(f"Rå-fil-skrivar starta ikkje: {_e}")
 
-# Start SFTP-innboks (instrument som PQube 3 pushar filer hit). Passiv til
-# aktivert i GUI (innboks.json). Set opp låst sftp-brukar + vaktetråd.
+# Start FTP-innboks (instrument som PQube 3 pushar filer hit). Passiv til
+# aktivert i GUI (innboks.json). Set opp låst FTP-server + vaktetråd.
 try:
     import instrument_innboks
     instrument_innboks.start()
 except Exception as _e:  # noqa: BLE001
     print(f"Instrument-innboks starta ikkje: {_e}")
+
+# Start HTTP-henting av PQube event-tre (pull via katalog-lister). Passiv til
+# aktivert i GUI (http_hent.json).
+try:
+    import pqube_http_hent
+    pqube_http_hent.start()
+except Exception as _e:  # noqa: BLE001
+    print(f"PQube HTTP-henting starta ikkje: {_e}")
 
 # Start modbus-lager (node-side store-and-forward; passiv til aktivert).
 # Idempotent — har eigen aktivert-gate. Trygt å kalle i alle modus.

@@ -1,5 +1,14 @@
 /** Norwegian Bokmål translations — english key → nb value */
 export const nb: Record<string, string> = {
+  // PQube HTTP-henting av event-tre
+  'PQube event fetch (HTTP)': 'PQube event-henting (HTTP)',
+  'The node browses the PQube’s web directory and pulls event files (PQDIF waveforms, CSV) into the archive. More reliable than FTP push — also captures events already on the PQube.':
+    'Noden blar PQubens web-katalog og drar ned event-filer (PQDIF-bølgeform, CSV) til arkivet. Meir påliteleg enn FTP-push — får med hendingar som alt ligg på PQuben òg.',
+  'PQube host (IP)': 'PQube-vert (IP)',
+  'Fetch events newer than (days)': 'Hent hendingar nyare enn (dagar)',
+  'Also fetch graph GIFs': 'Hent òg graf-GIF-ar',
+  'Fetching…': 'Hentar…',
+
   // FTP-innboks (instrument push, t.d. PQube 3 FTP-push)
   'FTP inbox (instrument push)': 'FTP-innboks (instrument push)',
   'For instruments that push their files (e.g. PQube 3 FTP push on events). The node runs a locked FTP server, receives the files, archives them and parses CSV into channels.':

@@ -13,6 +13,7 @@ import InstrumentNettverkCard from '../components/InstrumentNettverkCard'
 import NettSkannCard from '../components/NettSkannCard'
 import InstrumentFtpCard from '../components/InstrumentFtpCard'
 import InstrumentInnboksCard from '../components/InstrumentInnboksCard'
+import PqubeHentCard from '../components/PqubeHentCard'
 import TailscaleCard from '../components/TailscaleCard'
 import HubNodeConfigCard from '../components/HubNodeConfigCard'
 import DeviceConnectionCard from '../components/DeviceConnectionCard'
@@ -98,6 +99,7 @@ export default function SettingsPage() {
           <NettSkannCard />
           <InstrumentFtpCard />
           <InstrumentInnboksCard />
+          <PqubeHentCard />
           <TailscaleCard />
           <HubNodeConfigCard />
         </>
