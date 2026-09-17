@@ -128,21 +128,34 @@ def _skriv_henta(henta: set, maks: int) -> None:
 
 
 # --- HTTP ------------------------------------------------------------
-def _opna(k: dict, path: str, timeout: float = 40):
+_sess = None
+
+
+def _session():
+    """requests-session med retry — PQubens web er treg/skjør og svarar ofte
+    fyrst på 2. forsøk (same lærdom som instrument_proxy)."""
+    global _sess
+    if _sess is None:
+        import requests
+        from requests.adapters import HTTPAdapter
+        s = requests.Session()
+        s.mount("http://", HTTPAdapter(max_retries=2, pool_maxsize=4))
+        _sess = s
+    return _sess
+
+
+def _hent_bytes(k: dict, path: str, timeout: float = 60) -> bytes:
     url = "http://%s:%d%s" % (k["vert"], int(k["port"]), path)
-    req = urllib.request.Request(url)
-    if k.get("brukar"):
-        import base64
-        tok = base64.b64encode(
-            ("%s:%s" % (k["brukar"], k.get("passord", ""))).encode()).decode()
-        req.add_header("Authorization", "Basic " + tok)
-    return urllib.request.urlopen(req, timeout=timeout)
+    auth = (k["brukar"], k.get("passord", "")) if k.get("brukar") else None
+    r = _session().get(url, timeout=timeout, auth=auth)
+    r.raise_for_status()
+    return r.content
 
 
 def _listing(k: dict, path: str) -> list:
     """Returner (rel-)stiar under `path` frå autoindex-lista."""
     try:
-        txt = _opna(k, path).read(200000).decode("utf-8", "replace")
+        txt = _hent_bytes(k, path, timeout=30).decode("utf-8", "replace")
     except Exception as e:
         log.debug("listing %s feila: %s", path, e)
         return []
@@ -240,15 +253,14 @@ def _skann(k: dict) -> int:
     henta = _les_henta()
     nye = 0
     cutoff = datetime.date.today() - datetime.timedelta(days=int(k["dagar_tilbake"]))
-    # Rot: finn år-katalogar (4 siffer)
-    aar_dirs = []
-    for h in _listing(k, "/"):
-        m = re.search(r"/(\d{4})/?$", h.rstrip("/"))
-        if m:
-            aar_dirs.append((int(m.group(1)), h.rstrip("/") + "/"))
-    for aar, aar_path in sorted(aar_dirs):
-        if aar < cutoff.year:
-            continue
+    # PQubens rot "/" er SPA-en (ikkje autoindex) — gå difor rett på /AAR/.
+    # Vindauget er lite (dagar_tilbake), so berre inneverande + førre år er
+    # relevant (dekkjer årsskifte).
+    aar_kandidatar = sorted({cutoff.year, datetime.date.today().year})
+    for aar in aar_kandidatar:
+        aar_path = "/%d/" % aar
+        if not _listing(k, aar_path):
+            continue  # året finst ikkje / ikkje nåbar
         stakk = [aar_path]
         while stakk:
             if _stopp.is_set():
@@ -263,8 +275,7 @@ def _skann(k: dict) -> int:
                     if h in henta:
                         continue
                     try:
-                        data = _opna(k, h).read()
-                        rel = h[len(aar_path) - 5:] if h.startswith(aar_path) else h
+                        data = _hent_bytes(k, h)
                         _arkiver(k, h, data)
                         henta.add(h)
                         nye += 1
