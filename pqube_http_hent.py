@@ -44,6 +44,7 @@ STANDARD = {
     "kunde": "",
     "kanal_prefiks": "",
     "hent_gif": False,       # GIF-grafar er store; av som standard
+    "berre_hendingar": True, # berre event-mapper (T_...), hopp over trend/stat-arkiv
     "hugs_maks": 20000,      # maks tal filnamn vi hugsar
 }
 
@@ -52,6 +53,7 @@ _TYPAR = (".pqd", ".pqdif", ".csv", ".txt", ".xml", ".htm", ".html")
 
 _stopp = threading.Event()
 _traad = None
+_skann_las = threading.Lock()
 _tilstand = {"tilstand": "", "melding": "", "henta_totalt": 0,
              "sist_fil": "", "sist_ts": None, "nye_sist": 0}
 
@@ -72,7 +74,8 @@ def lagre_konfig(data: dict) -> tuple:
     vert = str(data.get("vert", k["vert"])).strip()
     if vert and not _privat(vert):
         return False, "'%s' er ikkje ein privat IP-adresse" % vert
-    for felt in ("aktivert", "vert", "brukar", "kunde", "kanal_prefiks", "hent_gif"):
+    for felt in ("aktivert", "vert", "brukar", "kunde", "kanal_prefiks",
+                 "hent_gif", "berre_hendingar"):
         if felt in data:
             k[felt] = data[felt]
     if data.get("passord"):
@@ -248,8 +251,37 @@ def _vil_ha(k: dict, path: str) -> bool:
     return False
 
 
+def _hopp_dir(k: dict, h: str, aar: int, cutoff: datetime.date) -> bool:
+    """Skal vi hoppe over denne katalogen? (trend/stat-arkiv + for gamle
+    månad/dag-mapper — held skann fokusert og rask)."""
+    base = h.rstrip("/").rsplit("/", 1)[-1]
+    if k.get("berre_hendingar", True):
+        if any(s in base for s in ("Trends", "Trend", "Weekly", "Stats", "Statistics")):
+            return True
+    # Månad-nivå (/Month_MM utan Day): hopp heile månader før vindauget
+    m = re.search(r"/Month_(\d{2})/?$", h.rstrip("/"))
+    if m:
+        mm = int(m.group(1))
+        if aar < cutoff.year or (aar == cutoff.year and mm < cutoff.month):
+            return True
+    # Dag-nivå og djupare
+    if _for_gammal(h, aar, cutoff):
+        return True
+    return False
+
+
 def _skann(k: dict) -> int:
-    """Gå gjennom PQube-treet, hent nye event-filer. Returner tal nye."""
+    """Gå gjennom PQube-treet, hent nye event-filer. Returner tal nye.
+    Berre éin skann om gongen (loop + hent-no deler lås)."""
+    if not _skann_las.acquire(blocking=False):
+        return 0
+    try:
+        return _skann_indre(k)
+    finally:
+        _skann_las.release()
+
+
+def _skann_indre(k: dict) -> int:
     henta = _les_henta()
     nye = 0
     cutoff = datetime.date.today() - datetime.timedelta(days=int(k["dagar_tilbake"]))
@@ -287,8 +319,8 @@ def _skann(k: dict) -> int:
                     except Exception as e:
                         log.warning("HTTP-hent %s feila: %s", h, e)
                 else:
-                    # katalog: hopp over for gamle dagar tidleg
-                    if _for_gammal(h, aar, cutoff):
+                    # katalog: hopp trend/stat-arkiv + for gamle månad/dag
+                    if _hopp_dir(k, h, aar, cutoff):
                         continue
                     stakk.append(h.rstrip("/") + "/")
     _skriv_henta(henta, int(k.get("hugs_maks", 20000)))
@@ -321,15 +353,21 @@ def _loop() -> None:
 
 
 def hent_no() -> tuple:
-    """Køyr eit skann med ein gong (for GUI-knapp)."""
+    """Start eit skann i bakgrunnen (GUI-knapp). Ikkje-blokkerande: treet er
+    stort/tregt, so vi svarar med ein gong og let vaktetråd-logikken køyre."""
     k = les_konfig()
     if not k["aktivert"] or not k["vert"]:
         return False, "ikkje aktivert / manglar vert"
-    try:
-        nye = _skann(k)
-        return True, "Henta %d nye filer" % nye
-    except Exception as e:
-        return False, str(e)
+    if _skann_las.locked():
+        return True, "Skann køyrer allereie"
+
+    def _jobb():
+        try:
+            _skann(les_konfig())
+        except Exception as e:
+            log.warning("hent-no skann feila: %s", e)
+    threading.Thread(target=_jobb, daemon=True, name="pqube-hent-no").start()
+    return True, "Skann starta i bakgrunnen"
 
 
 def start() -> None:
